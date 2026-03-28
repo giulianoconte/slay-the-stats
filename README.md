@@ -20,8 +20,7 @@ Without `local.props`, build output is placed in `SlayTheStats/dist/` and you co
 ## Building
 
 ```bash
-cd SlayTheStats
-dotnet build
+./deploy.sh
 ```
 
 This compiles the mod and copies the DLL and manifest to `ModsPath` (your mods folder if `local.props` is configured, otherwise `dist/`).
