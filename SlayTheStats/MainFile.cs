@@ -21,6 +21,7 @@ public partial class MainFile : Node
         harmony.PatchAll();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
-        RunParser.ProcessNewRuns(Db);
+        RunParser.ProcessNewRuns(Db, SavePath, msg => Logger.Info(msg), msg => Logger.Warn(msg));
+        StatsLogger.LogAllCards(Db);
     }
 }

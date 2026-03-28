@@ -32,7 +32,7 @@ Stats are calculated in two situations:
 - **On startup** — if the mod version has changed since the last run, all run history is reprocessed
 - **After a run** — when you return to the main menu after finishing or abandoning a run
 
-In both cases, check the Godot log for `[SlayTheStats]` entries showing per-card stats tables.
+In both cases, verify the mod loaded via Settings -> General -> Modding, then check the Godot log for `[SlayTheStats]` entries showing per-card stats tables.
 
 Log location:
 - **Windows:** `%APPDATA%\Godot\app_userdata\Slay the Spire 2\logs\godot.log`
@@ -51,6 +51,7 @@ dotnet test
 
 ## Resources
 
+- [STS2 Hello World mod guide](https://github.com/giulianoconte/slay-the-spire-2-mod-guide)
 - [Mod template](https://github.com/Alchyr/ModTemplate-StS2)
 - [BaseLib + wiki](https://github.com/Alchyr/BaseLib-StS2) / [wiki](https://alchyr.github.io/BaseLib-Wiki/)
 - [Hello world reference](https://github.com/jiegec/STS2FirstMod)

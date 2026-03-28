@@ -10,19 +10,19 @@ public static class RunParser
     /// </summary>
     public const string SkipId = "SKIP";
 
-    public static void ProcessNewRuns(StatsDb db)
+    public static void ProcessNewRuns(StatsDb db, string savePath, Action<string>? log = null, Action<string>? warn = null)
     {
         // If the file was deleted externally, reset in-memory state and reprocess everything
-        if (!File.Exists(MainFile.SavePath) && db.ProcessedRuns.Count > 0)
+        if (!File.Exists(savePath) && db.ProcessedRuns.Count > 0)
         {
-            MainFile.Logger.Info("Stats file was deleted. Reprocessing all runs.");
+            log?.Invoke("Stats file was deleted. Reprocessing all runs.");
             db.Reset();
         }
 
         var historyDirs = GetHistoryDirectories();
         if (historyDirs.Count == 0)
         {
-            MainFile.Logger.Warn("Could not find any STS2 run history directories.");
+            warn?.Invoke("Could not find any STS2 run history directories.");
             return;
         }
 
@@ -30,7 +30,7 @@ public static class RunParser
 
         foreach (var historyDir in historyDirs)
         {
-            MainFile.Logger.Info($"Scanning history directory: {historyDir}");
+            log?.Invoke($"Scanning history directory: {historyDir}");
             var runFiles = Directory.GetFiles(historyDir, "*.run");
 
             foreach (var path in runFiles)
@@ -47,21 +47,18 @@ public static class RunParser
                 }
                 catch (Exception e)
                 {
-                    MainFile.Logger.Warn($"Failed to parse run {runId}: {e.Message}");
+                    warn?.Invoke($"Failed to parse run {runId}: {e.Message}");
                 }
             }
         }
 
-        MainFile.Logger.Info($"Processed {newCount} new run(s). Total runs: {db.ProcessedRuns.Count}.");
+        log?.Invoke($"Processed {newCount} new run(s). Total runs: {db.ProcessedRuns.Count}.");
 
         if (newCount > 0)
-        {
-            db.Save(MainFile.SavePath, msg => MainFile.Logger.Warn(msg));
-            StatsLogger.LogAllCards(db);
-        }
+            db.Save(savePath, warn);
     }
 
-    private static void ProcessRun(string path, string runId, StatsDb db)
+    internal static void ProcessRun(string path, string runId, StatsDb db)
     {
         var json = File.ReadAllText(path);
         var root = JsonNode.Parse(json) ?? throw new Exception("Failed to parse JSON");
