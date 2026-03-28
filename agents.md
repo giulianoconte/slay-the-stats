@@ -19,5 +19,6 @@ Building the project auto-deploys the DLL and `SlayTheStats.json` to the mods fo
 
 ## Stats JSON
 Saved to `slay-the-stats.json` in Godot's user data dir (`AppData\Roaming\SlayTheSpire2\` on Windows).
-Structure: `cards[cardId][contextKey] -> CardStat`, where `contextKey` is `"CHARACTER|ascension|act"`.
+Structure: `cards[cardId][contextKey] -> CardStat`, where `contextKey` is `"CHARACTER|ascension|act|gameMode|buildVersion"`.
 Upgraded cards use `+` suffix on the card ID (e.g. `CARD.SETUP_STRIKE+`).
+

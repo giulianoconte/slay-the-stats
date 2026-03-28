@@ -20,6 +20,10 @@ public partial class MainFile : Node
         Harmony harmony = new(ModId);
         harmony.PatchAll();
 
+        var patched = harmony.GetPatchedMethods().ToList();
+        if (!patched.Any(m => m.DeclaringType?.Name == "NGame" && m.Name == "ReturnToMainMenuAfterRun"))
+            Logger.Warn("SlayTheStats: RunEndedPatch did not apply — stats will not update after runs. Game update may have changed NGame.");
+
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
         RunParser.ProcessNewRuns(Db, SavePath, msg => Logger.Info(msg), msg => Logger.Warn(msg));
         StatsLogger.LogAllCards(Db);

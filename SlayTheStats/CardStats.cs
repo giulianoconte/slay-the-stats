@@ -23,17 +23,18 @@ public class CardStat
 }
 
 /// <summary>
-/// Context key for a card stat entry: character|ascension|act (e.g. "CHARACTER.IRONCLAD|0|1").
+/// Context key for a card stat entry: character|ascension|act|gameMode|buildVersion
+/// e.g. "CHARACTER.IRONCLAD|0|1|standard|v0.98.0".
 /// Acts are 1-indexed. Use RunContext.ToKey() to build and RunContext.Parse() to read.
 /// </summary>
-public readonly record struct RunContext(string Character, int Ascension, int Act)
+public readonly record struct RunContext(string Character, int Ascension, int Act, string GameMode, string BuildVersion)
 {
-    public string ToKey() => $"{Character}|{Ascension}|{Act}";
+    public string ToKey() => $"{Character}|{Ascension}|{Act}|{GameMode}|{BuildVersion}";
 
     public static RunContext Parse(string key)
     {
         var parts = key.Split('|');
-        return new RunContext(parts[0], int.Parse(parts[1]), int.Parse(parts[2]));
+        return new RunContext(parts[0], int.Parse(parts[1]), int.Parse(parts[2]), parts[3], parts[4]);
     }
 }
 
@@ -43,7 +44,7 @@ public readonly record struct RunContext(string Character, int Ascension, int Ac
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.0.6";
+    public const string CurrentModVersion = "v0.0.8";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")] public Dictionary<string, Dictionary<string, CardStat>> Cards { get; set; } = new();

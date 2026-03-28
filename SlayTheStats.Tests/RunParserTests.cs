@@ -34,11 +34,11 @@ public class RunParserTests : IDisposable
 
         RunParser.ProcessRun(path, "run1", db);
 
-        var strike = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1"];
+        var strike = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
         Assert.Equal(1, strike.RunsOffered);
         Assert.Equal(1, strike.RunsPicked);
 
-        var defend = db.Cards["CARD.DEFEND"]["CHARACTER.IRONCLAD|0|1"];
+        var defend = db.Cards["CARD.DEFEND"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
         Assert.Equal(1, defend.RunsOffered);
         Assert.Equal(0, defend.RunsPicked);
     }
@@ -89,7 +89,7 @@ public class RunParserTests : IDisposable
         RunParser.ProcessRun(path, "run1", db);
 
         Assert.True(db.Cards.ContainsKey(RunParser.SkipId));
-        var skip = db.Cards[RunParser.SkipId]["CHARACTER.IRONCLAD|0|1"];
+        var skip = db.Cards[RunParser.SkipId]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
         Assert.Equal(1, skip.RunsPicked);
     }
 
@@ -106,7 +106,7 @@ public class RunParserTests : IDisposable
 
         RunParser.ProcessRun(path, "run1", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
         Assert.Equal(1, stat.RunsWon);
     }
 
@@ -121,7 +121,7 @@ public class RunParserTests : IDisposable
 
         RunParser.ProcessRun(path, "run1", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
         Assert.Equal(0, stat.RunsWon);
     }
 
@@ -141,6 +141,30 @@ public class RunParserTests : IDisposable
         Assert.Empty(db.Cards);
     }
 
+    // --- Game mode separation ---
+
+    [Fact]
+    public void SoloAndMultiplayerRuns_TrackStatsSeparately()
+    {
+        var db = new StatsDb();
+        var soloPath = TempRun(Build(gameMode: "standard", acts:
+        [[
+            [new("CARD.STRIKE", Picked: true)]
+        ]]));
+        var multiPath = TempRun(Build(gameMode: "co_op", acts:
+        [[
+            [new("CARD.STRIKE", Picked: true)]
+        ]]));
+
+        RunParser.ProcessRun(soloPath, "run1", db);
+        RunParser.ProcessRun(multiPath, "run2", db);
+
+        var strikeKeys = db.Cards["CARD.STRIKE"].Keys.ToList();
+        Assert.Equal(2, strikeKeys.Count);
+        Assert.Contains(strikeKeys, k => k.Contains("|standard|"));
+        Assert.Contains(strikeKeys, k => k.Contains("|co_op|"));
+    }
+
     // --- Per-run deduplication ---
 
     [Fact]
@@ -156,7 +180,7 @@ public class RunParserTests : IDisposable
 
         RunParser.ProcessRun(path, "run1", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
         Assert.Equal(1, stat.RunsOffered);
         Assert.Equal(1, stat.RunsPicked);
     }

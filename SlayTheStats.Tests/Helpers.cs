@@ -16,6 +16,8 @@ public static class RunFixture
         bool abandoned = false,
         int ascension = 0,
         string character = "CHARACTER.IRONCLAD",
+        string buildVersion = "UNKNOWN",
+        string gameMode = "UNKNOWN",
         List<List<List<CardChoice>>>? acts = null)
     {
         acts ??= [];
@@ -34,12 +36,15 @@ public static class RunFixture
             return $"[{floorsJson}]";
         }));
 
+        var buildIdField = buildVersion != "UNKNOWN" ? $@"""build_id"": ""{buildVersion}"", " : "";
+        var gameModeField = gameMode != "UNKNOWN" ? $@"""game_mode"": ""{gameMode}"", " : "";
+
         return $$"""
         {
             "was_abandoned": {{abandoned.ToString().ToLower()}},
             "win": {{won.ToString().ToLower()}},
             "ascension": {{ascension}},
-            "players": [{ "character": "{{character}}" }],
+            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}" }],
             "map_point_history": [{{actsJson}}]
         }
         """;

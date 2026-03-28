@@ -41,7 +41,7 @@ public static class RunParser
 
                 try
                 {
-                    ProcessRun(path, runId, db);
+                    ProcessRun(path, runId, db, warn);
                     db.ProcessedRuns.Add(runId);
                     newCount++;
                 }
@@ -58,7 +58,7 @@ public static class RunParser
             db.Save(savePath, warn);
     }
 
-    internal static void ProcessRun(string path, string runId, StatsDb db)
+    internal static void ProcessRun(string path, string runId, StatsDb db, Action<string>? warn = null)
     {
         var json = File.ReadAllText(path);
         var root = JsonNode.Parse(json) ?? throw new Exception("Failed to parse JSON");
@@ -69,21 +69,39 @@ public static class RunParser
 
         bool won = root["win"]?.GetValue<bool>() ?? false;
 
-        var character = root["players"]?[0]?["character"]?.GetValue<string>() ?? "UNKNOWN";
+        var character = root["players"]?[0]?["character"]?.GetValue<string>();
+        if (character == null)
+            warn?.Invoke($"Run {runId}: missing players[0].character — game format may have changed.");
+        character ??= "UNKNOWN";
+
         var ascension = root["ascension"]?.GetValue<int>() ?? 0;
+
+        var buildVersion = root["build_id"]?.GetValue<string>();
+        if (buildVersion == null)
+            warn?.Invoke($"Run {runId}: missing build_id — game format may have changed.");
+        buildVersion ??= "UNKNOWN";
+
+        var gameMode = root["game_mode"]?.GetValue<string>();
+        if (gameMode == null)
+            warn?.Invoke($"Run {runId}: missing game_mode — game format may have changed.");
+        gameMode ??= "UNKNOWN";
 
         // Walk all map points across all acts and collect card choices with context
         var allChoices = new List<(string cardId, bool wasPicked, RunContext context)>();
 
         var actArray = root["map_point_history"]?.AsArray();
-        if (actArray == null) return;
+        if (actArray == null)
+        {
+            warn?.Invoke($"Run {runId}: missing map_point_history — game format may have changed.");
+            return;
+        }
 
         for (int actIndex = 0; actIndex < actArray.Count; actIndex++)
         {
             var floors = actArray[actIndex]?.AsArray();
             if (floors == null) continue;
 
-            var context = new RunContext(character, ascension, actIndex + 1);
+            var context = new RunContext(character, ascension, actIndex + 1, gameMode, buildVersion);
 
             foreach (var floor in floors)
             {

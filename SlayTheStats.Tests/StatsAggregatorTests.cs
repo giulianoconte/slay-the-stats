@@ -10,8 +10,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, CardStat>
         {
-            ["CHARACTER.IRONCLAD|0|1"] = new CardStat { RunsOffered = 3, RunsPicked = 2, RunsWon = 1 },
-            ["CHARACTER.IRONCLAD|5|1"] = new CardStat { RunsOffered = 2, RunsPicked = 1, RunsWon = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 3, RunsPicked = 2, RunsWon = 1 },
+            ["CHARACTER.IRONCLAD|5|1|standard|v0.98.0"] = new CardStat { RunsOffered = 2, RunsPicked = 1, RunsWon = 1 },
         };
 
         var result = StatsAggregator.AggregateByAct(contextMap);
@@ -27,8 +27,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, CardStat>
         {
-            ["CHARACTER.IRONCLAD|0|1"] = new CardStat { RunsOffered = 4, RunsPicked = 2 },
-            ["CHARACTER.IRONCLAD|0|2"] = new CardStat { RunsOffered = 2, RunsPicked = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 4, RunsPicked = 2 },
+            ["CHARACTER.IRONCLAD|0|2|standard|v0.98.0"] = new CardStat { RunsOffered = 2, RunsPicked = 1 },
         };
 
         var result = StatsAggregator.AggregateByAct(contextMap);
