@@ -1,0 +1,11 @@
+{
+  "id": "SlayTheStats",
+  "name": "SlayTheStats",
+  "author": "Shoe",
+  "description": "Tracks card pick rates and win rates across runs",
+  "version": "v0.0.3",
+  "has_pck": false,
+  "has_dll": true,
+  "dependencies": ["BaseLib"],
+  "affects_gameplay": false
+}
