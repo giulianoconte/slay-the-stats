@@ -26,6 +26,12 @@ public partial class MainFile : Node
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
         RunParser.ProcessNewRuns(Db, SavePath, msg => Logger.Info(msg), msg => Logger.Warn(msg));
-        StatsLogger.LogAllCards(Db);
+    }
+
+    public override void _Ready()
+    {
+        // Belt-and-suspenders: create the tooltip panel early if GUMM adds MainFile to the scene tree.
+        // EnsurePanelExists is the authoritative creation path used by the hover patch.
+        CardHoverShowPatch.EnsurePanelExists();
     }
 }

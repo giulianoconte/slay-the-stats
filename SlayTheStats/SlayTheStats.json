@@ -1,9 +1,9 @@
 {
   "id": "SlayTheStats",
   "name": "SlayTheStats",
-  "author": "Shoe",
+  "author": "Giuliano Conte",
   "description": "Tracks card pick rates and win rates across runs",
-  "version": "v0.0.3",
+  "version": "v0.0.9",
   "has_pck": false,
   "has_dll": true,
   "dependencies": ["BaseLib"],

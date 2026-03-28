@@ -183,13 +183,23 @@ public static class RunParser
 
         foreach (var steamIdDir in Directory.GetDirectories(sts2Root))
         {
-            var standardHistory = Path.Combine(steamIdDir, "profile1", "saves", "history");
-            if (Directory.Exists(standardHistory))
-                found.Add(standardHistory);
+            foreach (var profileDir in Directory.GetDirectories(steamIdDir, "profile*"))
+            {
+                var history = Path.Combine(profileDir, "saves", "history");
+                if (Directory.Exists(history))
+                    found.Add(history);
+            }
 
-            var moddedHistory = Path.Combine(steamIdDir, "modded", "profile1", "saves", "history");
-            if (Directory.Exists(moddedHistory))
-                found.Add(moddedHistory);
+            var moddedDir = Path.Combine(steamIdDir, "modded");
+            if (Directory.Exists(moddedDir))
+            {
+                foreach (var profileDir in Directory.GetDirectories(moddedDir, "profile*"))
+                {
+                    var history = Path.Combine(profileDir, "saves", "history");
+                    if (Directory.Exists(history))
+                        found.Add(history);
+                }
+            }
         }
 
         return found;

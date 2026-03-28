@@ -1,7 +1,7 @@
 # Agent Notes
 
 ## Mod Version
-Bump `CurrentModVersion` in `CardStats.cs` for any code or schema change that affects stat calculation or output. This is the single trigger for reprocessing all run history on next game load.
+Bump `CurrentModVersion` in `CardStats.cs` AND `version` in `SlayTheStats.json` together — they are kept in sync. Do this for any code or schema change that affects stat calculation or output. `CurrentModVersion` is the trigger for reprocessing all run history on next game load.
 
 ## Keeping Docs Up To Date
 `README.md` and `agents.md` should stay current. If build steps, testing, project structure, or deployment change, update both files as part of the same change. Don't leave them describing the old setup.

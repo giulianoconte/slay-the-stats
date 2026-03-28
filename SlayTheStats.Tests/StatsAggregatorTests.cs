@@ -23,6 +23,36 @@ public class StatsAggregatorTests
     }
 
     [Fact]
+    public void AggregateByAct_FiltersByCharacter()
+    {
+        var contextMap = new Dictionary<string, CardStat>
+        {
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 5, RunsPicked = 3 },
+            ["CHARACTER.SILENT|0|1|standard|v0.98.0"]   = new CardStat { RunsOffered = 2, RunsPicked = 1 },
+        };
+
+        var result = StatsAggregator.AggregateByAct(contextMap, character: "CHARACTER.IRONCLAD");
+
+        Assert.Single(result);
+        Assert.Equal(5, result[1].RunsOffered);
+    }
+
+    [Fact]
+    public void AggregateByAct_FiltersByGameMode()
+    {
+        var contextMap = new Dictionary<string, CardStat>
+        {
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 4, RunsPicked = 2 },
+            ["CHARACTER.IRONCLAD|0|1|co_op|v0.98.0"]    = new CardStat { RunsOffered = 3, RunsPicked = 1 },
+        };
+
+        var result = StatsAggregator.AggregateByAct(contextMap, character: null, gameMode: "standard");
+
+        Assert.Single(result);
+        Assert.Equal(4, result[1].RunsOffered);
+    }
+
+    [Fact]
     public void AggregateByAct_KeepsActsSeparate()
     {
         var contextMap = new Dictionary<string, CardStat>

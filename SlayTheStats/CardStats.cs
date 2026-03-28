@@ -44,7 +44,7 @@ public readonly record struct RunContext(string Character, int Ascension, int Ac
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.0.8";
+    public const string CurrentModVersion = "v0.0.9";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")] public Dictionary<string, Dictionary<string, CardStat>> Cards { get; set; } = new();

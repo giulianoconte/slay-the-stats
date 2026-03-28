@@ -13,6 +13,5 @@ public static class RunEndedPatch
     static void Prefix()
     {
         RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => MainFile.Logger.Info(msg), msg => MainFile.Logger.Warn(msg));
-        StatsLogger.LogAllCards(MainFile.Db);
     }
 }
