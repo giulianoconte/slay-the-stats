@@ -6,10 +6,13 @@ namespace SlayTheStats.Tests;
 public static class RunFixture
 {
     public record CardChoice(string Id, bool Picked, int UpgradeLevel = 0);
+    public record RelicChoice(string Id, bool Picked);
 
     /// <summary>
     /// Each element of 'acts' is a list of reward screens for that act.
     /// Each reward screen is a list of card choices.
+    /// 'relicActs' follows the same shape for relic choice screens.
+    /// 'starterRelics' are placed in players[0].relics (the starter relic that has no floor event).
     /// </summary>
     public static string Build(
         bool won = false,
@@ -18,33 +21,57 @@ public static class RunFixture
         string character = "CHARACTER.IRONCLAD",
         string buildVersion = "UNKNOWN",
         string gameMode = "UNKNOWN",
-        List<List<List<CardChoice>>>? acts = null)
+        List<List<List<CardChoice>>>? acts = null,
+        List<List<List<RelicChoice>>>? relicActs = null,
+        List<string>? starterRelics = null)
     {
         acts ??= [];
+        relicActs ??= [];
 
-        var actsJson = string.Join(",", acts.Select(act =>
+        int actCount = Math.Max(acts.Count, relicActs.Count);
+
+        var actsJson = string.Join(",", Enumerable.Range(0, actCount).Select(actIdx =>
         {
-            var floorsJson = string.Join(",", act.Select(rewardScreen =>
+            var floorJsons = new List<string>();
+
+            if (actIdx < acts.Count)
             {
-                var choicesJson = string.Join(",", rewardScreen.Select(c =>
+                foreach (var rewardScreen in acts[actIdx])
                 {
-                    var upgradeField = c.UpgradeLevel > 0 ? $@", ""current_upgrade_level"": {c.UpgradeLevel}" : "";
-                    return $@"{{ ""card"": {{ ""id"": ""{c.Id}""{upgradeField} }}, ""was_picked"": {c.Picked.ToString().ToLower()} }}";
-                }));
-                return $@"{{ ""player_stats"": [{{ ""card_choices"": [{choicesJson}] }}] }}";
-            }));
-            return $"[{floorsJson}]";
+                    var choicesJson = string.Join(",", rewardScreen.Select(c =>
+                    {
+                        var upgradeField = c.UpgradeLevel > 0 ? $@", ""current_upgrade_level"": {c.UpgradeLevel}" : "";
+                        return $@"{{ ""card"": {{ ""id"": ""{c.Id}""{upgradeField} }}, ""was_picked"": {c.Picked.ToString().ToLower()} }}";
+                    }));
+                    floorJsons.Add($@"{{ ""player_stats"": [{{ ""card_choices"": [{choicesJson}] }}] }}");
+                }
+            }
+
+            if (actIdx < relicActs.Count)
+            {
+                foreach (var relicScreen in relicActs[actIdx])
+                {
+                    var choicesJson = string.Join(",", relicScreen.Select(r =>
+                        $@"{{ ""choice"": ""{r.Id}"", ""was_picked"": {r.Picked.ToString().ToLower()} }}"));
+                    floorJsons.Add($@"{{ ""player_stats"": [{{ ""relic_choices"": [{choicesJson}] }}] }}");
+                }
+            }
+
+            return $"[{string.Join(",", floorJsons)}]";
         }));
 
         var buildIdField = buildVersion != "UNKNOWN" ? $@"""build_id"": ""{buildVersion}"", " : "";
         var gameModeField = gameMode != "UNKNOWN" ? $@"""game_mode"": ""{gameMode}"", " : "";
+        var relicsField = starterRelics is { Count: > 0 }
+            ? $@", ""relics"": [{string.Join(",", starterRelics.Select(r => $@"{{""id"":""{r}""}}") )}]"
+            : "";
 
         return $$"""
         {
             "was_abandoned": {{abandoned.ToString().ToLower()}},
             "win": {{won.ToString().ToLower()}},
             "ascension": {{ascension}},
-            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}" }],
+            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}"{{relicsField}} }],
             "map_point_history": [{{actsJson}}]
         }
         """;

@@ -44,10 +44,11 @@ public readonly record struct RunContext(string Character, int Ascension, int Ac
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.0.9";
+    public const string CurrentModVersion = "v0.0.10";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
-    [JsonPropertyName("cards")] public Dictionary<string, Dictionary<string, CardStat>> Cards { get; set; } = new();
+    [JsonPropertyName("cards")]  public Dictionary<string, Dictionary<string, CardStat>>  Cards  { get; set; } = new();
+    [JsonPropertyName("relics")] public Dictionary<string, Dictionary<string, RelicStat>> Relics { get; set; } = new();
     [JsonPropertyName("processed_runs")] public HashSet<string> ProcessedRuns { get; set; } = new();
 
     public static StatsDb Load(string path, Action<string>? warn = null)
@@ -92,7 +93,25 @@ public class StatsDb
     public void Reset()
     {
         Cards.Clear();
+        Relics.Clear();
         ProcessedRuns.Clear();
+    }
+
+    public RelicStat GetOrCreateRelic(string relicId, RunContext context)
+    {
+        if (!Relics.TryGetValue(relicId, out var contextMap))
+        {
+            contextMap = new Dictionary<string, RelicStat>();
+            Relics[relicId] = contextMap;
+        }
+
+        var key = context.ToKey();
+        if (!contextMap.TryGetValue(key, out var stat))
+        {
+            stat = new RelicStat();
+            contextMap[key] = stat;
+        }
+        return stat;
     }
 
     public CardStat GetOrCreate(string cardId, RunContext context)

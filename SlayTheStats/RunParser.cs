@@ -86,8 +86,10 @@ public static class RunParser
             warn?.Invoke($"Run {runId}: missing game_mode — game format may have changed.");
         gameMode ??= "UNKNOWN";
 
-        // Walk all map points across all acts and collect card choices with context
+        // Walk all map points across all acts and collect card choices and relic acquisitions with context
         var allChoices = new List<(string cardId, bool wasPicked, RunContext context)>();
+        var relicsAcquired = new List<(string relicId, RunContext context)>();
+        var relicsSeenInFloors = new HashSet<string>();
 
         var actArray = root["map_point_history"]?.AsArray();
         if (actArray == null)
@@ -111,26 +113,56 @@ public static class RunParser
                 foreach (var playerStats in playerStatsArr)
                 {
                     var cardChoices = playerStats?["card_choices"]?.AsArray();
-                    if (cardChoices == null) continue;
-
-                    bool anyPicked = false;
-                    foreach (var choice in cardChoices)
+                    if (cardChoices != null)
                     {
-                        var cardId = choice?["card"]?["id"]?.GetValue<string>();
-                        if (cardId == null) continue;
+                        bool anyPicked = false;
+                        foreach (var choice in cardChoices)
+                        {
+                            var cardId = choice?["card"]?["id"]?.GetValue<string>();
+                            if (cardId == null) continue;
 
-                        var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
-                        var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
+                            var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
+                            var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
 
-                        bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
-                        allChoices.Add((cardKey, wasPicked, context));
-                        if (wasPicked) anyPicked = true;
+                            bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
+                            allChoices.Add((cardKey, wasPicked, context));
+                            if (wasPicked) anyPicked = true;
+                        }
+
+                        // Record a skip if a reward screen was shown but nothing was picked
+                        if (cardChoices.Count > 0 && !anyPicked)
+                            allChoices.Add((SkipId, true, context));
                     }
 
-                    // Record a skip if a reward screen was shown but nothing was picked
-                    if (cardChoices.Count > 0 && !anyPicked)
-                        allChoices.Add((SkipId, true, context));
+                    var relicChoices = playerStats?["relic_choices"]?.AsArray();
+                    if (relicChoices != null)
+                    {
+                        foreach (var choice in relicChoices)
+                        {
+                            var relicId = choice?["choice"]?.GetValue<string>();
+                            if (relicId == null) continue;
+
+                            relicsSeenInFloors.Add(relicId);
+
+                            bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
+                            if (wasPicked)
+                                relicsAcquired.Add((relicId, context));
+                        }
+                    }
                 }
+            }
+        }
+
+        // Starter relic: present in players[0].relics but never appears in relic_choices — assign to act 1
+        var starterContext = new RunContext(character, ascension, 1, gameMode, buildVersion);
+        var finalRelics = root["players"]?[0]?["relics"]?.AsArray();
+        if (finalRelics != null)
+        {
+            foreach (var relic in finalRelics)
+            {
+                var relicId = relic?["id"]?.GetValue<string>();
+                if (relicId != null && !relicsSeenInFloors.Contains(relicId))
+                    relicsAcquired.Add((relicId, starterContext));
             }
         }
 
@@ -168,6 +200,14 @@ public static class RunParser
         {
             foreach (var (cardId, wasPicked, context) in allChoices)
                 if (wasPicked) db.GetOrCreate(cardId, context).Won++;
+        }
+
+        // Relic stats: one entry per acquired relic
+        foreach (var (relicId, context) in relicsAcquired)
+        {
+            var stat = db.GetOrCreateRelic(relicId, context);
+            stat.RunsPresent++;
+            if (won) stat.RunsWon++;
         }
     }
 
