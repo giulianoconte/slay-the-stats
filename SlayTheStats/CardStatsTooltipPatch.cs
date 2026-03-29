@@ -132,10 +132,19 @@ public static class CardHoverShowPatch
         {
             if (actStats.TryGetValue(act, out var stat))
             {
-                var pr      = stat.RunsOffered > 0 ? $"{Math.Round(100.0 * stat.RunsPicked / stat.RunsOffered):F0}%" : "-";
-                var wr      = stat.RunsPicked  > 0 ? $"{Math.Round(100.0 * stat.RunsWon    / stat.RunsPicked):F0}%"  : "-";
+                var prPct   = stat.RunsOffered > 0 ? 100.0 * stat.RunsPicked / stat.RunsOffered : -1;
+                var wrPct   = stat.RunsPicked  > 0 ? 100.0 * stat.RunsWon    / stat.RunsPicked  : -1;
+                var pr      = prPct >= 0 ? $"{Math.Round(prPct):F0}%" : "-";
+                var wr      = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
                 var pickOff = $"{stat.RunsPicked}/{stat.RunsOffered}";
-                sb.Append($"{act,3}  {pickOff,5}   {pr,4}  {wr,4}\n");
+
+                // Pad before wrapping in color tags — BBCode tags are invisible to layout but
+                // would break fixed-width padding if included in the format string width.
+                var cPickOff = TooltipHelper.ColN($"{pickOff,5}", stat.RunsOffered);
+                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct) : $"{pr,4}";
+                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct) : $"{wr,4}";
+
+                sb.Append($"{act,3}  {cPickOff}   {cPr}  {cWr}\n");
             }
             else
             {

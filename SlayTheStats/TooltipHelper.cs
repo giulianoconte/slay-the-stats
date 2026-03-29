@@ -66,9 +66,14 @@ internal static class TooltipHelper
         header.ShortcutKeysEnabled = false;
         vbox.AddChild(header);
 
-        var table = new Label();
-        table.Name         = "StatsLabel";
-        table.AutowrapMode = TextServer.AutowrapMode.Off;
+        var table = new RichTextLabel();
+        table.Name                = "StatsLabel";
+        table.BbcodeEnabled       = true;
+        table.FitContent          = true;
+        table.AutowrapMode        = TextServer.AutowrapMode.Off;
+        table.ScrollActive        = false;
+        table.SelectionEnabled    = false;
+        table.ShortcutKeysEnabled = false;
         vbox.AddChild(table);
 
         panel.AddChild(vbox);
@@ -97,7 +102,7 @@ internal static class TooltipHelper
         if (panel == null) return;
 
         var header = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/HeaderLabel");
-        var table  = panel.GetNodeOrNull<Label>("VBoxContainer/StatsLabel");
+        var table  = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/StatsLabel");
         if (header == null || table == null) return;
 
         if (!_headerStyleApplied) { ApplyHeaderStyle(header); _headerStyleApplied = true; }
@@ -108,11 +113,10 @@ internal static class TooltipHelper
 
         // When there is no data, fold the message into the header and hide the table label so the
         // panel collapses to a single line (VBoxContainer excludes invisible children from layout).
-        header.Text   = $"[b]Stats[/b]                [color=#606060]SlayTheStats[/color]";
-        table.Text    = tableText;
-        table.Visible = true;
+        header.Text = $"[b]Stats[/b]                [color=#606060]SlayTheStats[/color]";
+        table.Text  = tableText;
         // The PanelContainer is placed freely in the root (not inside a layout), so it won't
-        // auto-resize when child content changes height. ResetSize() on both the label and the panel
+        // auto-resize when child content changes height. ResetSize() on both labels and the panel
         // forces the full chain to recalculate from the new content minimum size.
         table.ResetSize();
         panel.ResetSize();
@@ -292,17 +296,46 @@ internal static class TooltipHelper
         label.AddThemeConstantOverride("line_separation",  Fonts.LineSep);
     }
 
-    private static void ApplyTableStyle(Label label)
+    private static void ApplyTableStyle(RichTextLabel label)
     {
-        label.AddThemeColorOverride("font_color", Fonts.Text);
+        label.AddThemeColorOverride("default_color", Fonts.Text);
         var mono = ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
-        if (mono != null) label.AddThemeFontOverride("font", mono);
-        label.AddThemeFontSizeOverride("font_size", 20); // smaller than header to fit 4-col table within panel width
+        if (mono != null) label.AddThemeFontOverride("normal_font", mono);
+        label.AddThemeFontSizeOverride("normal_font_size", 20); // smaller than header to fit 4-col table within panel width
         label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
         label.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
         label.AddThemeConstantOverride("line_separation", Fonts.LineSep);
     }
+
+    /// <summary>Wraps text in a BBCode color tag based on sample size. Returns text unchanged for adequate N (12+).</summary>
+    internal static string ColN(string text, int n) => n switch
+    {
+        < 4  => $"[color=#666666]{text}[/color]",
+        < 8  => $"[color=#999999]{text}[/color]",
+        < 12 => $"[color=#BBBBBB]{text}[/color]",
+        _    => text,
+    };
+
+    /// <summary>Wraps text in a BBCode color tag based on win-rate percentage.</summary>
+    internal static string ColWR(string text, double pct) => pct switch
+    {
+        < 30 => $"[color=#E07840]{text}[/color]",
+        < 45 => $"[color=#C8A040]{text}[/color]",
+        < 55 => text,
+        < 70 => $"[color=#40B0A0]{text}[/color]",
+        _    => $"[color=#30D0C0]{text}[/color]",
+    };
+
+    /// <summary>Wraps text in a BBCode color tag based on pick-rate percentage (baseline ~33%).</summary>
+    internal static string ColPR(string text, double pct) => pct switch
+    {
+        < 20 => $"[color=#E07840]{text}[/color]",
+        < 30 => $"[color=#C8A040]{text}[/color]",
+        < 40 => text,
+        < 55 => $"[color=#40B0A0]{text}[/color]",
+        _    => $"[color=#30D0C0]{text}[/color]",
+    };
 
     private static StyleBox BuildPanelStyle()
     {

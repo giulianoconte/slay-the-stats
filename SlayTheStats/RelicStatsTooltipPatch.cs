@@ -165,8 +165,11 @@ internal static class RelicHoverHelper
         {
             if (actStats.TryGetValue(act, out var stat) && stat.RunsPresent > 0)
             {
-                var wr = $"{Math.Round(100.0 * stat.RunsWon / stat.RunsPresent):F0}%";
-                sb.Append($"{act,3}  {stat.RunsPresent,3}  {wr,4}\n");
+                var wrPct   = 100.0 * stat.RunsWon / stat.RunsPresent;
+                var wr      = $"{Math.Round(wrPct):F0}%";
+                var cRuns   = TooltipHelper.ColN($"{stat.RunsPresent,3}", stat.RunsPresent);
+                var cWr     = TooltipHelper.ColWR($"{wr,4}", wrPct);
+                sb.Append($"{act,3}  {cRuns}  {cWr}\n");
             }
             else
             {
