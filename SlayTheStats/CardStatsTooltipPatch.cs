@@ -141,8 +141,8 @@ public static class CardHoverShowPatch
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
                 var cPickOff = TooltipHelper.ColN($"{pickOff,5}", stat.RunsOffered);
-                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct) : $"{pr,4}";
-                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct) : $"{wr,4}";
+                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, stat.RunsOffered) : $"{pr,4}";
+                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked)  : $"{wr,4}";
 
                 sb.Append($"{act,3}  {cPickOff}   {cPr}  {cWr}\n");
             }

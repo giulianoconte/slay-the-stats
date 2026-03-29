@@ -317,25 +317,44 @@ internal static class TooltipHelper
         _    => text,
     };
 
-    /// <summary>Wraps text in a BBCode color tag based on win-rate percentage.</summary>
-    internal static string ColWR(string text, double pct) => pct switch
-    {
-        < 30 => $"[color=#E07840]{text}[/color]",
-        < 45 => $"[color=#C8A040]{text}[/color]",
-        < 55 => text,
-        < 70 => $"[color=#40B0A0]{text}[/color]",
-        _    => $"[color=#30D0C0]{text}[/color]",
-    };
+    // Four shades per direction, faintest to most vivid. Chosen by significance score, not N bracket.
+    private static readonly string[] BadShades  = { "#7A5848", "#A07050", "#C08450", "#E07840" };
+    private static readonly string[] GoodShades = { "#508080", "#409090", "#30A8A0", "#30D0C0" };
 
-    /// <summary>Wraps text in a BBCode color tag based on pick-rate percentage (baseline ~33%).</summary>
-    internal static string ColPR(string text, double pct) => pct switch
+    /// <summary>
+    /// Combined significance score in [0,1]: tanh(k × N × |pct − baseline|).
+    /// tanh gives a smooth curve that saturates at high N×deviation without blowing up.
+    /// k=0.004 calibrated so (N=1, 100% WR) ≈ very faint and (N=8, 70% WR) ≈ strong.
+    /// </summary>
+    private static double Significance(double pct, double baseline, int n)
+        => Math.Tanh(0.004 * n * Math.Abs(pct - baseline));
+
+    /// <summary>Maps a significance score to a shade index 0–3, or -1 for no colour.</summary>
+    private static int SigLevel(double sig) => sig switch { < 0.15 => -1, < 0.30 => 0, < 0.50 => 1, < 0.75 => 2, _ => 3 };
+
+    /// <summary>
+    /// Colours text by win-rate significance (baseline 50%).
+    /// Direction (orange vs teal) comes from whether pct is above or below baseline;
+    /// shade intensity comes from tanh(k × N × deviation) so both high deviation and
+    /// high N push toward vivid colour.
+    /// </summary>
+    internal static string ColWR(string text, double pct, int n)
     {
-        < 20 => $"[color=#E07840]{text}[/color]",
-        < 30 => $"[color=#C8A040]{text}[/color]",
-        < 40 => text,
-        < 55 => $"[color=#40B0A0]{text}[/color]",
-        _    => $"[color=#30D0C0]{text}[/color]",
-    };
+        var level = SigLevel(Significance(pct, 50.0, n));
+        if (level < 0) return text;
+        return $"[color={(pct >= 50 ? GoodShades : BadShades)[level]}]{text}[/color]";
+    }
+
+    /// <summary>
+    /// Colours text by pick-rate significance (baseline ~33% for 3-choice offers).
+    /// Same tanh significance model as ColWR.
+    /// </summary>
+    internal static string ColPR(string text, double pct, int n)
+    {
+        var level = SigLevel(Significance(pct, 33.0, n));
+        if (level < 0) return text;
+        return $"[color={(pct >= 33 ? GoodShades : BadShades)[level]}]{text}[/color]";
+    }
 
     private static StyleBox BuildPanelStyle()
     {

@@ -168,7 +168,7 @@ internal static class RelicHoverHelper
                 var wrPct   = 100.0 * stat.RunsWon / stat.RunsPresent;
                 var wr      = $"{Math.Round(wrPct):F0}%";
                 var cRuns   = TooltipHelper.ColN($"{stat.RunsPresent,3}", stat.RunsPresent);
-                var cWr     = TooltipHelper.ColWR($"{wr,4}", wrPct);
+                var cWr     = TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent);
                 sb.Append($"{act,3}  {cRuns}  {cWr}\n");
             }
             else
