@@ -55,7 +55,7 @@ public static class CardHoverShowPatch
                 statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats);
             }
 
-            TooltipHelper.ConnectFontTheft();
+            TooltipHelper.TrySceneTheftOnce();
             _activeHolder = __instance;
             TooltipHelper.ShowPanel("SlayTheStats", statsText);
         }

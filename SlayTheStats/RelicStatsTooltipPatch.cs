@@ -87,7 +87,7 @@ internal static class RelicHoverHelper
                 statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats);
             }
 
-            TooltipHelper.ConnectFontTheft();
+            TooltipHelper.TrySceneTheftOnce();
             _activeHolder = holder;
             TooltipHelper.ShowPanel("SlayTheStats", statsText);
         }

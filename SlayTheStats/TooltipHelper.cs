@@ -13,7 +13,7 @@ internal static class TooltipHelper
         public Font? Bold;
         public Font? Normal;
         public int   Size    = 22;
-        public Color Title   = new Color(0.988f, 0.784f, 0.184f, 1f); // golden yellow default
+        public Color Title   = new Color(0.918f, 0.745f, 0.318f, 1f); // golden yellow — matches keyword panel titles
         public Color Text    = new Color(1f, 0.9647f, 0.8863f, 1f);
         public Color Shadow  = new Color(0f, 0f, 0f, 0.251f);
         public int   ShadowX = 3;
@@ -30,13 +30,17 @@ internal static class TooltipHelper
     private static bool      _headerStyleApplied;
     private static bool      _tableStyleApplied;
     private static StyleBox? _stolenPanelStyle;
-    private static float?    _lastTipWidth;
     private static Control?  _panel;
     private static bool      _followerInjected;
+
+    // Empirically matched to game's native tooltip width. Game panels report 359px logical but
+    // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
+    internal const float TooltipWidth = 348f;
 
     internal static bool FontStealConnected;
     internal static bool HasActiveHover;
     internal static int  ShowGen;
+    private  static bool _sceneTheftDone;
 
     internal const string TooltipNodeName = "SlayTheStatsTooltip";
 
@@ -137,6 +141,72 @@ internal static class TooltipHelper
         _tableStyleApplied  = false;
     }
 
+    /// <summary>
+    /// Loads hover_tip.tscn once to steal accurate font and margin values directly from the scene,
+    /// then invalidates cached styles so they are reapplied on the next show.
+    /// </summary>
+    internal static void TrySceneTheftOnce()
+    {
+        if (_sceneTheftDone) return;
+        _sceneTheftDone = true;
+        try
+        {
+            var scene = ResourceLoader.Load<PackedScene>("res://scenes/ui/hover_tip.tscn");
+            if (scene == null) return;
+
+            var panel = scene.Instantiate<Control>();
+
+            var desc = panel.GetNodeOrNull<Control>("TextContainer/VBoxContainer/Description");
+            if (desc != null)
+            {
+                var normal  = desc.GetThemeFont("normal_font");
+                var bold    = desc.GetThemeFont("bold_font");
+                var size    = desc.GetThemeFontSize("normal_font_size");
+                var text    = desc.GetThemeColor("default_color");
+                var shadow  = desc.GetThemeColor("font_shadow_color");
+                var shadowX = desc.GetThemeConstant("shadow_offset_x");
+                var shadowY = desc.GetThemeConstant("shadow_offset_y");
+                var lineSep = desc.GetThemeConstant("line_separation");
+                if (normal != null || bold != null)
+                {
+                    Fonts = new FontSettings
+                    {
+                        Normal = normal, Bold = bold,
+                        Size   = size > 0 ? size : Fonts.Size,
+                        Title  = Fonts.Title,
+                        Text   = text != default ? text : Fonts.Text,
+                        Shadow = shadow, ShadowX = shadowX, ShadowY = shadowY, LineSep = lineSep,
+                    };
+                    InvalidateStyles();
+                }
+            }
+
+            var bg            = panel.GetNodeOrNull<NinePatchRect>("Bg");
+            var textContainer = panel.GetNodeOrNull<MarginContainer>("TextContainer");
+            var tex           = bg?.Texture as Texture2D ?? ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
+            if (tex != null)
+            {
+                var sb = new StyleBoxTexture();
+                sb.Texture             = tex;
+                sb.TextureMarginLeft   = bg?.PatchMarginLeft   ?? 55f;
+                sb.TextureMarginRight  = bg?.PatchMarginRight  ?? 91f;
+                sb.TextureMarginTop    = bg?.PatchMarginTop    ?? 43f;
+                sb.TextureMarginBottom = bg?.PatchMarginBottom ?? 32f;
+                sb.ContentMarginLeft   = textContainer?.GetThemeConstant("margin_left")   ?? 22f;
+                sb.ContentMarginRight  = textContainer?.GetThemeConstant("margin_right")  ?? 45f;
+                sb.ContentMarginTop    = textContainer?.GetThemeConstant("margin_top")    ?? 16f;
+                sb.ContentMarginBottom = textContainer?.GetThemeConstant("margin_bottom") ?? 28f;
+                _stolenPanelStyle = sb;
+            }
+
+            panel.QueueFree();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] TrySceneTheft failed: {e.Message}");
+        }
+    }
+
     internal static void ConnectFontTheft()
     {
         if (FontStealConnected) return;
@@ -207,7 +277,7 @@ internal static class TooltipHelper
         label.AddThemeColorOverride("font_color", Fonts.Text);
         var mono = ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
         if (mono != null) label.AddThemeFontOverride("font", mono);
-        label.AddThemeFontSizeOverride("font_size", Fonts.Size);
+        label.AddThemeFontSizeOverride("font_size", 20); // smaller than header to fit 4-col table within panel width
         label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
         label.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
@@ -225,10 +295,10 @@ internal static class TooltipHelper
             sb.TextureMarginRight  = 91f;
             sb.TextureMarginTop    = 43f;
             sb.TextureMarginBottom = 32f;
-            sb.ContentMarginLeft   = 18f;
-            sb.ContentMarginRight  = 18f;
-            sb.ContentMarginTop    = 14f;
-            sb.ContentMarginBottom = 14f;
+            sb.ContentMarginLeft   = 22f;
+            sb.ContentMarginRight  = 45f;
+            sb.ContentMarginTop    = 16f;
+            sb.ContentMarginBottom = 28f;
             return sb;
         }
         var flat = new StyleBoxFlat();
@@ -246,13 +316,7 @@ internal static class TooltipHelper
 
     internal static void UpdatePanelPosition(Control p, Container textContainer)
     {
-        if (_lastTipWidth == null)
-        {
-            var sib = textContainer.GetChildren().OfType<Control>()
-                .FirstOrDefault(c => c.Visible && c.Size.X > 0);
-            if (sib != null) _lastTipWidth = sib.Size.X;
-        }
-        if (_lastTipWidth.HasValue) p.CustomMinimumSize = new Vector2(_lastTipWidth.Value, 0);
+        p.CustomMinimumSize = new Vector2(TooltipWidth, 0);
 
         int sep = textContainer.GetThemeConstant("separation");
         p.Position = new Vector2(

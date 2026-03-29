@@ -18,7 +18,14 @@ public partial class MainFile : Node
     public static void Initialize()
     {
         Harmony harmony = new(ModId);
-        harmony.PatchAll();
+
+        // Apply patches individually so a missing target in one class doesn't abort the rest.
+        foreach (var type in typeof(MainFile).Assembly.GetTypes())
+        {
+            if (type.GetCustomAttributes(typeof(HarmonyPatch), false).Length == 0) continue;
+            try { harmony.CreateClassProcessor(type).Patch(); }
+            catch (Exception e) { Logger.Warn($"SlayTheStats: Patch {type.Name} skipped — {e.Message}"); }
+        }
 
         var patched = harmony.GetPatchedMethods().ToList();
         if (!patched.Any(m => m.DeclaringType?.Name == "NGame" && m.Name == "ReturnToMainMenuAfterRun"))
