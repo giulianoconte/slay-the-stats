@@ -89,7 +89,7 @@ internal static class RelicHoverHelper
 
             TooltipHelper.TrySceneTheftOnce();
             _activeHolder = holder;
-            TooltipHelper.ShowPanel("SlayTheStats", statsText);
+            TooltipHelper.ShowPanel(statsText);
         }
         catch (Exception e)
         {
@@ -160,7 +160,7 @@ internal static class RelicHoverHelper
     private static string BuildStatsText(Dictionary<int, RelicStat> actStats)
     {
         var sb = new StringBuilder();
-        sb.Append("Act    N   WR%\n");
+        sb.Append("Act Runs  Win%\n");
         for (int act = 1; act <= 3; act++)
         {
             if (actStats.TryGetValue(act, out var stat) && stat.RunsPresent > 0)

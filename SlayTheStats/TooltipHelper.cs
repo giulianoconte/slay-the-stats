@@ -56,9 +56,14 @@ internal static class TooltipHelper
         vbox.Name = "VBoxContainer";
         vbox.AddThemeConstantOverride("separation", 2);
 
-        var header = new Label();
-        header.Name         = "HeaderLabel";
-        header.AutowrapMode = TextServer.AutowrapMode.Off;
+        var header = new RichTextLabel();
+        header.Name               = "HeaderLabel";
+        header.BbcodeEnabled      = true;
+        header.FitContent         = true;
+        header.AutowrapMode       = TextServer.AutowrapMode.Off;
+        header.ScrollActive       = false;
+        header.SelectionEnabled   = false;
+        header.ShortcutKeysEnabled = false;
         vbox.AddChild(header);
 
         var table = new Label();
@@ -67,6 +72,10 @@ internal static class TooltipHelper
         vbox.AddChild(table);
 
         panel.AddChild(vbox);
+        // Steel blue-gray tint distinguishes our panel from the game's warm-stone (positive) and
+        // brick-red (negative) tooltips — "data" reads cool and analytical.
+        // SelfModulate only affects the panel's own draw (background stylebox), not child labels.
+        panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
         _panel = panel;
         _headerStyleApplied = false;
         _tableStyleApplied  = false;
@@ -79,7 +88,7 @@ internal static class TooltipHelper
     /// Increments ShowGen (cancels any pending hide timers), sets panel text, attaches to root,
     /// injects the position follower on first call, and makes the panel visible.
     /// </summary>
-    internal static void ShowPanel(string headerText, string tableText)
+    internal static void ShowPanel(string tableText)
     {
         ShowGen++;
         HasActiveHover = true;
@@ -87,7 +96,7 @@ internal static class TooltipHelper
         var panel = GetPanelPublic();
         if (panel == null) return;
 
-        var header = panel.GetNodeOrNull<Label>("VBoxContainer/HeaderLabel");
+        var header = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/HeaderLabel");
         var table  = panel.GetNodeOrNull<Label>("VBoxContainer/StatsLabel");
         if (header == null || table == null) return;
 
@@ -97,8 +106,16 @@ internal static class TooltipHelper
         if (_stolenPanelStyle == null) _stolenPanelStyle = BuildPanelStyle();
         panel.AddThemeStyleboxOverride("panel", _stolenPanelStyle);
 
-        header.Text = headerText;
-        table.Text  = tableText;
+        // When there is no data, fold the message into the header and hide the table label so the
+        // panel collapses to a single line (VBoxContainer excludes invisible children from layout).
+        header.Text   = $"[b]Stats[/b]                [color=#606060]SlayTheStats[/color]";
+        table.Text    = tableText;
+        table.Visible = true;
+        // The PanelContainer is placed freely in the root (not inside a layout), so it won't
+        // auto-resize when child content changes height. ResetSize() on both the label and the panel
+        // forces the full chain to recalculate from the new content minimum size.
+        table.ResetSize();
+        panel.ResetSize();
 
         var root = (Engine.GetMainLoop() as SceneTree)?.Root;
         if (panel.GetParent() != root)
@@ -260,16 +277,19 @@ internal static class TooltipHelper
         }));
     }
 
-    private static void ApplyHeaderStyle(Label label)
+    private static void ApplyHeaderStyle(RichTextLabel label)
     {
-        label.AddThemeColorOverride("font_color", Fonts.Title);
-        var font = Fonts.Bold ?? Fonts.Normal;
-        if (font != null) label.AddThemeFontOverride("font", font);
-        label.AddThemeFontSizeOverride("font_size", Fonts.Size);
+        // RichTextLabel uses different override keys than Label.
+        // default_color is the base colour; [b] tags use bold_font; [color=] overrides in BBCode.
+        label.AddThemeColorOverride("default_color", Fonts.Title);
+        if (Fonts.Bold   != null) label.AddThemeFontOverride("bold_font",   Fonts.Bold);
+        if (Fonts.Normal != null) label.AddThemeFontOverride("normal_font", Fonts.Normal);
+        label.AddThemeFontSizeOverride("bold_font_size",   Fonts.Size);
+        label.AddThemeFontSizeOverride("normal_font_size", Fonts.Size);
         label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
         label.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
-        label.AddThemeConstantOverride("line_separation", Fonts.LineSep);
+        label.AddThemeConstantOverride("line_separation",  Fonts.LineSep);
     }
 
     private static void ApplyTableStyle(Label label)
@@ -365,7 +385,7 @@ public partial class SlayTheStatsPositionFollower : Node
             int sep = textContainer.GetThemeConstant("separation");
             cardContainer.GlobalPosition = new Vector2(
                 cardContainer.GlobalPosition.X,
-                p.GlobalPosition.Y + p.Size.Y + sep);
+                p.GlobalPosition.Y + p.Size.Y + sep + 12f);
         }
     }
 }

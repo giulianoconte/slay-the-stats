@@ -57,7 +57,7 @@ public static class CardHoverShowPatch
 
             TooltipHelper.TrySceneTheftOnce();
             _activeHolder = __instance;
-            TooltipHelper.ShowPanel("SlayTheStats", statsText);
+            TooltipHelper.ShowPanel(statsText);
         }
         catch (Exception e)
         {
@@ -127,7 +127,7 @@ public static class CardHoverShowPatch
     private static string BuildStatsText(Dictionary<int, CardStat> actStats)
     {
         var sb = new StringBuilder();
-        sb.Append("Act  Picks    PR%   WR%\n");
+        sb.Append("Act  Picks  Pick%  Win%\n");
         for (int act = 1; act <= 3; act++)
         {
             if (actStats.TryGetValue(act, out var stat))
