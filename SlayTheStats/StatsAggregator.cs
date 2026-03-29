@@ -43,4 +43,35 @@ public static class StatsAggregator
 
         return result;
     }
+
+    /// <summary>
+    /// Aggregates a relic's per-context stats into per-act totals,
+    /// optionally filtering by character and/or game mode.
+    /// Pass null to skip that filter.
+    /// </summary>
+    public static Dictionary<int, RelicStat> AggregateRelicsByAct(
+        Dictionary<string, RelicStat> contextMap,
+        string? character,
+        string? gameMode = "standard")
+    {
+        var result = new Dictionary<int, RelicStat>();
+
+        foreach (var (key, stat) in contextMap)
+        {
+            var ctx = RunContext.Parse(key);
+            if (character != null && ctx.Character != character) continue;
+            if (gameMode != null && ctx.GameMode != gameMode) continue;
+
+            if (!result.TryGetValue(ctx.Act, out var agg))
+            {
+                agg = new RelicStat();
+                result[ctx.Act] = agg;
+            }
+
+            agg.RunsPresent += stat.RunsPresent;
+            agg.RunsWon     += stat.RunsWon;
+        }
+
+        return result;
+    }
 }
