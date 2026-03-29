@@ -108,7 +108,6 @@ internal static class TooltipHelper
             _followerInjected = true;
             var follower = new SlayTheStatsPositionFollower { Name = "SlayTheStatsFollower" };
             root?.AddChild(follower);
-            MainFile.Logger.Info("[SlayTheStats] PositionFollower injected");
         }
 
         panel.Visible = true;
@@ -151,14 +150,7 @@ internal static class TooltipHelper
         {
             if (tipPanel.Name == TooltipNodeName) return;
 
-            MainFile.Logger.Info($"[SlayTheStats] TipPanel: type={tipPanel.GetType().Name} children={tipPanel.GetChildCount()}");
-            foreach (var child in tipPanel.GetChildren())
-                MainFile.Logger.Info($"[SlayTheStats]   child: {child.GetType().Name} \"{child.Name}\" kids={child.GetChildCount()}");
             var vbox = tipPanel.GetNodeOrNull<Node>("TextContainer/VBoxContainer");
-            if (vbox != null)
-                foreach (var child in vbox.GetChildren())
-                    MainFile.Logger.Info($"[SlayTheStats]   vbox child: {child.GetType().Name} \"{child.Name}\"");
-
             var desc = tipPanel.GetNodeOrNull<Control>("TextContainer/VBoxContainer/Description");
             if (desc == null) return;
             var normal  = desc.GetThemeFont("normal_font");
@@ -181,15 +173,11 @@ internal static class TooltipHelper
                     {
                         var c = ctrl.GetThemeColor("font_color");
                         if (c != default)
-                        {
                             titleColor = c;
-                            MainFile.Logger.Info($"[SlayTheStats] FontTheft: title node=\"{child.Name}\" color={c}");
-                        }
                     }
                 }
             }
 
-            MainFile.Logger.Info($"[SlayTheStats] FontTheft: size={size} lineSep={lineSep} titleColor={titleColor}");
             Fonts = new FontSettings
             {
                 Normal = normal, Bold = bold,
@@ -302,5 +290,18 @@ public partial class SlayTheStatsPositionFollower : Node
         if (textContainer == null) return;
 
         TooltipHelper.UpdatePanelPosition(p, textContainer);
+
+        // For relics whose card tip is positioned BELOW the text container (SetAlignmentForRelic),
+        // push the card container further down to make room for our panel.
+        // Relics using SetAlignment(Left|Right) place the card BESIDE the text — don't move those.
+        var cardContainer = tipSet?.GetNodeOrNull<Control>("cardHoverTipContainer");
+        if (cardContainer != null && cardContainer.GetChildCount() > 0 && p.Size.Y > 0
+            && RelicHoverHelper.ShouldPushCardContainer)
+        {
+            int sep = textContainer.GetThemeConstant("separation");
+            cardContainer.GlobalPosition = new Vector2(
+                cardContainer.GlobalPosition.X,
+                p.GlobalPosition.Y + p.Size.Y + sep);
+        }
     }
 }

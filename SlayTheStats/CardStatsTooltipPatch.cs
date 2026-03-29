@@ -39,20 +39,25 @@ public static class CardHoverShowPatch
                          : MainFile.Db.Cards.ContainsKey(rawId)                    ? rawId
                          : null;
 
-            if (lookupId == null) return;
+            string statsText;
+            if (lookupId == null)
+            {
+                statsText = "No data";
+            }
+            else
+            {
+                var contextMap = MainFile.Db.Cards[lookupId];
+                var character = CurrentCharacter ?? GetCharacterFromOwner(__instance);
+                if (character != null && CurrentCharacter == null)
+                    CurrentCharacter = character;
 
-            var contextMap = MainFile.Db.Cards[lookupId];
-            var character = CurrentCharacter ?? GetCharacterFromOwner(__instance);
-            if (character != null && CurrentCharacter == null)
-                CurrentCharacter = character;
-
-            var actStats = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard");
-            if (actStats.Count == 0) return;
+                var actStats = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard");
+                statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats);
+            }
 
             TooltipHelper.ConnectFontTheft();
             _activeHolder = __instance;
-            TooltipHelper.ShowPanel("SlayTheStats", BuildStatsText(actStats));
-            MainFile.Logger.Info($"[SlayTheStats] ShowTooltip(card): anchor={__instance.GetHashCode()}");
+            TooltipHelper.ShowPanel("SlayTheStats", statsText);
         }
         catch (Exception e)
         {
@@ -73,9 +78,7 @@ public static class CardHoverShowPatch
 
     internal static void HideTooltip(NCardHolder? source = null)
     {
-        var skip = source != null && source != _activeHolder;
-        MainFile.Logger.Info($"[SlayTheStats] HideTooltip(card): source={source?.GetHashCode()} active={_activeHolder?.GetHashCode()} skip={skip}");
-        if (skip) return;
+        if (source != null && source != _activeHolder) return;
 
         _activeHolder = null;
         TooltipHelper.HasActiveHover = false;
@@ -156,6 +159,8 @@ public static class CardHoverHidePatch
 /// <summary>
 /// Safety net: hides the panel when a card is returned to the pool without going through
 /// ClearHoverTips. Skips if any hover (card or relic) is still active.
+/// Uses HideWithDelay (not direct hide) so that a relic OnFocus postfix firing in the same
+/// frame can cancel the hide by incrementing ShowGen before the timer fires.
 /// </summary>
 [HarmonyPatch(typeof(NCard), "OnFreedToPool")]
 public static class CardFreedToPoolPatch
@@ -167,8 +172,7 @@ public static class CardFreedToPoolPatch
             var node = TooltipHelper.GetPanelPublic();
             if (node == null || !node.Visible) return;
             if (TooltipHelper.HasActiveHover) return;
-            MainFile.Logger.Info("[SlayTheStats] FreedToPool: hiding panel (no active hover)");
-            node.Visible = false;
+            TooltipHelper.HideWithDelay();
         }
         catch { }
     }
