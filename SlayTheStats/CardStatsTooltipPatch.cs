@@ -24,7 +24,11 @@ public static class CardHoverShowPatch
     private static bool _signalConnected;
     private static bool _fontStealConnected;
     private static bool _panelCreated;
-    private static float? _lastTipX; // X of last seen keyword tip panel column; used as fallback for non-keyword cards
+    private static Vector2? _tipOffset;      // offset from anchor to top-left of keyword column (for no-keyword cards)
+    private static Vector2? _bottomOffset;   // offset from anchor to our panel's top-left (below keyword panels)
+    private static float?   _lastTipWidth;   // width of keyword panels; enforced as our min width
+    private static int      _showGen;        // incremented each ShowTooltip; stale deferred callbacks self-cancel
+    private static NCardHolder? _activeHolder; // card whose stats are currently being shown
     internal const string TooltipNodeName  = "SlayTheStatsTooltip";
     private const  string CanvasLayerName  = "SlayTheStatsLayer";
 
@@ -149,8 +153,14 @@ public static class CardHoverShowPatch
         return root?.GetNodeOrNull<Control>($"{CanvasLayerName}/{TooltipNodeName}");
     }
 
-    internal static void HideTooltip()
+    // source: the NCardHolder whose ClearHoverTips fired (forwarded from the patch).
+    // If source doesn't match _activeHolder, a newer show is already in progress — skip.
+    internal static void HideTooltip(NCardHolder? source = null)
     {
+        var skip = source != null && source != _activeHolder;
+        MainFile.Logger.Info($"[SlayTheStats] HideTooltip: source={source?.GetHashCode()} active={_activeHolder?.GetHashCode()} skip={skip} gen={_showGen}");
+        if (skip) return;
+        _showGen++;
         var node = GetPanel();
         if (node != null) node.Visible = false;
     }
@@ -198,13 +208,7 @@ public static class CardHoverShowPatch
         catch { return null; }
     }
 
-    private static string BuildHeaderText(string? character)
-    {
-        var characterLabel = character != null
-            ? char.ToUpper(character.Split('.').Last()[0]) + character.Split('.').Last().Substring(1).ToLower()
-            : "All Characters";
-        return $"SlayTheStats ({characterLabel}, Solo)";
-    }
+    private static string BuildHeaderText(string? character) => "SlayTheStats";
 
     private static string BuildStatsText(Dictionary<int, CardStat> actStats)
     {
@@ -546,6 +550,8 @@ public static class CardHoverShowPatch
     }
 
 
+    private static bool _tipSetParentLogged;
+
     private static void ShowTooltip(NCardHolder anchor, string headerText, string tableText)
     {
         var root  = (Engine.GetMainLoop() as SceneTree)?.Root;
@@ -567,90 +573,130 @@ public static class CardHoverShowPatch
         table.Text  = tableText;
         panel.Visible = false;
 
+        var anchorPos     = anchor.GlobalPosition;
         var tipSet        = FindNodeByTypeName(root, "NHoverTipSet");
         var textContainer = tipSet?.GetNodeOrNull<Container>("textHoverTipContainer");
 
-        // Local helpers — capture panel and textContainer.
-        void placeFromPanels(List<Control> vis)
+        MainFile.Logger.Info($"[SlayTheStats] ShowTooltip: anchor={anchor.GetHashCode()} anchorPos={anchorPos} gen={_showGen+1}");
+
+        // One-time: log NHoverTipSet's parent chain to understand its coordinate space.
+        if (!_tipSetParentLogged && tipSet != null)
         {
-            if (!GodotObject.IsInstanceValid(panel)) return;
-            float bottomEdge = float.MinValue, leftEdge = 0;
-            foreach (var c in vis)
+            _tipSetParentLogged = true;
+            var sb2 = new StringBuilder("[SlayTheStats] NHoverTipSet parent chain: ");
+            Node? cur = tipSet;
+            while (cur != null)
             {
-                var b = c.GlobalPosition.Y + c.Size.Y;
-                MainFile.Logger.Info($"[SlayTheStats] Place child: pos={c.GlobalPosition} size={c.Size} bottom={b}");
-                if (b > bottomEdge) { bottomEdge = b; leftEdge = c.GlobalPosition.X; }
+                sb2.Append($"{cur.GetType().Name}(\"{cur.Name}\")");
+                if (cur is CanvasLayer cl) sb2.Append($"[layer={cl.Layer}]");
+                if (cur is Control ctrl) sb2.Append($"[gpos={ctrl.GlobalPosition}]");
+                cur = cur.GetParent();
+                if (cur != null) sb2.Append(" -> ");
             }
-            _lastTipX = leftEdge;
-            MainFile.Logger.Info($"[SlayTheStats] Place: below panels ({leftEdge}, {bottomEdge + 6})");
-            panel.GlobalPosition = new Vector2(leftEdge, bottomEdge + 6);
-            panel.Visible = true;
+            MainFile.Logger.Info(sb2.ToString());
         }
 
-        void placeFromFallback()
-        {
-            if (!GodotObject.IsInstanceValid(panel)) return;
-            float x = _lastTipX ?? (textContainer != null && GodotObject.IsInstanceValid(textContainer)
-                ? textContainer.GlobalPosition.X : 0);
-            float y = textContainer != null && GodotObject.IsInstanceValid(textContainer)
-                ? textContainer.GlobalPosition.Y : 0;
-            MainFile.Logger.Info($"[SlayTheStats] Place: fallback ({x}, {y})");
-            panel.GlobalPosition = new Vector2(x, y);
-            panel.Visible = true;
-        }
+        _activeHolder = anchor;
+        var myGen = ++_showGen;
 
         List<Control> VisiblePanels() =>
             textContainer?.GetChildren().OfType<Control>().Where(c => c.Visible).ToList()
             ?? new List<Control>();
 
-        bool LayoutDone(List<Control> vis) =>
-            vis.Count <= 1 || vis.Select(c => c.GlobalPosition.Y).Distinct().Count() > 1;
+        // 2+ panels: layout is done when they have distinct Y values (container stacked them).
+        // 1 panel:   trust after at least one deferred frame (gives layout time to run).
+        bool LayoutDone(List<Control> vis, int waited) =>
+            vis.Count >= 2 ? vis.Select(c => c.GlobalPosition.Y).Distinct().Count() > 1
+                           : waited > 0;
 
-        if (textContainer == null)
+        // Per-frame tracker: reapplies the stored anchor-relative offset each frame.
+        // Using anchor.GlobalPosition (not keyword panel positions) avoids any timing
+        // dependency on when the game updates those panels — anchor position is always current.
+        Action track = null!;
+        track = () =>
         {
-            // No NHoverTipSet found — defer one frame and use cached/fallback position.
-            (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
-                Callable.From(placeFromFallback), (uint)GodotObject.ConnectFlags.OneShot);
-            return;
-        }
-
-        var vis0 = VisiblePanels();
-        if (vis0.Count > 0 && LayoutDone(vis0))
-        {
-            // Second hover: panels already exist and are fully laid out.
-            // Wait one ProcessFrame so our panel doesn't flicker at the old position.
-            (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
-                Callable.From(() => placeFromPanels(VisiblePanels())),
-                (uint)GodotObject.ConnectFlags.OneShot);
-        }
-        else if (vis0.Count > 0)
-        {
-            // Panels exist but layout hasn't run — use sort_children to know when it's done.
-            textContainer.Connect("sort_children", Callable.From(() => placeFromPanels(VisiblePanels())),
-                (uint)GodotObject.ConnectFlags.OneShot);
-        }
-        else
-        {
-            // No panels yet (first hover or no-keyword card).
-            // Poll for up to 3 frames; once panels appear use sort_children, otherwise fall back.
-            var waits = new[] { 0 };
-            Action poll = null!;
-            poll = () =>
+            if (_showGen != myGen || !GodotObject.IsInstanceValid(panel) || !panel.Visible) return;
+            if (!GodotObject.IsInstanceValid(anchor)) return;
+            if (_bottomOffset.HasValue)
             {
-                if (!GodotObject.IsInstanceValid(panel)) return;
-                var vis = VisiblePanels();
-                if (vis.Count > 0)
-                    textContainer.Connect("sort_children", Callable.From(() => placeFromPanels(VisiblePanels())),
-                        (uint)GodotObject.ConnectFlags.OneShot);
-                else if (waits[0]++ < 3)
-                    (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
-                        Callable.From(poll), (uint)GodotObject.ConnectFlags.OneShot);
-                else
-                    placeFromFallback();
-            };
+                var ap = anchor.GlobalPosition;
+                panel.GlobalPosition = new Vector2(ap.X + _bottomOffset.Value.X, ap.Y + _bottomOffset.Value.Y);
+            }
             (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
-                Callable.From(poll), (uint)GodotObject.ConnectFlags.OneShot);
+                Callable.From(track), (uint)GodotObject.ConnectFlags.OneShot);
+        };
+
+        // Initial placement helpers — called once by the poll to set position and start tracking.
+        void placeFromPanels(List<Control> vis)
+        {
+            if (!GodotObject.IsInstanceValid(panel)) return;
+            float bottomEdge = float.MinValue, topEdge = float.MaxValue, leftEdge = 0, panelWidth = 0;
+            foreach (var c in vis)
+            {
+                var b = c.GlobalPosition.Y + c.Size.Y;
+                MainFile.Logger.Info($"[SlayTheStats] Place child: pos={c.GlobalPosition} size={c.Size} bottom={b}");
+                if (b > bottomEdge) { bottomEdge = b; leftEdge = c.GlobalPosition.X; panelWidth = c.Size.X; }
+                if (c.GlobalPosition.Y < topEdge) topEdge = c.GlobalPosition.Y;
+            }
+            _tipOffset    = new Vector2(leftEdge - anchorPos.X, topEdge - anchorPos.Y);
+            _bottomOffset = new Vector2(leftEdge - anchorPos.X, bottomEdge + 6 - anchorPos.Y);
+            _lastTipWidth = panelWidth;
+            if (panelWidth > 0) panel.CustomMinimumSize = new Vector2(panelWidth, 0);
+            MainFile.Logger.Info($"[SlayTheStats] Place: below panels ({leftEdge}, {bottomEdge + 6}), offset={_tipOffset}");
+            panel.GlobalPosition = new Vector2(leftEdge, bottomEdge + 6);
+            panel.Visible = true;
+            track(); // start per-frame tracking
         }
+
+        void placeFromFallback()
+        {
+            if (!GodotObject.IsInstanceValid(panel)) return;
+            float x, y;
+            if (_tipOffset.HasValue)
+            {
+                x = anchorPos.X + _tipOffset.Value.X;
+                y = anchorPos.Y + _tipOffset.Value.Y;
+            }
+            else
+            {
+                x = textContainer != null && GodotObject.IsInstanceValid(textContainer)
+                    ? textContainer.GlobalPosition.X : anchorPos.X + anchor.Size.X + 10;
+                y = textContainer != null && GodotObject.IsInstanceValid(textContainer)
+                    ? textContainer.GlobalPosition.Y : anchorPos.Y;
+            }
+            if (_lastTipWidth.HasValue) panel.CustomMinimumSize = new Vector2(_lastTipWidth.Value, 0);
+            _bottomOffset = _tipOffset.HasValue ? _tipOffset : (Vector2?)new Vector2(x - anchorPos.X, y - anchorPos.Y);
+            MainFile.Logger.Info($"[SlayTheStats] Place: fallback anchor={anchorPos} offset={_tipOffset} -> ({x}, {y})");
+            panel.GlobalPosition = new Vector2(x, y);
+            panel.Visible = true;
+            track(); // start per-frame tracking
+        }
+
+        var waits = new[] { 0 };
+        Action poll = null!;
+        poll = () =>
+        {
+            if (_showGen != myGen) return;
+            if (!GodotObject.IsInstanceValid(panel)) return;
+
+            var vis = VisiblePanels();
+
+            if (vis.Count > 0 && LayoutDone(vis, waits[0]))
+                placeFromPanels(vis);
+            else if (vis.Count > 0 && waits[0]++ < 6)
+                (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
+                    Callable.From(poll), (uint)GodotObject.ConnectFlags.OneShot);
+            else if (vis.Count == 0 && waits[0]++ < 4)
+                (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
+                    Callable.From(poll), (uint)GodotObject.ConnectFlags.OneShot);
+            else if (vis.Count > 0)
+                placeFromPanels(vis);
+            else
+                placeFromFallback();
+        };
+
+        (Engine.GetMainLoop() as SceneTree)?.Connect(SceneTree.SignalName.ProcessFrame,
+            Callable.From(poll), (uint)GodotObject.ConnectFlags.OneShot);
     }
 
     /// Connects to textHoverTipContainer.child_entered_tree so we steal the style
@@ -730,7 +776,7 @@ public static class CardHoverHidePatch
 {
     static void Postfix(NCardHolder __instance)
     {
-        try { CardHoverShowPatch.HideTooltip(); }
+        try { CardHoverShowPatch.HideTooltip(__instance); }
         catch { }
     }
 }
