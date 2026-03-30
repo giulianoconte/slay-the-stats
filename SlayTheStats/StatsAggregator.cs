@@ -45,6 +45,30 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Returns the overall win-rate percentage for a character in a given game mode,
+    /// or 50.0 as a neutral fallback if no data exists yet.
+    /// </summary>
+    public static double GetCharacterWR(StatsDb db, string character, string gameMode = "standard")
+    {
+        var key = $"{character}|{gameMode}";
+        if (!db.Characters.TryGetValue(key, out var stat) || stat.Runs == 0)
+            return 50.0;
+        return 100.0 * stat.Wins / stat.Runs;
+    }
+
+    /// <summary>
+    /// Returns the expected pick rate for a single card, accounting for the skip option.
+    /// Baseline = (1 - skipRate) / 3, where skipRate = TotalSkips / TotalRewardScreens.
+    /// Falls back to 1/3 if no data.
+    /// </summary>
+    public static double GetPickRateBaseline(StatsDb db)
+    {
+        if (db.TotalRewardScreens == 0) return 1.0 / 3.0;
+        var skipRate = (double)db.TotalSkips / db.TotalRewardScreens;
+        return (1.0 - skipRate) / 3.0;
+    }
+
+    /// <summary>
     /// Aggregates a relic's per-context stats into per-act totals,
     /// optionally filtering by character and/or game mode.
     /// Pass null to skip that filter.

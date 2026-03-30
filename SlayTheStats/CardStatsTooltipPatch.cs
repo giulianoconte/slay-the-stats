@@ -51,8 +51,10 @@ public static class CardHoverShowPatch
                 if (character != null && CurrentCharacter == null)
                     CurrentCharacter = character;
 
-                var actStats = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard");
-                statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats);
+                var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard");
+                var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : 50.0;
+                var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
+                statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats, characterWR, pickRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -124,34 +126,56 @@ public static class CardHoverShowPatch
         catch { return null; }
     }
 
-    private static string BuildStatsText(Dictionary<int, CardStat> actStats)
+    private static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0)
     {
         var sb = new StringBuilder();
         sb.Append("Act  Picks  Pick%  Win%\n");
+
+        int totOffered = 0, totPicked = 0, totWon = 0;
+
         for (int act = 1; act <= 3; act++)
         {
             if (actStats.TryGetValue(act, out var stat))
             {
+                totOffered += stat.RunsOffered;
+                totPicked  += stat.RunsPicked;
+                totWon     += stat.RunsWon;
+
                 var prPct   = stat.RunsOffered > 0 ? 100.0 * stat.RunsPicked / stat.RunsOffered : -1;
                 var wrPct   = stat.RunsPicked  > 0 ? 100.0 * stat.RunsWon    / stat.RunsPicked  : -1;
                 var pr      = prPct >= 0 ? $"{Math.Round(prPct):F0}%" : "-";
                 var wr      = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
                 var pickOff = $"{stat.RunsPicked}/{stat.RunsOffered}";
 
+                var pickN = stat.RunsPicked;
+
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
-                var cPickOff = TooltipHelper.ColN($"{pickOff,5}", stat.RunsOffered);
-                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, stat.RunsOffered) : $"{pr,4}";
-                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked)  : $"{wr,4}";
+                var cPickOff = TooltipHelper.ColN($"{pickOff,5}", pickN);
+                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, pickN, pickRateBaseline) : $"{pr,4}";
+                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked, characterWR) : $"{wr,4}";
 
                 sb.Append($"{act,3}  {cPickOff}   {cPr}  {cWr}\n");
             }
             else
             {
-                sb.Append($"{act,3}      -      -     -\n");
+                sb.Append($"{act,3}  [color=#909090]    -      -     -[/color]\n");
             }
         }
-        return sb.ToString().TrimEnd();
+
+        // Total row — aggregated across all acts
+        var totPrPct   = totOffered > 0 ? 100.0 * totPicked / totOffered : -1;
+        var totWrPct   = totPicked  > 0 ? 100.0 * totWon    / totPicked  : -1;
+        var totPr      = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
+        var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
+        var totPickOff = $"{totPicked}/{totOffered}";
+        var totPickN   = totPicked / 3;
+        var cTotPickOff = TooltipHelper.ColN($"{totPickOff,5}", totPickN);
+        var cTotPr      = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,4}", totPrPct, totPickN, pickRateBaseline) : $"{totPr,4}";
+        var cTotWr      = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"{totWr,4}";
+        sb.Append($"All  {cTotPickOff}   {cTotPr}  {cTotWr}");
+
+        return sb.ToString();
     }
 }
 

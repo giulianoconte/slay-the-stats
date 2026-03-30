@@ -311,15 +311,17 @@ internal static class TooltipHelper
     /// <summary>Wraps text in a BBCode color tag based on sample size. Returns text unchanged for adequate N (12+).</summary>
     internal static string ColN(string text, int n) => n switch
     {
-        < 4  => $"[color=#666666]{text}[/color]",
-        < 8  => $"[color=#999999]{text}[/color]",
-        < 12 => $"[color=#BBBBBB]{text}[/color]",
+        < 4  => $"[color={NeutralShade}]{text}[/color]",
+        < 8  => $"[color=#AAAAAA]{text}[/color]",
+        < 12 => $"[color=#CCCCCC]{text}[/color]",
         _    => text,
     };
 
     // Three shades per direction: light, medium, heavy. Chosen by significance score.
-    private static readonly string[] BadShades  = { "#886860", "#B07840", "#E07840" };
-    private static readonly string[] GoodShades = { "#507878", "#409090", "#30D0C0" };
+    // NeutralShade is used when significance is below threshold — dimmer than even the faintest shade.
+    private const           string   NeutralShade = "#909090";
+    private static readonly string[] BadShades    = { "#A07870", "#B07840", "#E07840" };
+    private static readonly string[] GoodShades   = { "#608888", "#409090", "#30D0C0" };
 
     /// <summary>
     /// Combined significance score in [0,1]: tanh(k × N × |pct − baseline|).
@@ -329,30 +331,34 @@ internal static class TooltipHelper
         => Math.Tanh(0.0025 * n * Math.Abs(pct - baseline));
 
     /// <summary>Maps a significance score to a shade index 0–2, or -1 for no colour.</summary>
-    private static int SigLevel(double sig) => sig switch { < 0.15 => -1, < 0.40 => 0, < 0.65 => 1, _ => 2 };
+    private static int SigLevel(double sig) => sig switch { < 0.25 => -1, < 0.40 => 0, < 0.65 => 1, _ => 2 };
 
     /// <summary>
-    /// Colours text by win-rate significance (baseline 50%).
+    /// Colours text by win-rate significance relative to a baseline (default 50%).
+    /// Pass the character's overall WR as the baseline so a card at 60% WR on a 65%-WR
+    /// character correctly shows orange rather than teal.
     /// Direction (orange vs teal) comes from whether pct is above or below baseline;
     /// shade intensity comes from tanh(k × N × deviation) so both high deviation and
     /// high N push toward vivid colour.
     /// </summary>
-    internal static string ColWR(string text, double pct, int n)
+    internal static string ColWR(string text, double pct, int n, double baseline = 50.0)
     {
-        var level = SigLevel(Significance(pct, 50.0, n));
-        if (level < 0) return text;
-        return $"[color={(pct >= 50 ? GoodShades : BadShades)[level]}]{text}[/color]";
+        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        var level = SigLevel(Significance(pct, baseline, n));
+        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}[/color]";
     }
 
     /// <summary>
-    /// Colours text by pick-rate significance (baseline ~33% for 3-choice offers).
-    /// Same tanh significance model as ColWR.
+    /// Colours text by pick-rate significance relative to a baseline.
+    /// Baseline should be (1 - skipRate) / 3. Same tanh significance model as ColWR.
     /// </summary>
-    internal static string ColPR(string text, double pct, int n)
+    internal static string ColPR(string text, double pct, int n, double baseline = 100.0 / 3.0)
     {
-        var level = SigLevel(Significance(pct, 33.0, n));
-        if (level < 0) return text;
-        return $"[color={(pct >= 33 ? GoodShades : BadShades)[level]}]{text}[/color]";
+        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        var level = SigLevel(Significance(pct, baseline, n));
+        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}[/color]";
     }
 
     private static StyleBox BuildPanelStyle()

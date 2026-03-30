@@ -130,8 +130,15 @@ public static class RunParser
                         }
 
                         // Record a skip if a reward screen was shown but nothing was picked
-                        if (cardChoices.Count > 0 && !anyPicked)
-                            allChoices.Add((SkipId, true, context));
+                        if (cardChoices.Count > 0)
+                        {
+                            db.TotalRewardScreens++;
+                            if (!anyPicked)
+                            {
+                                db.TotalSkips++;
+                                allChoices.Add((SkipId, true, context));
+                            }
+                        }
                     }
 
                     var relicChoices = playerStats?["relic_choices"]?.AsArray();
@@ -209,6 +216,11 @@ public static class RunParser
             stat.RunsPresent++;
             if (won) stat.RunsWon++;
         }
+
+        // Character-level run/win counts — used as the WR baseline in tooltips
+        var charStat = db.GetOrCreateCharacter(character, gameMode);
+        charStat.Runs++;
+        if (won) charStat.Wins++;
     }
 
     private static List<string> GetHistoryDirectories()

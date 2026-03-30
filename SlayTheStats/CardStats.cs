@@ -38,18 +38,28 @@ public readonly record struct RunContext(string Character, int Ascension, int Ac
     }
 }
 
+/// <summary>Total runs played and won for a character+gameMode combination.</summary>
+public class CharacterStat
+{
+    [JsonPropertyName("runs")] public int Runs { get; set; }
+    [JsonPropertyName("wins")] public int Wins { get; set; }
+}
+
 /// <summary>
 /// Full stats database, keyed by card ID (e.g. "CARD.STRIKE_R") or "SKIP",
 /// then by RunContext key (e.g. "CHARACTER.IRONCLAD|0|1").
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.0.10";
+    public const string CurrentModVersion = "v0.0.12"; // bumped: adds reward screen counters for dynamic pick-rate baseline
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
-    [JsonPropertyName("cards")]  public Dictionary<string, Dictionary<string, CardStat>>  Cards  { get; set; } = new();
-    [JsonPropertyName("relics")] public Dictionary<string, Dictionary<string, RelicStat>> Relics { get; set; } = new();
+    [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();
+    [JsonPropertyName("relics")]     public Dictionary<string, Dictionary<string, RelicStat>> Relics     { get; set; } = new();
+    [JsonPropertyName("characters")] public Dictionary<string, CharacterStat>                 Characters { get; set; } = new();
     [JsonPropertyName("processed_runs")] public HashSet<string> ProcessedRuns { get; set; } = new();
+    [JsonPropertyName("total_reward_screens")] public int TotalRewardScreens { get; set; }
+    [JsonPropertyName("total_skips")]          public int TotalSkips          { get; set; }
 
     public static StatsDb Load(string path, Action<string>? warn = null)
     {
@@ -94,7 +104,21 @@ public class StatsDb
     {
         Cards.Clear();
         Relics.Clear();
+        Characters.Clear();
         ProcessedRuns.Clear();
+        TotalRewardScreens = 0;
+        TotalSkips         = 0;
+    }
+
+    public CharacterStat GetOrCreateCharacter(string character, string gameMode)
+    {
+        var key = $"{character}|{gameMode}";
+        if (!Characters.TryGetValue(key, out var stat))
+        {
+            stat = new CharacterStat();
+            Characters[key] = stat;
+        }
+        return stat;
     }
 
     public RelicStat GetOrCreateRelic(string relicId, RunContext context)

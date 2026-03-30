@@ -56,7 +56,7 @@
     <PropertyGroup>
         <!-- Diasble architecture mismatch warning; mods are ideally built for all platforms (MSIL)
              while your local StS2 version will be for your specific platform. -->
-        <NoWarn>$(NoWarn);MSB3270</NoWarn> 
+        <NoWarn>$(NoWarn);MSB3270;STS002</NoWarn>
     </PropertyGroup>
 
     <ItemGroup Condition="Exists('$(Sts2DataDir)')" >
@@ -108,7 +108,7 @@
                 Condition="'$(Sts2DataDir)' == '' or !Exists('$(Sts2DataDir)')" />
         <Warning
                 Text=" Godot not found at path '$(GodotPath)' - .pck export will be skipped"
-                Condition="'$(GodotPath)' == '' or !Exists('$(GodotPath)')" />
+                Condition="'$(IsLinux)' != 'true' and ('$(GodotPath)' == '' or !Exists('$(GodotPath)'))" />
     </Target>
 
     <Target Name="CopyToModsFolderOnBuild" AfterTargets="PostBuildEvent">
