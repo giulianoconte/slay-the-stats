@@ -208,8 +208,9 @@ public static class CardHoverShowPatch
     internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null)
     {
         var sb = new StringBuilder();
-        // Columns: Act(3)  Picks(5)  Pick%(5)  Win%(4)
-        sb.Append("Act  Picks  Pick%  Win%\n");
+        // Columns: Act(3)  Picks(7)  Pick%(5)  Win%(4)
+        // Picks shows RunsPresent/RunsOffered, e.g. "12/30"
+        sb.Append("Act    Picks  Pick%  Win%\n");
 
         int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
 
@@ -230,7 +231,8 @@ public static class CardHoverShowPatch
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
                 // Pick% significance uses RunsOffered (total trials), not RunsPicked (successes).
-                var cPicks = TooltipHelper.ColN($"{stat.RunsPicked,5}", stat.RunsPicked);
+                var picks  = $"{stat.RunsPresent}/{stat.RunsOffered}";
+                var cPicks = TooltipHelper.ColN($"{picks,7}", stat.RunsPresent);
                 var cPr    = prPct >= 0 ? TooltipHelper.ColPR($"{pr,5}", prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
                 var cWr    = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
 
@@ -238,16 +240,17 @@ public static class CardHoverShowPatch
             }
             else
             {
-                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]{"-",5}  {"-",5}  {"-",4}[/color]\n");
+                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]{"-",7}  {"-",5}  {"-",4}[/color]\n");
             }
         }
 
         // Total row — aggregated across all acts
-        var totPrPct = totOffered > 0 ? 100.0 * totPicked  / totOffered : -1;
-        var totWrPct = totPresent > 0 ? 100.0 * totWon     / totPresent : -1;
-        var totPr    = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
-        var totWr    = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var cTotPicks = TooltipHelper.ColN($"{totPicked,5}", totPicked / 3);
+        var totPrPct  = totOffered > 0 ? 100.0 * totPicked  / totOffered : -1;
+        var totWrPct  = totPresent > 0 ? 100.0 * totWon     / totPresent : -1;
+        var totPr     = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
+        var totWr     = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
+        var totPicks  = $"{totPresent}/{totOffered}";
+        var cTotPicks = TooltipHelper.ColN($"{totPicks,7}", totPresent / 3);
         var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,5}", totPrPct, totOffered / 3, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
