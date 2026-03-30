@@ -437,9 +437,17 @@ internal static class TooltipHelper
         p.CustomMinimumSize = new Vector2(TooltipWidth, 0);
 
         int sep = textContainer.GetThemeConstant("separation");
-        p.Position = new Vector2(
-            textContainer.GlobalPosition.X,
-            textContainer.GlobalPosition.Y + textContainer.Size.Y + sep);
+        float x = textContainer.GlobalPosition.X;
+        // When a card is near the right edge, the game repositions its own tooltips leftward
+        // automatically. Cards with no native tooltips don't trigger that logic, so
+        // textHoverTipContainer may sit at a position that would push our panel off-screen.
+        // Clamp to the viewport so our panel never overflows the right (or left) edge.
+        var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        if (x + TooltipWidth > viewportSize.X)
+            x = viewportSize.X - TooltipWidth;
+        if (x < 0) x = 0;
+
+        p.Position = new Vector2(x, textContainer.GlobalPosition.Y + textContainer.Size.Y + sep);
     }
 
     internal static Node? FindNodeByTypeName(Node? node, string typeName)
@@ -471,7 +479,33 @@ public partial class SlayTheStatsPositionFollower : Node
         var textContainer = tipSet?.GetNodeOrNull<Container>("textHoverTipContainer");
         if (textContainer == null) return;
 
-        TooltipHelper.UpdatePanelPosition(p, textContainer);
+        if (textContainer.GetChildCount() > 0)
+        {
+            // Game has repositioned textHoverTipContainer beside the card — follow it.
+            TooltipHelper.UpdatePanelPosition(p, textContainer);
+        }
+        else
+        {
+            // No native tooltips: textHoverTipContainer was not repositioned by the game.
+            // Follow it every frame (so the panel scrolls with the card), but flip horizontally
+            // when near the right edge instead of clamping — clamping would push the panel
+            // back on top of the card; flipping moves it to the opposite side.
+            p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
+            int sep = textContainer.GetThemeConstant("separation");
+            var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+            float x = textContainer.GlobalPosition.X;
+            // When the card is near the right edge the game repositions textContainer to the
+            // card's LEFT edge (even though it has no children). When the card is on the left,
+            // textContainer is at the card's RIGHT edge. Detect which case we're in by whether
+            // textContainer is in the right or left half of the screen.
+            if (x > viewportSize.X * 0.5f)
+            {
+                // textContainer.X = card left edge → place panel to its left (panel right = card left)
+                x -= TooltipHelper.TooltipWidth;
+            }
+            x = Math.Max(0, x);
+            p.Position = new Vector2(x, textContainer.GlobalPosition.Y + sep);
+        }
 
         var shadow = TooltipHelper.GetShadowPublic();
         if (shadow != null)

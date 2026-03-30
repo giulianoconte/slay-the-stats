@@ -40,27 +40,29 @@ public static class CardHoverShowPatch
                          : MainFile.Db.Cards.ContainsKey(rawId)                    ? rawId
                          : null;
 
+            // Derive character context first — needed for contextual "no data" messages
+            // regardless of whether the card has stats data.
+            var character = CurrentCharacter ?? GetCharacterFromOwner(__instance);
+            if (character != null && CurrentCharacter == null)
+                CurrentCharacter = character;
+
+            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
+                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
+                : (int?)null;
+
             string statsText;
             if (lookupId == null)
             {
-                statsText = $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]";
+                statsText = NoDataText(character, maxAscension);
             }
             else
             {
-                var contextMap = GetContextMap(lookupId);
-                var character = CurrentCharacter ?? GetCharacterFromOwner(__instance);
-                if (character != null && CurrentCharacter == null)
-                    CurrentCharacter = character;
-
-                var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
-                    ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
-                    : (int?)null;
-
+                var contextMap       = GetContextMap(lookupId);
                 var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
                 var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var characterLabel   = character != null ? FormatCharacterName(character) : "All chars";
                 var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]" : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
+                statsText = actStats.Count == 0 ? NoDataText(character, maxAscension) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -83,6 +85,8 @@ public static class CardHoverShowPatch
     internal static Control? GetPanelPublic() => TooltipHelper.GetPanelPublic();
 
     internal static bool IsActiveHover() => _activeHolder != null;
+
+    internal static NCardHolder? ActiveHolder => _activeHolder;
 
     internal static void HideTooltip(NCardHolder? source = null)
     {
@@ -178,10 +182,29 @@ public static class CardHoverShowPatch
         catch { return null; }
     }
 
+    /// <summary>
+    /// "No data for A6 Ironclad" / "No data for Ironclad" / "No data for all characters"
+    /// depending on the current filter context.
+    /// </summary>
+    internal static string NoDataText(string? character, int? maxAscension)
+    {
+        string ctx;
+        if (character != null)
+        {
+            var name = FormatCharacterName(character);
+            ctx = maxAscension != null ? $"A{maxAscension} {name}" : name;
+        }
+        else
+        {
+            ctx = "all characters";
+        }
+        return $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data for {ctx}[/color][/font]";
+    }
+
     internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null)
     {
         var sb = new StringBuilder();
-        sb.Append("Act  Picks  Pick%  Win%\n");
+        sb.Append("Act   Runs   Run%  Win%\n");
 
         int totOffered = 0, totPicked = 0, totWon = 0;
 
@@ -193,21 +216,20 @@ public static class CardHoverShowPatch
                 totPicked  += stat.RunsPicked;
                 totWon     += stat.RunsWon;
 
-                var prPct   = stat.RunsOffered > 0 ? 100.0 * stat.RunsPicked / stat.RunsOffered : -1;
-                var wrPct   = stat.RunsPicked  > 0 ? 100.0 * stat.RunsWon    / stat.RunsPicked  : -1;
-                var pr      = prPct >= 0 ? $"{Math.Round(prPct):F0}%" : "-";
-                var wr      = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
-                var pickOff = $"{stat.RunsPicked}/{stat.RunsOffered}";
-
-                var pickN = stat.RunsPicked;
+                var prPct = stat.RunsOffered > 0 ? 100.0 * stat.RunsPicked / stat.RunsOffered : -1;
+                var wrPct = stat.RunsPicked  > 0 ? 100.0 * stat.RunsWon    / stat.RunsPicked  : -1;
+                var pr    = prPct >= 0 ? $"{Math.Round(prPct):F0}%" : "-";
+                var wr    = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
+                var runs  = $"{stat.RunsPicked}/{stat.RunsOffered}";
 
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
-                var cPickOff = TooltipHelper.ColN($"{pickOff,5}", pickN);
-                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, pickN, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{pr,4}[/color]";
-                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked, characterWR) : $"[color={TooltipHelper.NeutralShade}]{wr,4}[/color]";
+                // Run% significance uses RunsOffered (total trials), not RunsPicked (successes).
+                var cRuns = TooltipHelper.ColN($"{runs,5}", stat.RunsPicked);
+                var cPr   = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{pr,4}[/color]";
+                var cWr   = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked, characterWR) : $"[color={TooltipHelper.NeutralShade}]{wr,4}[/color]";
 
-                sb.Append($"{act,3}  {cPickOff}   {cPr}  {cWr}\n");
+                sb.Append($"{act,3}  {cRuns}   {cPr}  {cWr}\n");
             }
             else
             {
@@ -220,17 +242,16 @@ public static class CardHoverShowPatch
         var totWrPct   = totPicked  > 0 ? 100.0 * totWon    / totPicked  : -1;
         var totPr      = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var totPickOff = $"{totPicked}/{totOffered}";
-        var totPickN   = totPicked / 3;
-        var cTotPickOff = TooltipHelper.ColN($"{totPickOff,5}", totPickN);
-        var cTotPr      = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,4}", totPrPct, totPickN, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{totPr,4}[/color]";
-        var cTotWr      = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
-        sb.Append($"All  {cTotPickOff}   {cTotPr}  {cTotWr}");
+        var totRuns    = $"{totPicked}/{totOffered}";
+        var cTotRuns   = TooltipHelper.ColN($"{totRuns,5}", totPicked / 3);
+        var cTotPr     = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,4}", totPrPct, totOffered / 3, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{totPr,4}[/color]";
+        var cTotWr     = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
+        sb.Append($"All  {cTotRuns}   {cTotPr}  {cTotWr}");
 
         var ascPrefix = maxAscension != null ? $"A{maxAscension} " : "";
         var prBaseStr = $"{Math.Round(pickRateBaseline * 100):F0}%";
         var wrStr     = $"{Math.Round(characterWR):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font]");
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
 
         return sb.ToString();
     }
@@ -317,24 +338,25 @@ public static class InspectCardDisplayPatch
                          : MainFile.Db.Cards.ContainsKey(rawId)                    ? rawId
                          : null;
 
+            var character    = CardHoverShowPatch.CurrentCharacter;
+            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
+                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
+                : (int?)null;
+
             string statsText;
             if (lookupId == null)
             {
-                statsText = $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]";
+                statsText = CardHoverShowPatch.NoDataText(character, maxAscension);
             }
             else
             {
                 var contextMap       = CardHoverShowPatch.GetContextMap(lookupId);
-                var character        = CardHoverShowPatch.CurrentCharacter;
-                var maxAscension     = SlayTheStatsConfig.OnlyHighestWonAscension
-                    ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
-                    : (int?)null;
                 var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
                 var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var characterLabel   = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
                 var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
-                    ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]"
+                    ? CardHoverShowPatch.NoDataText(character, maxAscension)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
             }
 
