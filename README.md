@@ -1,46 +1,80 @@
 # SlayTheStats
 
-A Slay the Spire 2 mod that tracks card pick rates and win rates across runs, broken out by act, character, and ascension.
+TODO: image
 
-## Installation
+A Slay the Spire 2 mod that tracks card and relic stats across your runs.
+
+---
+
+## For Players
+
+### What It Does
+
+Every time you finish or abandon a run, SlayTheStats updates your personal stats:
+
+- **Pick%** — how often you pick a card when it's offered on a fight reward screen
+- **Win%** — how often you win runs that include a given card or relic
+- **N** — number of runs the card/relic appeared in (the sample size behind Win%)
+
+Stats are shown as a tooltip when you hover over cards and relics. Stats are broken out by act.
+
+**Color coding** helps you read the data at a glance:
+- Pick% and Win% numbers are highlighted when significant. Significance calculation is aware of sample-size, so stats with more evidence are given more significance.
+- A Color-blind setting is available.
+
+### Installation
 
 1. Install [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) in STS2
 2. Copy `SlayTheStats.dll` and `SlayTheStats.json` into your STS2 mods folder
 
-## How It Works
+### Understanding the Stats
 
-Stats are calculated in two situations:
-- **On startup** — if the mod version has changed since the last run, all run history is reprocessed
-- **After a run** — when you return to the main menu after finishing or abandoning a run
+**Pick%** is sourced only from fight reward scenes. Shop purchases, event cards, and other acquisition sources are not included in the pick rate calculation.
 
-Check the Godot log for `[SlayTheStats]` entries showing per-card stats tables.
+**Win%** counts all runs in which the card was present in your final deck, from any source.
 
-Log location:
+**Picks** is the number of runs where the card or relic was present.
+
+**Upgraded cards** (e.g. Tremble+) are tracked separately from each other. This can be changed in the settings.
+
+### Where Stats Are Saved
+
+Stats are stored in `slay-the-stats.json`:
+- **Windows:** `%APPDATA%\Slay the Spire 2\`
+- **Linux:** `~/.local/share/Slay the Spire 2/`
+
+On startup, if the mod version has changed since your last session, all run history is reprocessed to update stats.
+
+### Troubleshooting
+
+Check the Godot log for `[SlayTheStats]` entries:
 - **Windows:** `%APPDATA%\Godot\app_userdata\Slay the Spire 2\logs\godot.log`
 - **Linux:** `~/.local/share/godot/app_userdata/Slay the Spire 2/logs/godot.log`
 
-Stats are saved to `slay-the-stats.json` in:
-- **Windows:** `%APPDATA%\SlayTheSpire2\`
-- **Linux:** `~/.local/share/SlayTheSpire2\`
+---
 
-## Building from Source
+## For Modders / Developers
 
-Built on Linux, tested on Windows and Linux.
+### Tech Stack
+
+- **Language:** C# (.NET 9)
+- **Modding layer:** [GUMM](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) + [BaseLib](https://github.com/Alchyr/BaseLib-StS2) + HarmonyX
+- **Build target:** Godot 4 / STS2
 
 ### Prerequisites
 
 - [.NET 9.0 SDK](https://dot.net)
-- [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) installed in STS2
+- [GUMM](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) installed in STS2
 - `sts2.dll` and `0Harmony.dll` copied from your STS2 install into `SlayTheStats/libs/`
   - Windows path: `steamapps\common\Slay the Spire 2\`
-  - These are build references only and are not shipped with the mod
+  - These are build references only — not shipped with the mod
 
 ### Setup
 
 1. Copy `SlayTheStats/local.props.example` to `SlayTheStats/local.props`
 2. Set `ModsPath` to your STS2 mods directory
 
-Without `local.props`, build output is placed in `SlayTheStats/dist/` and you copy it to your mods folder manually.
+Without `local.props`, build output goes to `SlayTheStats/dist/` and you need to copy it manually.
 
 ### Building
 
@@ -48,7 +82,7 @@ Without `local.props`, build output is placed in `SlayTheStats/dist/` and you co
 ./deploy.sh
 ```
 
-This compiles the mod and copies the DLL and manifest to `ModsPath` (your mods folder if `local.props` is configured, otherwise `dist/`).
+Compiles the mod and copies the DLL and manifest to `ModsPath` (or `dist/` if not configured).
 
 ### Running Tests
 
@@ -57,9 +91,30 @@ cd SlayTheStats.Tests
 dotnet test
 ```
 
-## Resources
+### Project Structure
+
+| File | Purpose |
+|---|---|
+| `MainFile.cs` | Mod entry point — initializes Harmony, loads and processes the stats DB |
+| `RunParser.cs` | Parses `.run` save files from STS2 run history |
+| `StatsDb.cs` | In-memory stats database, serialized to `slay-the-stats.json` |
+| `StatsAggregator.cs` | Aggregates raw per-context stats into per-act totals for display |
+| `CardStats.cs` / `RelicStats.cs` | Data models for card and relic stat entries |
+| `CardStatsTooltipPatch.cs` | Harmony patches for card hover tooltips |
+| `RelicStatsTooltipPatch.cs` | Harmony patches for relic hover tooltips |
+| `TooltipHelper.cs` | Shared tooltip panel management |
+| `Patches.cs` | Additional Harmony patches (run-end hook, character tracking) |
+
+### How Stats Are Tracked
+
+Stats are keyed by a context string: `character|ascension|act|gameMode|buildVersion`. The DB is a flat dictionary of these composite keys to `CardStat` counters. This makes aggregation over any subset of dimensions a simple filter-and-sum pass.
+
+Run files (`.run`) are parsed from the STS2 run history directory. Each run is parsed once; already-processed runs are skipped. If the mod version changes, all runs are reprocessed from scratch.
+
+Pick rate is only incremented on fight reward screens (`card_choices` entries on monster/elite/boss floors). Shop inventory browsing, events, and other sources affect win rate only.
+
+### Resources
 
 - [STS2 Hello World mod guide](https://github.com/giulianoconte/slay-the-spire-2-mod-guide)
 - [Mod template](https://github.com/Alchyr/ModTemplate-StS2)
 - [BaseLib + wiki](https://github.com/Alchyr/BaseLib-StS2) / [wiki](https://alchyr.github.io/BaseLib-Wiki/)
-- Official Slay the Spire Discord
