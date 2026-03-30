@@ -60,6 +60,11 @@ public class StatsDb
     [JsonPropertyName("processed_runs")] public HashSet<string> ProcessedRuns { get; set; } = new();
     [JsonPropertyName("total_reward_screens")] public int TotalRewardScreens { get; set; }
     [JsonPropertyName("total_skips")]          public int TotalSkips          { get; set; }
+    /// <summary>
+    /// Highest ascension won per character (e.g. "CHARACTER.IRONCLAD" → 9).
+    /// Used by the OnlyHighestWonAscension config option to filter stats.
+    /// </summary>
+    [JsonPropertyName("highest_won_ascensions")] public Dictionary<string, int> HighestWonAscensions { get; set; } = new();
 
     public static StatsDb Load(string path, Action<string>? warn = null)
     {
@@ -108,6 +113,7 @@ public class StatsDb
         ProcessedRuns.Clear();
         TotalRewardScreens = 0;
         TotalSkips         = 0;
+        HighestWonAscensions.Clear();
     }
 
     public CharacterStat GetOrCreateCharacter(string character, string gameMode)

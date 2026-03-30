@@ -4,6 +4,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
+using MegaCrit.Sts2.Core.Nodes.Screens;
 
 namespace SlayTheStats;
 
@@ -46,16 +47,20 @@ public static class CardHoverShowPatch
             }
             else
             {
-                var contextMap = MainFile.Db.Cards[lookupId];
+                var contextMap = GetContextMap(lookupId);
                 var character = CurrentCharacter ?? GetCharacterFromOwner(__instance);
                 if (character != null && CurrentCharacter == null)
                     CurrentCharacter = character;
 
-                var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard");
+                var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
+                    ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
+                    : (int?)null;
+
+                var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
                 var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel   = character != null ? FormatCharacterName(character) : "All characters";
+                var characterLabel   = character != null ? FormatCharacterName(character) : "All chars";
                 var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]" : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel);
+                statsText = actStats.Count == 0 ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]" : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -88,7 +93,40 @@ public static class CardHoverShowPatch
         TooltipHelper.HideWithDelay();
     }
 
-    private static string FormatCharacterName(string character)
+    /// <summary>
+    /// Returns the context map for a card. When GroupCardUpgrades is enabled, merges the base
+    /// and upgraded versions (e.g. CARD.STRIKE_R and CARD.STRIKE_R+) into a single map by
+    /// summing their per-context counters.
+    /// </summary>
+    internal static Dictionary<string, CardStat> GetContextMap(string lookupId)
+    {
+        if (!SlayTheStatsConfig.GroupCardUpgrades)
+            return MainFile.Db.Cards[lookupId];
+
+        var pairedId = lookupId.EndsWith("+") ? lookupId[..^1] : lookupId + "+";
+        if (!MainFile.Db.Cards.TryGetValue(pairedId, out var pairedMap))
+            return MainFile.Db.Cards[lookupId];
+
+        var merged = new Dictionary<string, CardStat>(MainFile.Db.Cards[lookupId]);
+        foreach (var (key, stat) in pairedMap)
+        {
+            if (merged.TryGetValue(key, out var existing))
+                merged[key] = new CardStat
+                {
+                    Offered     = existing.Offered     + stat.Offered,
+                    Picked      = existing.Picked      + stat.Picked,
+                    Won         = existing.Won         + stat.Won,
+                    RunsOffered = existing.RunsOffered + stat.RunsOffered,
+                    RunsPicked  = existing.RunsPicked  + stat.RunsPicked,
+                    RunsWon     = existing.RunsWon     + stat.RunsWon,
+                };
+            else
+                merged[key] = stat;
+        }
+        return merged;
+    }
+
+    internal static string FormatCharacterName(string character)
     {
         var name = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
             ? character.Substring("CHARACTER.".Length)
@@ -140,7 +178,7 @@ public static class CardHoverShowPatch
         catch { return null; }
     }
 
-    private static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "all characters")
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null)
     {
         var sb = new StringBuilder();
         sb.Append("Act  Picks  Pick%  Win%\n");
@@ -189,8 +227,10 @@ public static class CardHoverShowPatch
         var cTotWr      = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
         sb.Append($"All  {cTotPickOff}   {cTotPr}  {cTotWr}");
 
-        var wrStr = $"{Math.Round(characterWR):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][color=#686868]{characterLabel} Win%: {wrStr}[/color][/font]");
+        var ascPrefix = maxAscension != null ? $"A{maxAscension} " : "";
+        var prBaseStr = $"{Math.Round(pickRateBaseline * 100):F0}%";
+        var wrStr     = $"{Math.Round(characterWR):F0}%";
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font]");
 
         return sb.ToString();
     }
@@ -234,5 +274,98 @@ public static class ClearCurrentCharacterPatch
     static void Prefix()
     {
         CardHoverShowPatch.CurrentCharacter = null;
+    }
+}
+
+/// <summary>
+/// Shows card stats in the inspect screen (opened by right-clicking a card on a reward/shop screen).
+/// NInspectCardScreen.UpdateCardDisplay fires whenever the displayed card changes (on open, on
+/// left/right navigation, and on upgrade-toggle). We re-derive the card ID from _card.Model
+/// with the same reflection chain used for hovering, so no duplicate logic is needed.
+/// </summary>
+[HarmonyPatch(typeof(NInspectCardScreen), "UpdateCardDisplay")]
+public static class InspectCardDisplayPatch
+{
+    private static bool _warnedOnce;
+
+    static void Postfix(NInspectCardScreen __instance)
+    {
+        try
+        {
+            TooltipHelper.EnsurePanelExists();
+
+            // _card is a private NCard field on NInspectCardScreen.
+            var card  = AccessTools.Field(typeof(NInspectCardScreen), "_card")?.GetValue(__instance);
+            if (card == null) return;
+            var model = AccessTools.Property(card.GetType(), "Model")?.GetValue(card);
+            if (model == null) return;
+            var id    = AccessTools.Property(model.GetType(), "Id")?.GetValue(model);
+            if (id == null) return;
+            var rawId = AccessTools.Field(id.GetType(), "Entry")?.GetValue(id) as string
+                     ?? AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string
+                     ?? id.ToString();
+            if (rawId == null) return;
+
+            var upgradeLevel = AccessTools.Property(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
+                            ?? AccessTools.Field(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
+                            ?? 0;
+            var suffix = upgradeLevel > 0 ? "+" : "";
+
+            var lookupId = MainFile.Db.Cards.ContainsKey("CARD." + rawId + suffix) ? "CARD." + rawId + suffix
+                         : MainFile.Db.Cards.ContainsKey("CARD." + rawId)          ? "CARD." + rawId
+                         : MainFile.Db.Cards.ContainsKey(rawId + suffix)           ? rawId + suffix
+                         : MainFile.Db.Cards.ContainsKey(rawId)                    ? rawId
+                         : null;
+
+            string statsText;
+            if (lookupId == null)
+            {
+                statsText = $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]";
+            }
+            else
+            {
+                var contextMap       = CardHoverShowPatch.GetContextMap(lookupId);
+                var character        = CardHoverShowPatch.CurrentCharacter;
+                var maxAscension     = SlayTheStatsConfig.OnlyHighestWonAscension
+                    ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
+                    : (int?)null;
+                var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
+                var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
+                var characterLabel   = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
+                var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
+                statsText = actStats.Count == 0
+                    ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]"
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
+            }
+
+            TooltipHelper.TrySceneTheftOnce();
+            TooltipHelper.InspectActive = true;
+            TooltipHelper.ShowPanel(statsText);
+        }
+        catch (Exception e)
+        {
+            if (!_warnedOnce)
+            {
+                MainFile.Logger.Warn($"SlayTheStats: inspect tooltip unavailable — {e.Message}");
+                _warnedOnce = true;
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Hides the stats panel when the inspect screen closes.
+/// </summary>
+[HarmonyPatch(typeof(NInspectCardScreen), "Close")]
+public static class InspectCardClosePatch
+{
+    static void Postfix()
+    {
+        try
+        {
+            TooltipHelper.InspectActive = false;
+            CardHoverShowPatch.HideTooltip();
+        }
+        catch { }
     }
 }

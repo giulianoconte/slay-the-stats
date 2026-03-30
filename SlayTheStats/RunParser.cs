@@ -220,7 +220,12 @@ public static class RunParser
         // Character-level run/win counts — used as the WR baseline in tooltips
         var charStat = db.GetOrCreateCharacter(character, gameMode);
         charStat.Runs++;
-        if (won) charStat.Wins++;
+        if (won)
+        {
+            charStat.Wins++;
+            if (!db.HighestWonAscensions.TryGetValue(character, out var prev) || ascension > prev)
+                db.HighestWonAscensions[character] = ascension;
+        }
     }
 
     private static List<string> GetHistoryDirectories()

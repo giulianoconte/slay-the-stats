@@ -27,18 +27,21 @@ internal static class TooltipHelper
         Normal = ResourceLoader.Load<Font>("res://themes/kreon_regular_glyph_space_one.tres"),
     };
 
-    private static bool      _headerStyleApplied;
-    private static bool      _tableStyleApplied;
-    private static StyleBox? _stolenPanelStyle;
-    private static Control?  _panel;
-    private static bool      _followerInjected;
+    private static bool           _headerStyleApplied;
+    private static bool           _tableStyleApplied;
+    private static StyleBox?      _stolenPanelStyle;
+    private static Control?       _panel;
+    private static NinePatchRect? _shadow;
+    private static bool           _followerInjected;
 
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
-    internal const float TooltipWidth = 348f;
+    internal const float TooltipWidth  = 348f;
+    internal const float ShadowOffset  = 8f;
 
     internal static bool FontStealConnected;
     internal static bool HasActiveHover;
+    internal static bool InspectActive;
     internal static int  ShowGen;
     private  static bool _sceneTheftDone;
 
@@ -81,13 +84,32 @@ internal static class TooltipHelper
         // brick-red (negative) tooltips — "data" reads cool and analytical.
         // SelfModulate only affects the panel's own draw (background stylebox), not child labels.
         panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+        // High ZIndex ensures the panel renders above card nodes regardless of scene tree order.
+        panel.ZIndex = 100;
         _panel = panel;
         _headerStyleApplied = false;
         _tableStyleApplied  = false;
+
+        // Shadow: same texture as the tooltip, dark-modulated, offset ShadowOffset px down-right.
+        // NinePatchRect gives the same rounded-corner shape as the tooltip itself.
+        var shadow = new NinePatchRect();
+        shadow.Name              = "SlayTheStatsTooltipShadow";
+        shadow.Texture           = ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
+        shadow.PatchMarginLeft   = 55;
+        shadow.PatchMarginRight  = 91;
+        shadow.PatchMarginTop    = 43;
+        shadow.PatchMarginBottom = 32;
+        shadow.Modulate          = new Color(0f, 0f, 0f, 0.25098f);
+        shadow.ZIndex            = 99;
+        shadow.Visible           = false;
+        _shadow = shadow;
     }
 
     internal static Control? GetPanelPublic() =>
         _panel != null && GodotObject.IsInstanceValid(_panel) ? _panel : null;
+
+    internal static NinePatchRect? GetShadowPublic() =>
+        _shadow != null && GodotObject.IsInstanceValid(_shadow) ? _shadow : null;
 
     /// <summary>
     /// Increments ShowGen (cancels any pending hide timers), sets panel text, attaches to root,
@@ -128,6 +150,12 @@ internal static class TooltipHelper
             root?.AddChild(panel);
         }
 
+        if (_shadow != null && GodotObject.IsInstanceValid(_shadow) && _shadow.GetParent() != root)
+        {
+            _shadow.GetParent()?.RemoveChild(_shadow);
+            root?.AddChild(_shadow);
+        }
+
         if (!_followerInjected)
         {
             _followerInjected = true;
@@ -135,6 +163,7 @@ internal static class TooltipHelper
             root?.AddChild(follower);
         }
 
+        if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = true;
         panel.Visible = true;
     }
 
@@ -150,9 +179,10 @@ internal static class TooltipHelper
 
         timer.Timeout += () =>
         {
-            if (ShowGen != genAtHide || HasActiveHover) return;
+            if (ShowGen != genAtHide || HasActiveHover || InspectActive) return;
             var node = GetPanelPublic();
             if (node != null) node.Visible = false;
+            if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
         };
     }
 
@@ -204,6 +234,8 @@ internal static class TooltipHelper
 
             var bg            = panel.GetNodeOrNull<NinePatchRect>("Bg");
             var textContainer = panel.GetNodeOrNull<MarginContainer>("TextContainer");
+
+
             var tex           = bg?.Texture as Texture2D ?? ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
             if (tex != null)
             {
@@ -319,9 +351,18 @@ internal static class TooltipHelper
 
     // Three shades per direction: light, medium, heavy. Chosen by significance score.
     // NeutralShade is used when significance is below threshold — dimmer than even the faintest shade.
-    internal const          string   NeutralShade = "#909090";
-    private static readonly string[] BadShades    = { "#A07870", "#B07840", "#E07840" };
-    private static readonly string[] GoodShades   = { "#608888", "#409090", "#30D0C0" };
+    internal const string NeutralShade = "#909090";
+
+    // Color-blind palette: teal (good) / orange (bad) — distinguishable without red/green.
+    private static readonly string[] _cbBadShades  = { "#A07870", "#B07840", "#E07840" };
+    private static readonly string[] _cbGoodShades = { "#608888", "#409090", "#30D0C0" };
+
+    // Normal palette: green (good) / red (bad).
+    private static readonly string[] _normalBadShades  = { "#A06868", "#C04040", "#E82020" };
+    private static readonly string[] _normalGoodShades = { "#68A068", "#40C040", "#20E820" };
+
+    private static string[] BadShades  => SlayTheStatsConfig.ColorBlindMode ? _cbBadShades  : _normalBadShades;
+    private static string[] GoodShades => SlayTheStatsConfig.ColorBlindMode ? _cbGoodShades : _normalGoodShades;
 
     /// <summary>
     /// Combined significance score in [0,1]: tanh(k × N × |pct − baseline|).
@@ -431,6 +472,13 @@ public partial class SlayTheStatsPositionFollower : Node
         if (textContainer == null) return;
 
         TooltipHelper.UpdatePanelPosition(p, textContainer);
+
+        var shadow = TooltipHelper.GetShadowPublic();
+        if (shadow != null)
+        {
+            shadow.Position = p.Position + new Vector2(TooltipHelper.ShadowOffset, TooltipHelper.ShadowOffset);
+            shadow.Size     = p.Size;
+        }
 
         // For relics whose card tip is positioned BELOW the text container (SetAlignmentForRelic),
         // push the card container further down to make room for our panel.

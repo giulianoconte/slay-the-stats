@@ -82,8 +82,12 @@ internal static class RelicHoverHelper
             }
             else
             {
+                var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
+                    ? StatsAggregator.GetHighestWonAscension(MainFile.Db, CardHoverShowPatch.CurrentCharacter)
+                    : (int?)null;
+
                 var actStats = StatsAggregator.AggregateRelicsByAct(
-                    MainFile.Db.Relics[lookupId], character: null, gameMode: "standard");
+                    MainFile.Db.Relics[lookupId], character: null, gameMode: "standard", onlyAscension: maxAscension);
                 var character = CardHoverShowPatch.CurrentCharacter;
                 var wrBaseline = character != null
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, character)

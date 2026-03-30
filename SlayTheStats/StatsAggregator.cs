@@ -7,17 +7,18 @@ public static class StatsAggregator
     /// summing across all characters, ascensions, game modes, and build versions.
     /// </summary>
     public static Dictionary<int, CardStat> AggregateByAct(Dictionary<string, CardStat> contextMap)
-        => AggregateByAct(contextMap, character: null, gameMode: null);
+        => AggregateByAct(contextMap, character: null, gameMode: null, onlyAscension: null);
 
     /// <summary>
     /// Aggregates a card's per-context stats into per-act totals,
-    /// optionally filtering by character and/or game mode.
-    /// Pass null to skip that filter.
+    /// optionally filtering by character, game mode, and/or max ascension.
+    /// Pass null to skip a filter.
     /// </summary>
     public static Dictionary<int, CardStat> AggregateByAct(
         Dictionary<string, CardStat> contextMap,
         string? character,
-        string? gameMode = "standard")
+        string? gameMode = "standard",
+        int? onlyAscension = null)
     {
         var result = new Dictionary<int, CardStat>();
 
@@ -26,6 +27,7 @@ public static class StatsAggregator
             var ctx = RunContext.Parse(key);
             if (character != null && ctx.Character != character) continue;
             if (gameMode != null && ctx.GameMode != gameMode) continue;
+            if (onlyAscension != null && ctx.Ascension != onlyAscension) continue;
 
             if (!result.TryGetValue(ctx.Act, out var agg))
             {
@@ -85,14 +87,57 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Returns the highest ascension won for a character, or null if they have no wins.
+    /// Reads from HighestWonAscensions first (O(1)); falls back to scanning card context maps
+    /// for data recorded before that field was introduced.
+    /// </summary>
+    /// <summary>
+    /// Returns the highest ascension won for a character, or null if they have no wins.
+    /// When character is null, returns the max across all characters (for use in the compendium
+    /// where no character context is available).
+    /// Reads from HighestWonAscensions first (O(1)); falls back to scanning card context maps
+    /// for data recorded before that field was introduced.
+    /// </summary>
+    public static int? GetHighestWonAscension(StatsDb db, string? character)
+    {
+        // Fast path: populated by RunParser going forward
+        if (character != null)
+        {
+            if (db.HighestWonAscensions.TryGetValue(character, out var asc))
+                return asc;
+        }
+        else if (db.HighestWonAscensions.Count > 0)
+        {
+            return db.HighestWonAscensions.Values.Max();
+        }
+
+        // Fallback: derive from card context maps for older data.
+        // character == null means no filter — take the global max.
+        int? maxAsc = null;
+        foreach (var contextMap in db.Cards.Values)
+        {
+            foreach (var (key, stat) in contextMap)
+            {
+                if (stat.RunsWon == 0) continue;
+                var ctx = RunContext.Parse(key);
+                if (character != null && ctx.Character != character) continue;
+                if (maxAsc == null || ctx.Ascension > maxAsc)
+                    maxAsc = ctx.Ascension;
+            }
+        }
+        return maxAsc;
+    }
+
+    /// <summary>
     /// Aggregates a relic's per-context stats into per-act totals,
-    /// optionally filtering by character and/or game mode.
-    /// Pass null to skip that filter.
+    /// optionally filtering by character, game mode, and/or max ascension.
+    /// Pass null to skip a filter.
     /// </summary>
     public static Dictionary<int, RelicStat> AggregateRelicsByAct(
         Dictionary<string, RelicStat> contextMap,
         string? character,
-        string? gameMode = "standard")
+        string? gameMode = "standard",
+        int? onlyAscension = null)
     {
         var result = new Dictionary<int, RelicStat>();
 
@@ -101,6 +146,7 @@ public static class StatsAggregator
             var ctx = RunContext.Parse(key);
             if (character != null && ctx.Character != character) continue;
             if (gameMode != null && ctx.GameMode != gameMode) continue;
+            if (onlyAscension != null && ctx.Ascension != onlyAscension) continue;
 
             if (!result.TryGetValue(ctx.Act, out var agg))
             {
