@@ -93,36 +93,101 @@ public class RunParserTests : IDisposable
         Assert.Equal(1, skip.RunsPicked);
     }
 
-    // --- Win/loss attribution ---
+    // --- Win/loss attribution (presence-based) ---
 
     [Fact]
-    public void WinningRun_IncrementsRunsWon()
+    public void WinningRun_IncrementsRunsWonAndRunsPresent()
     {
         var db = new StatsDb();
         var path = TempRun(Build(won: true, acts:
         [[
             [new("CARD.STRIKE", Picked: true)]
-        ]]));
+        ]], deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1)]));
 
         RunParser.ProcessRun(path, "run1", db);
 
         var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        Assert.Equal(1, stat.RunsPresent);
         Assert.Equal(1, stat.RunsWon);
     }
 
     [Fact]
-    public void LosingRun_DoesNotIncrementRunsWon()
+    public void LosingRun_IncrementsRunsPresentButNotRunsWon()
     {
         var db = new StatsDb();
         var path = TempRun(Build(won: false, acts:
         [[
             [new("CARD.STRIKE", Picked: true)]
-        ]]));
+        ]], deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1)]));
 
         RunParser.ProcessRun(path, "run1", db);
 
         var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        Assert.Equal(1, stat.RunsPresent);
         Assert.Equal(0, stat.RunsWon);
+    }
+
+    [Fact]
+    public void StarterCard_NotPickedFromReward_TrackedByPresence()
+    {
+        var db = new StatsDb();
+        var path = TempRun(Build(
+            won: true,
+            deck: [new DeckCard("CARD.STRIKE_IRONCLAD", FloorAdded: 1)]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        var stat = db.Cards["CARD.STRIKE_IRONCLAD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        Assert.Equal(1, stat.RunsPresent);
+        Assert.Equal(1, stat.RunsWon);
+        Assert.Equal(0, stat.RunsOffered);
+        Assert.Equal(0, stat.RunsPicked);
+    }
+
+    [Fact]
+    public void MultipleCopiesInDeck_RunsPresentDeduplicated()
+    {
+        var db = new StatsDb();
+        // Two copies of the same card, both in act 1 — should only count as RunsPresent=1
+        var path = TempRun(Build(
+            acts: [[[new("CARD.STRIKE", Picked: false)], [new("CARD.STRIKE", Picked: false)]]],
+            deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1), new DeckCard("CARD.STRIKE", FloorAdded: 2)]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        Assert.Equal(1, stat.RunsPresent);
+    }
+
+    [Fact]
+    public void DeckCard_ActDerivedFromFloor()
+    {
+        var db = new StatsDb();
+        // Act 1 has 2 floors; card at floor 3 falls in act 2
+        var path = TempRun(Build(
+            acts: [
+                [[new("CARD.DEFEND", Picked: false)], [new("CARD.DEFEND", Picked: false)]],
+                [[new("CARD.STRIKE", Picked: true)]]
+            ],
+            deck: [new DeckCard("CARD.STRIKE", FloorAdded: 3)]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
+        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
+    }
+
+    [Fact]
+    public void UpgradedCardInDeck_TrackedWithPlusSuffix()
+    {
+        var db = new StatsDb();
+        var path = TempRun(Build(
+            deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1, UpgradeLevel: 1)]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        Assert.True(db.Cards.ContainsKey("CARD.STRIKE+"));
+        Assert.Equal(1, db.Cards["CARD.STRIKE+"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"].RunsPresent);
     }
 
     // --- Abandoned runs ---

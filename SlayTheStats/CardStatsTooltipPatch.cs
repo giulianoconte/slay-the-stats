@@ -88,6 +88,9 @@ public static class CardHoverShowPatch
 
     internal static NCardHolder? ActiveHolder => _activeHolder;
 
+    /// <summary>Returns the active holder cast to Control for layout purposes, or null if unavailable.</summary>
+    internal static Control? ActiveHolderControl => _activeHolder as Control;
+
     internal static void HideTooltip(NCardHolder? source = null)
     {
         if (source != null && source != _activeHolder) return;
@@ -122,6 +125,7 @@ public static class CardHoverShowPatch
                     Won         = existing.Won         + stat.Won,
                     RunsOffered = existing.RunsOffered + stat.RunsOffered,
                     RunsPicked  = existing.RunsPicked  + stat.RunsPicked,
+                    RunsPresent = existing.RunsPresent + stat.RunsPresent,
                     RunsWon     = existing.RunsWon     + stat.RunsWon,
                 };
             else
@@ -204,9 +208,10 @@ public static class CardHoverShowPatch
     internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null)
     {
         var sb = new StringBuilder();
-        sb.Append("Act   Runs   Run%  Win%\n");
+        // Columns: Act(3)  Picks(5)  Pick%(5)  Win%(4)
+        sb.Append("Act  Picks  Pick%  Win%\n");
 
-        int totOffered = 0, totPicked = 0, totWon = 0;
+        int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
 
         for (int act = 1; act <= 3; act++)
         {
@@ -214,42 +219,41 @@ public static class CardHoverShowPatch
             {
                 totOffered += stat.RunsOffered;
                 totPicked  += stat.RunsPicked;
+                totPresent += stat.RunsPresent;
                 totWon     += stat.RunsWon;
 
                 var prPct = stat.RunsOffered > 0 ? 100.0 * stat.RunsPicked / stat.RunsOffered : -1;
-                var wrPct = stat.RunsPicked  > 0 ? 100.0 * stat.RunsWon    / stat.RunsPicked  : -1;
+                var wrPct = stat.RunsPresent > 0 ? 100.0 * stat.RunsWon    / stat.RunsPresent : -1;
                 var pr    = prPct >= 0 ? $"{Math.Round(prPct):F0}%" : "-";
                 var wr    = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
-                var runs  = $"{stat.RunsPicked}/{stat.RunsOffered}";
 
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
-                // Run% significance uses RunsOffered (total trials), not RunsPicked (successes).
-                var cRuns = TooltipHelper.ColN($"{runs,5}", stat.RunsPicked);
-                var cPr   = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{pr,4}[/color]";
-                var cWr   = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked, characterWR) : $"[color={TooltipHelper.NeutralShade}]{wr,4}[/color]";
+                // Pick% significance uses RunsOffered (total trials), not RunsPicked (successes).
+                var cPicks = TooltipHelper.ColN($"{stat.RunsPicked,5}", stat.RunsPicked);
+                var cPr    = prPct >= 0 ? TooltipHelper.ColPR($"{pr,5}", prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
+                var cWr    = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
 
-                sb.Append($"{act,3}  {cRuns}   {cPr}  {cWr}\n");
+                sb.Append($"{act,3}  {cPicks}  {cPr}  {cWr}\n");
             }
             else
             {
-                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]    -      -     -[/color]\n");
+                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]{"-",5}  {"-",5}  {"-",4}[/color]\n");
             }
         }
 
         // Total row — aggregated across all acts
-        var totPrPct   = totOffered > 0 ? 100.0 * totPicked / totOffered : -1;
-        var totWrPct   = totPicked  > 0 ? 100.0 * totWon    / totPicked  : -1;
-        var totPr      = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
-        var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var totRuns    = $"{totPicked}/{totOffered}";
-        var cTotRuns   = TooltipHelper.ColN($"{totRuns,5}", totPicked / 3);
-        var cTotPr     = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,4}", totPrPct, totOffered / 3, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{totPr,4}[/color]";
-        var cTotWr     = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
-        sb.Append($"All  {cTotRuns}   {cTotPr}  {cTotWr}");
+        var totPrPct = totOffered > 0 ? 100.0 * totPicked  / totOffered : -1;
+        var totWrPct = totPresent > 0 ? 100.0 * totWon     / totPresent : -1;
+        var totPr    = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
+        var totWr    = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
+        var cTotPicks = TooltipHelper.ColN($"{totPicked,5}", totPicked / 3);
+        var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,5}", totPrPct, totOffered / 3, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
+        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
+        sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
 
         var ascPrefix = maxAscension != null ? $"A{maxAscension} " : "";
-        var prBaseStr = $"{Math.Round(pickRateBaseline * 100):F0}%";
+        var prBaseStr = $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = $"{Math.Round(characterWR):F0}%";
         sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
 

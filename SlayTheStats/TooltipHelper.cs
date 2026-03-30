@@ -486,23 +486,34 @@ public partial class SlayTheStatsPositionFollower : Node
         }
         else
         {
-            // No native tooltips: textHoverTipContainer was not repositioned by the game.
-            // Follow it every frame (so the panel scrolls with the card), but flip horizontally
-            // when near the right edge instead of clamping — clamping would push the panel
-            // back on top of the card; flipping moves it to the opposite side.
+            // No native tooltips: the game still positions textContainer at the card's right
+            // edge (normal) or left edge (flipped, when card is near the right of the screen).
+            // textContainer.X is the correct placement anchor — use it directly.
+            // The only thing we need to decide is which side: use the card holder's actual
+            // right edge for an exact overflow check instead of the old midpoint heuristic,
+            // which misfired for cards in the middle-right area of the screen.
             p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
             int sep = textContainer.GetThemeConstant("separation");
             var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-            float x = textContainer.GlobalPosition.X;
-            // When the card is near the right edge the game repositions textContainer to the
-            // card's LEFT edge (even though it has no children). When the card is on the left,
-            // textContainer is at the card's RIGHT edge. Detect which case we're in by whether
-            // textContainer is in the right or left half of the screen.
-            if (x > viewportSize.X * 0.5f)
+            float tcX = textContainer.GlobalPosition.X;
+
+            bool flipToLeft;
+            var holder = CardHoverShowPatch.ActiveHolderControl;
+            if (holder != null && GodotObject.IsInstanceValid(holder))
             {
-                // textContainer.X = card left edge → place panel to its left (panel right = card left)
-                x -= TooltipHelper.TooltipWidth;
+                // Game flips when placing panel to the right of the card would overflow.
+                float cardRight = holder.GlobalPosition.X + holder.Size.X;
+                flipToLeft = cardRight + TooltipHelper.TooltipWidth > viewportSize.X;
             }
+            else
+            {
+                // Fallback: if textContainer (= card right edge when not flipped) + panel
+                // overflows, the game must have already flipped textContainer to the left edge.
+                flipToLeft = tcX + TooltipHelper.TooltipWidth > viewportSize.X;
+            }
+
+            // textContainer.X is at the card's right edge (no flip) or left edge (flip).
+            float x = flipToLeft ? tcX - TooltipHelper.TooltipWidth : tcX;
             x = Math.Max(0, x);
             p.Position = new Vector2(x, textContainer.GlobalPosition.Y + sep);
         }

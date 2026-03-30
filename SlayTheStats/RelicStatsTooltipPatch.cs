@@ -168,7 +168,8 @@ internal static class RelicHoverHelper
     private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0)
     {
         var sb = new StringBuilder();
-        sb.Append("Act Runs  Win%\n");
+        // Columns: Act(3)  Picks(5)  Win%(4)
+        sb.Append("Act Picks  Win%\n");
 
         int totPresent = 0, totWon = 0;
 
@@ -181,22 +182,22 @@ internal static class RelicHoverHelper
 
                 var wrPct = 100.0 * stat.RunsWon / stat.RunsPresent;
                 var wr    = $"{Math.Round(wrPct):F0}%";
-                var cRuns = TooltipHelper.ColN($"{stat.RunsPresent,3}", stat.RunsPresent);
+                var cRuns = TooltipHelper.ColN($"{stat.RunsPresent,5}", stat.RunsPresent);
                 var cWr   = TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, wrBaseline);
-                sb.Append($"{act,3}  {cRuns}  {cWr}\n");
+                sb.Append($"{act,3} {cRuns}  {cWr}\n");
             }
             else
             {
-                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]  -     -[/color]\n");
+                sb.Append($"{act,3} [color={TooltipHelper.NeutralShade}]{"-",5}  {"-",4}[/color]\n");
             }
         }
 
         // Total row — aggregated across all acts
         var totWrPct = totPresent > 0 ? 100.0 * totWon / totPresent : -1;
         var totWr    = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var cTotRuns = TooltipHelper.ColN($"{totPresent,3}", totPresent / 3);
-        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, wrBaseline) : $"{totWr,4}";
-        sb.Append($"All  {cTotRuns}  {cTotWr}");
+        var cTotRuns = TooltipHelper.ColN($"{totPresent,5}", totPresent / 3);
+        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
+        sb.Append($"All {cTotRuns}  {cTotWr}");
 
         return sb.ToString();
     }

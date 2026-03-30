@@ -40,6 +40,7 @@ public static class StatsAggregator
             agg.Won         += stat.Won;
             agg.RunsOffered += stat.RunsOffered;
             agg.RunsPicked  += stat.RunsPicked;
+            agg.RunsPresent += stat.RunsPresent;
             agg.RunsWon     += stat.RunsWon;
         }
 
@@ -75,15 +76,16 @@ public static class StatsAggregator
     }
 
     /// <summary>
-    /// Returns the expected pick rate for a single card, accounting for the skip option.
-    /// Baseline = (1 - skipRate) / 3, where skipRate = TotalSkips / TotalRewardScreens.
-    /// Falls back to 1/3 if no data.
+    /// Returns the expected pick rate for a single card as a percentage (0–100),
+    /// accounting for the skip option.
+    /// Baseline = (1 - skipRate) / 3 × 100, where skipRate = TotalSkips / TotalRewardScreens.
+    /// Falls back to 100/3 ≈ 33.3 if no data.
     /// </summary>
     public static double GetPickRateBaseline(StatsDb db)
     {
-        if (db.TotalRewardScreens == 0) return 1.0 / 3.0;
+        if (db.TotalRewardScreens == 0) return 100.0 / 3.0;
         var skipRate = (double)db.TotalSkips / db.TotalRewardScreens;
-        return (1.0 - skipRate) / 3.0;
+        return (1.0 - skipRate) / 3.0 * 100.0;
     }
 
     /// <summary>

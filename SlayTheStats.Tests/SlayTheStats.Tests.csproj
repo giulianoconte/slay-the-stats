@@ -19,6 +19,7 @@
   <!-- Compile source files directly to avoid pulling in the Godot SDK -->
   <ItemGroup>
     <Compile Include="../SlayTheStats/CardStats.cs" />
+    <Compile Include="../SlayTheStats/RelicStats.cs" />
     <Compile Include="../SlayTheStats/RunParser.cs" />
     <Compile Include="../SlayTheStats/StatsAggregator.cs" />
   </ItemGroup>

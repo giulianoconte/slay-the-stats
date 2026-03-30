@@ -98,6 +98,25 @@ public static class RunParser
             return;
         }
 
+        // Build cumulative floor counts per act so deck cards can be assigned an act
+        // based on their floor_added_to_deck value.
+        int cumulativeFloors = 0;
+        var actBoundaries = new List<int>(actArray.Count);
+        for (int i = 0; i < actArray.Count; i++)
+        {
+            cumulativeFloors += actArray[i]?.AsArray()?.Count ?? 0;
+            actBoundaries.Add(cumulativeFloors);
+        }
+
+        int FloorToAct(int floor)
+        {
+            for (int a = 0; a < actBoundaries.Count; a++)
+            {
+                if (floor <= actBoundaries[a]) return a + 1;
+            }
+            return Math.Max(1, actBoundaries.Count);
+        }
+
         for (int actIndex = 0; actIndex < actArray.Count; actIndex++)
         {
             var floors = actArray[actIndex]?.AsArray();
@@ -191,22 +210,39 @@ public static class RunParser
             if (wasPicked) pickedThisRun.Add((cardId, context.ToKey()));
         }
 
-        // Apply per-run counters
+        // Apply per-run fight-reward counters (Pick% stats)
         foreach (var (cardId, contextKey) in offeredThisRun)
             db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsOffered++;
 
         foreach (var (cardId, contextKey) in pickedThisRun)
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsPicked++;
+
+        // End-of-run presence pass: read players[0].deck and record RunsPresent/RunsWon
+        // for every card present in the final build, regardless of acquisition source.
+        var presenceThisRun = new HashSet<(string cardId, string contextKey)>();
+        var finalDeck = root["players"]?[0]?["deck"]?.AsArray();
+        if (finalDeck != null)
         {
-            var stat = db.GetOrCreate(cardId, RunContext.Parse(contextKey));
-            stat.RunsPicked++;
-            if (won) stat.RunsWon++;
+            foreach (var card in finalDeck)
+            {
+                var deckCardId = card?["id"]?.GetValue<string>();
+                if (deckCardId == null) continue;
+
+                var upgradeLevel = card?["current_upgrade_level"]?.GetValue<int>() ?? 0;
+                var cardKey = upgradeLevel > 0 ? deckCardId + "+" : deckCardId;
+
+                var floor = card?["floor_added_to_deck"]?.GetValue<int>() ?? 1;
+                var act   = FloorToAct(floor);
+                var ctx   = new RunContext(character, ascension, act, gameMode, buildVersion);
+                presenceThisRun.Add((cardKey, ctx.ToKey()));
+            }
         }
 
-        // Per-instance wins: count each picked card that was in a winning deck
-        if (won)
+        foreach (var (cardId, contextKey) in presenceThisRun)
         {
-            foreach (var (cardId, wasPicked, context) in allChoices)
-                if (wasPicked) db.GetOrCreate(cardId, context).Won++;
+            var stat = db.GetOrCreate(cardId, RunContext.Parse(contextKey));
+            stat.RunsPresent++;
+            if (won) stat.RunsWon++;
         }
 
         // Relic stats: one entry per acquired relic

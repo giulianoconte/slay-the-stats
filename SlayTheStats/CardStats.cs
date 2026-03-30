@@ -8,6 +8,8 @@ namespace SlayTheStats;
 /// Stats for a single card, tracked both per-instance and per-run.
 /// Per-instance: counts every occurrence (e.g. 2 copies of a card in a winning deck = 2 wins).
 /// Per-run: counts at most once per run regardless of copies.
+/// RunsPresent/RunsWon use end-of-run deck presence (all acquisition sources).
+/// RunsOffered/RunsPicked use fight-reward floor walk only (for Pick% stats).
 /// </summary>
 public class CardStat
 {
@@ -16,10 +18,13 @@ public class CardStat
     [JsonPropertyName("picked")] public int Picked { get; set; }
     [JsonPropertyName("won")] public int Won { get; set; }
 
-    // Per-run counters
+    // Per-run counters (Pick% — fight rewards only)
     [JsonPropertyName("runs_offered")] public int RunsOffered { get; set; }
     [JsonPropertyName("runs_picked")] public int RunsPicked { get; set; }
-    [JsonPropertyName("runs_won")] public int RunsWon { get; set; }
+
+    // Per-run counters (Win% — end-of-run deck presence, all acquisition sources)
+    [JsonPropertyName("runs_present")] public int RunsPresent { get; set; }
+    [JsonPropertyName("runs_won")]     public int RunsWon     { get; set; }
 }
 
 /// <summary>
@@ -51,7 +56,7 @@ public class CharacterStat
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.1.0";
+    public const string CurrentModVersion = "v0.1.0-2";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();

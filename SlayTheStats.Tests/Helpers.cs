@@ -7,12 +7,14 @@ public static class RunFixture
 {
     public record CardChoice(string Id, bool Picked, int UpgradeLevel = 0);
     public record RelicChoice(string Id, bool Picked);
+    public record DeckCard(string Id, int FloorAdded, int UpgradeLevel = 0);
 
     /// <summary>
     /// Each element of 'acts' is a list of reward screens for that act.
     /// Each reward screen is a list of card choices.
     /// 'relicActs' follows the same shape for relic choice screens.
     /// 'starterRelics' are placed in players[0].relics (the starter relic that has no floor event).
+    /// 'deck' is placed in players[0].deck (final deck at end of run, used for presence tracking).
     /// </summary>
     public static string Build(
         bool won = false,
@@ -23,7 +25,8 @@ public static class RunFixture
         string gameMode = "UNKNOWN",
         List<List<List<CardChoice>>>? acts = null,
         List<List<List<RelicChoice>>>? relicActs = null,
-        List<string>? starterRelics = null)
+        List<string>? starterRelics = null,
+        List<DeckCard>? deck = null)
     {
         acts ??= [];
         relicActs ??= [];
@@ -65,13 +68,20 @@ public static class RunFixture
         var relicsField = starterRelics is { Count: > 0 }
             ? $@", ""relics"": [{string.Join(",", starterRelics.Select(r => $@"{{""id"":""{r}""}}") )}]"
             : "";
+        var deckField = deck is { Count: > 0 }
+            ? $@", ""deck"": [{string.Join(",", deck.Select(c =>
+            {
+                var upgrade = c.UpgradeLevel > 0 ? $@", ""current_upgrade_level"": {c.UpgradeLevel}" : "";
+                return $@"{{""id"":""{c.Id}"", ""floor_added_to_deck"": {c.FloorAdded}{upgrade}}}";
+            }))}]"
+            : "";
 
         return $$"""
         {
             "was_abandoned": {{abandoned.ToString().ToLower()}},
             "win": {{won.ToString().ToLower()}},
             "ascension": {{ascension}},
-            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}"{{relicsField}} }],
+            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}"{{relicsField}}{{deckField}} }],
             "map_point_history": [{{actsJson}}]
         }
         """;
