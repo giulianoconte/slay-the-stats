@@ -308,12 +308,12 @@ internal static class TooltipHelper
         label.AddThemeConstantOverride("line_separation", Fonts.LineSep);
     }
 
-    /// <summary>Wraps text in a BBCode color tag based on sample size. Returns text unchanged for adequate N (12+).</summary>
+    /// <summary>Wraps text in a BBCode color tag based on sample size. Returns text unchanged for adequate N (16+).</summary>
     internal static string ColN(string text, int n) => n switch
     {
         < 4  => $"[color={NeutralShade}]{text}[/color]",
         < 8  => $"[color=#AAAAAA]{text}[/color]",
-        < 12 => $"[color=#CCCCCC]{text}[/color]",
+        < 16 => $"[color=#CCCCCC]{text}[/color]",
         _    => text,
     };
 
