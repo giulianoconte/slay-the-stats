@@ -354,22 +354,33 @@ internal static class TooltipHelper
     internal const string NeutralShade = "#909090";
 
     // Color-blind palette: teal (good) / orange (bad) — distinguishable without red/green.
-    private static readonly string[] _cbBadShades  = { "#A07870", "#B07840", "#E07840" };
-    private static readonly string[] _cbGoodShades = { "#608888", "#409090", "#30D0C0" };
+    private static readonly string[] _cbBadShades  = { "#A87850", "#B07840", "#E07840" };
+    private static readonly string[] _cbGoodShades = { "#508C8C", "#409090", "#30D0C0" };
 
-    // Normal palette: green (good) / red (bad).
-    private static readonly string[] _normalBadShades  = { "#A06868", "#C04040", "#E82020" };
-    private static readonly string[] _normalGoodShades = { "#68A068", "#40C040", "#20E820" };
+    // Normal palette: orange→red (bad) / lime→green (good).
+    // Level 0 uses orange/lime so faint signals read as "slightly off" rather than immediately red/green.
+    // Level-2 shades are intentionally below full saturation to avoid jarring vivid colors.
+    private static readonly string[] _normalBadShades  = { "#C07828", "#C04020", "#CC2828" };
+    private static readonly string[] _normalGoodShades = { "#88B840", "#40C040", "#28CC28" };
 
     private static string[] BadShades  => SlayTheStatsConfig.ColorBlindMode ? _cbBadShades  : _normalBadShades;
     private static string[] GoodShades => SlayTheStatsConfig.ColorBlindMode ? _cbGoodShades : _normalGoodShades;
 
+    // When true, appends the significance level (0=neutral, 1=light, 2=med, 3=strong) to ColWR/ColPR output.
+    internal const bool DebugColorLevels = true;
+
+    // k_win calibrated for Win%, where n = RunsPresent.
+    // k_pick = k_win * KPickFactor: Pick% uses RunsOffered as n, which is ~4× larger than
+    // RunsPresent for a ~25% pick-rate card. Since n ∝ 1/k in tanh(k × n × deviation),
+    // scaling k down by the same factor keeps the significance thresholds equivalent.
+    private const double KWin       = 0.0025;
+    private const double KPickFactor = 0.25;
+
     /// <summary>
     /// Combined significance score in [0,1]: tanh(k × N × |pct − baseline|).
-    /// k=0.0025 calibrated.
     /// </summary>
-    private static double Significance(double pct, double baseline, int n)
-        => Math.Tanh(0.0025 * n * Math.Abs(pct - baseline));
+    private static double Significance(double pct, double baseline, int n, double k)
+        => Math.Tanh(k * n * Math.Abs(pct - baseline));
 
     /// <summary>Maps a significance score to a shade index 0–2, or -1 for no colour.</summary>
     private static int SigLevel(double sig) => sig switch { < 0.25 => -1, < 0.40 => 0, < 0.65 => 1, _ => 2 };
@@ -384,22 +395,26 @@ internal static class TooltipHelper
     /// </summary>
     internal static string ColWR(string text, double pct, int n, double baseline = 50.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
-        var level = SigLevel(Significance(pct, baseline, n));
-        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
-        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}[/color]";
+        if (n <= 3) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
+        var level = SigLevel(Significance(pct, baseline, n, KWin));
+        if (level < 0) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
+        var dbg = DebugColorLevels ? $"{level + 1}" : "";
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}{dbg}[/color]";
     }
 
     /// <summary>
     /// Colours text by pick-rate significance relative to a baseline.
-    /// Baseline should be (1 - skipRate) / 3. Same tanh significance model as ColWR.
+    /// Baseline should be (1 - skipRate) / 3. Uses KWin * KPickFactor as k because
+    /// RunsOffered (the n for Pick%) is ~4× larger than RunsPresent (n for Win%),
+    /// so we scale k down proportionally to keep evidence thresholds equivalent.
     /// </summary>
     internal static string ColPR(string text, double pct, int n, double baseline = 100.0 / 3.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
-        var level = SigLevel(Significance(pct, baseline, n));
-        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
-        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}[/color]";
+        if (n <= 3) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
+        var level = SigLevel(Significance(pct, baseline, n, KWin * KPickFactor));
+        if (level < 0) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
+        var dbg = DebugColorLevels ? $"{level + 1}" : "";
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}{dbg}[/color]";
     }
 
     private static StyleBox BuildPanelStyle()
