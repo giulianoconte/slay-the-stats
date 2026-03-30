@@ -317,20 +317,19 @@ internal static class TooltipHelper
         _    => text,
     };
 
-    // Four shades per direction, faintest to most vivid. Chosen by significance score, not N bracket.
-    private static readonly string[] BadShades  = { "#7A5848", "#A07050", "#C08450", "#E07840" };
-    private static readonly string[] GoodShades = { "#508080", "#409090", "#30A8A0", "#30D0C0" };
+    // Three shades per direction: light, medium, heavy. Chosen by significance score.
+    private static readonly string[] BadShades  = { "#886860", "#B07840", "#E07840" };
+    private static readonly string[] GoodShades = { "#507878", "#409090", "#30D0C0" };
 
     /// <summary>
     /// Combined significance score in [0,1]: tanh(k × N × |pct − baseline|).
-    /// tanh gives a smooth curve that saturates at high N×deviation without blowing up.
-    /// k=0.004 calibrated so (N=1, 100% WR) ≈ very faint and (N=8, 70% WR) ≈ strong.
+    /// k=0.0025 calibrated.
     /// </summary>
     private static double Significance(double pct, double baseline, int n)
-        => Math.Tanh(0.004 * n * Math.Abs(pct - baseline));
+        => Math.Tanh(0.0025 * n * Math.Abs(pct - baseline));
 
-    /// <summary>Maps a significance score to a shade index 0–3, or -1 for no colour.</summary>
-    private static int SigLevel(double sig) => sig switch { < 0.15 => -1, < 0.30 => 0, < 0.50 => 1, < 0.75 => 2, _ => 3 };
+    /// <summary>Maps a significance score to a shade index 0–2, or -1 for no colour.</summary>
+    private static int SigLevel(double sig) => sig switch { < 0.15 => -1, < 0.40 => 0, < 0.65 => 1, _ => 2 };
 
     /// <summary>
     /// Colours text by win-rate significance (baseline 50%).
