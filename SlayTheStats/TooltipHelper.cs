@@ -113,7 +113,7 @@ internal static class TooltipHelper
 
         // When there is no data, fold the message into the header and hide the table label so the
         // panel collapses to a single line (VBoxContainer excludes invisible children from layout).
-        header.Text = $"[b]Stats[/b]                [color=#606060]SlayTheStats[/color]";
+        header.Text = $"[b]Stats[/b]                    [color=#606060]SlayTheStats[/color]";
         table.Text  = tableText;
         // The PanelContainer is placed freely in the root (not inside a layout), so it won't
         // auto-resize when child content changes height. ResetSize() on both labels and the panel
@@ -214,9 +214,9 @@ internal static class TooltipHelper
                 sb.TextureMarginTop    = bg?.PatchMarginTop    ?? 43f;
                 sb.TextureMarginBottom = bg?.PatchMarginBottom ?? 32f;
                 sb.ContentMarginLeft   = textContainer?.GetThemeConstant("margin_left")   ?? 22f;
-                sb.ContentMarginRight  = textContainer?.GetThemeConstant("margin_right")  ?? 45f;
+                sb.ContentMarginRight  = 0f;
                 sb.ContentMarginTop    = textContainer?.GetThemeConstant("margin_top")    ?? 16f;
-                sb.ContentMarginBottom = textContainer?.GetThemeConstant("margin_bottom") ?? 28f;
+                sb.ContentMarginBottom = 12f;
                 _stolenPanelStyle = sb;
             }
 
@@ -319,7 +319,7 @@ internal static class TooltipHelper
 
     // Three shades per direction: light, medium, heavy. Chosen by significance score.
     // NeutralShade is used when significance is below threshold — dimmer than even the faintest shade.
-    private const           string   NeutralShade = "#909090";
+    internal const          string   NeutralShade = "#909090";
     private static readonly string[] BadShades    = { "#A07870", "#B07840", "#E07840" };
     private static readonly string[] GoodShades   = { "#608888", "#409090", "#30D0C0" };
 
@@ -373,9 +373,9 @@ internal static class TooltipHelper
             sb.TextureMarginTop    = 43f;
             sb.TextureMarginBottom = 32f;
             sb.ContentMarginLeft   = 22f;
-            sb.ContentMarginRight  = 45f;
+            sb.ContentMarginRight  = 0f;
             sb.ContentMarginTop    = 16f;
-            sb.ContentMarginBottom = 28f;
+            sb.ContentMarginBottom = 12f;
             return sb;
         }
         var flat = new StyleBoxFlat();

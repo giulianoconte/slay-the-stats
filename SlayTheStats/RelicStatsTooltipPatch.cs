@@ -78,13 +78,17 @@ internal static class RelicHoverHelper
             string statsText;
             if (lookupId == null)
             {
-                statsText = "No data";
+                statsText = $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]";
             }
             else
             {
                 var actStats = StatsAggregator.AggregateRelicsByAct(
                     MainFile.Db.Relics[lookupId], character: null, gameMode: "standard");
-                statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats);
+                var character = CardHoverShowPatch.CurrentCharacter;
+                var wrBaseline = character != null
+                    ? StatsAggregator.GetCharacterWR(MainFile.Db, character)
+                    : StatsAggregator.GetGlobalWR(MainFile.Db);
+                statsText = actStats.Count == 0 ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]" : BuildStatsText(actStats, wrBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -157,7 +161,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0)
     {
         var sb = new StringBuilder();
         sb.Append("Act Runs  Win%\n");
@@ -174,12 +178,12 @@ internal static class RelicHoverHelper
                 var wrPct = 100.0 * stat.RunsWon / stat.RunsPresent;
                 var wr    = $"{Math.Round(wrPct):F0}%";
                 var cRuns = TooltipHelper.ColN($"{stat.RunsPresent,3}", stat.RunsPresent);
-                var cWr   = TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent);
+                var cWr   = TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, wrBaseline);
                 sb.Append($"{act,3}  {cRuns}  {cWr}\n");
             }
             else
             {
-                sb.Append($"{act,3}  [color=#909090]  -     -[/color]\n");
+                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]  -     -[/color]\n");
             }
         }
 
@@ -187,7 +191,7 @@ internal static class RelicHoverHelper
         var totWrPct = totPresent > 0 ? 100.0 * totWon / totPresent : -1;
         var totWr    = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
         var cTotRuns = TooltipHelper.ColN($"{totPresent,3}", totPresent / 3);
-        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3) : $"{totWr,4}";
+        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, wrBaseline) : $"{totWr,4}";
         sb.Append($"All  {cTotRuns}  {cTotWr}");
 
         return sb.ToString();

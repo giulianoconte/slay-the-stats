@@ -42,7 +42,7 @@ public static class CardHoverShowPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = "No data";
+                statsText = $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]";
             }
             else
             {
@@ -52,9 +52,10 @@ public static class CardHoverShowPatch
                     CurrentCharacter = character;
 
                 var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard");
-                var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : 50.0;
+                var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
+                var characterLabel   = character != null ? FormatCharacterName(character) : "All characters";
                 var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? "No data" : BuildStatsText(actStats, characterWR, pickRateBaseline);
+                statsText = actStats.Count == 0 ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]" : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -85,6 +86,14 @@ public static class CardHoverShowPatch
         _activeHolder = null;
         TooltipHelper.HasActiveHover = false;
         TooltipHelper.HideWithDelay();
+    }
+
+    private static string FormatCharacterName(string character)
+    {
+        var name = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+            ? character.Substring("CHARACTER.".Length)
+            : character;
+        return char.ToUpper(name[0]) + name.Substring(1).ToLower();
     }
 
     private static string? GetRawCardId(NCardHolder holder)
@@ -118,15 +127,20 @@ public static class CardHoverShowPatch
     {
         try
         {
-            var cardNode = AccessTools.Property(typeof(NCardHolder), "CardNode")?.GetValue(holder);
-            var model = cardNode != null ? AccessTools.Property(cardNode.GetType(), "Model")?.GetValue(cardNode) : null;
-            var owner = model != null ? AccessTools.Property(model.GetType(), "Owner")?.GetValue(model) : null;
-            return owner != null ? AccessTools.Property(owner.GetType(), "CharacterId")?.GetValue(owner) as string : null;
+            var cardNode  = AccessTools.Property(typeof(NCardHolder), "CardNode")?.GetValue(holder);
+            var model     = cardNode != null ? AccessTools.Property(cardNode.GetType(), "Model")?.GetValue(cardNode) : null;
+            var owner     = model != null ? AccessTools.Property(model.GetType(), "Owner")?.GetValue(model) : null;
+            var character = owner != null ? AccessTools.Property(owner.GetType(), "Character")?.GetValue(owner) : null;
+            var id        = character != null ? AccessTools.Property(character.GetType(), "Id")?.GetValue(character) : null;
+            if (id == null) return null;
+            var category = AccessTools.Property(id.GetType(), "Category")?.GetValue(id) as string;
+            var entry    = AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string;
+            return category != null && entry != null ? $"{category}.{entry}".ToUpper() : null;
         }
         catch { return null; }
     }
 
-    private static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0)
+    private static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "all characters")
     {
         var sb = new StringBuilder();
         sb.Append("Act  Picks  Pick%  Win%\n");
@@ -152,14 +166,14 @@ public static class CardHoverShowPatch
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
                 var cPickOff = TooltipHelper.ColN($"{pickOff,5}", pickN);
-                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, pickN, pickRateBaseline) : $"{pr,4}";
-                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked, characterWR) : $"{wr,4}";
+                var cPr      = prPct >= 0 ? TooltipHelper.ColPR($"{pr,4}", prPct, pickN, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{pr,4}[/color]";
+                var cWr      = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPicked, characterWR) : $"[color={TooltipHelper.NeutralShade}]{wr,4}[/color]";
 
                 sb.Append($"{act,3}  {cPickOff}   {cPr}  {cWr}\n");
             }
             else
             {
-                sb.Append($"{act,3}  [color=#909090]    -      -     -[/color]\n");
+                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]    -      -     -[/color]\n");
             }
         }
 
@@ -171,9 +185,12 @@ public static class CardHoverShowPatch
         var totPickOff = $"{totPicked}/{totOffered}";
         var totPickN   = totPicked / 3;
         var cTotPickOff = TooltipHelper.ColN($"{totPickOff,5}", totPickN);
-        var cTotPr      = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,4}", totPrPct, totPickN, pickRateBaseline) : $"{totPr,4}";
-        var cTotWr      = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"{totWr,4}";
+        var cTotPr      = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,4}", totPrPct, totPickN, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{totPr,4}[/color]";
+        var cTotWr      = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPicked / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
         sb.Append($"All  {cTotPickOff}   {cTotPr}  {cTotWr}");
+
+        var wrStr = $"{Math.Round(characterWR):F0}%";
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][color=#686868]{characterLabel} Win%: {wrStr}[/color][/font]");
 
         return sb.ToString();
     }

@@ -57,6 +57,22 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Returns the overall win-rate percentage across all characters in a given game mode,
+    /// or 50.0 as a neutral fallback if no data exists yet.
+    /// </summary>
+    public static double GetGlobalWR(StatsDb db, string gameMode = "standard")
+    {
+        int totalRuns = 0, totalWins = 0;
+        foreach (var (key, stat) in db.Characters)
+        {
+            if (!key.EndsWith("|" + gameMode)) continue;
+            totalRuns += stat.Runs;
+            totalWins += stat.Wins;
+        }
+        return totalRuns == 0 ? 50.0 : 100.0 * totalWins / totalRuns;
+    }
+
+    /// <summary>
     /// Returns the expected pick rate for a single card, accounting for the skip option.
     /// Baseline = (1 - skipRate) / 3, where skipRate = TotalSkips / TotalRewardScreens.
     /// Falls back to 1/3 if no data.
