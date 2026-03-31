@@ -195,8 +195,8 @@ internal static class RelicHoverHelper
         // Total row — aggregated across all acts
         var totWrPct = totPresent > 0 ? 100.0 * totWon / totPresent : -1;
         var totWr    = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var cTotRuns = TooltipHelper.ColN($"{totPresent,5}", totPresent / 3);
-        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
+        var cTotRuns = TooltipHelper.ColN($"{totPresent,5}", totPresent);
+        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
         sb.Append($"All {cTotRuns}  {cTotWr}");
 
         return sb.ToString();

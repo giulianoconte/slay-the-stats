@@ -36,6 +36,8 @@ public partial class MainFile : Node
         ModConfigRegistry.Register(ModId, config);
         ModConfigBridge.DeferredRegister();
 
+        TooltipHelper.TryLoadModFonts();
+
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
         RunParser.ProcessNewRuns(Db, SavePath, msg => Logger.Info(msg), msg => Logger.Warn(msg));
     }

@@ -34,6 +34,12 @@ internal static class TooltipHelper
     private static NinePatchRect? _shadow;
     private static bool           _followerInjected;
 
+    private static Font? _monoRegular;
+    private static Font? _monoBold;
+    private static bool  _modFontsLoaded;
+
+    internal static bool HasBoldFont => _monoBold != null;
+
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
     internal const float TooltipWidth  = 348f;
@@ -193,6 +199,45 @@ internal static class TooltipHelper
     }
 
     /// <summary>
+    /// Loads FiraMono regular and bold from the mod's own fonts/ directory.
+    /// Uses the DLL location so the path works regardless of where GDWeave is installed.
+    /// </summary>
+    internal static void TryLoadModFonts()
+    {
+        if (_modFontsLoaded) return;
+        _modFontsLoaded = true;
+        try
+        {
+            var modDir      = System.IO.Path.GetDirectoryName(
+                                  System.Reflection.Assembly.GetExecutingAssembly().Location)!;
+            var regularPath = System.IO.Path.Combine(modDir, "fonts", "FiraMono-Regular.ttf");
+            var boldPath    = System.IO.Path.Combine(modDir, "fonts", "FiraMono-Medium.ttf");
+
+            if (System.IO.File.Exists(regularPath))
+            {
+                var ff = new FontFile();
+                ff.LoadDynamicFont(regularPath);
+                _monoRegular = ff;
+            }
+            if (System.IO.File.Exists(boldPath))
+            {
+                var ff = new FontFile();
+                ff.LoadDynamicFont(boldPath);
+                _monoBold = ff;
+            }
+
+            if (_monoRegular == null)
+                MainFile.Logger.Warn($"[SlayTheStats] FiraMono-Regular.ttf not found at {regularPath}");
+            if (_monoBold == null)
+                MainFile.Logger.Warn($"[SlayTheStats] FiraMono-Medium.ttf not found at {boldPath}");
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] TryLoadModFonts failed: {e.Message}");
+        }
+    }
+
+    /// <summary>
     /// Loads hover_tip.tscn once to steal accurate font and margin values directly from the scene,
     /// then invalidates cached styles so they are reapplied on the next show.
     /// </summary>
@@ -331,8 +376,14 @@ internal static class TooltipHelper
     private static void ApplyTableStyle(RichTextLabel label)
     {
         label.AddThemeColorOverride("default_color", Fonts.Text);
-        var mono = ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
-        if (mono != null) label.AddThemeFontOverride("normal_font", mono);
+        // Prefer bundled FiraMono; fall back to the game's SourceCodePro (no bold variant).
+        var normal = _monoRegular ?? ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
+        if (normal != null) label.AddThemeFontOverride("normal_font", normal);
+        if (_monoBold != null)
+        {
+            label.AddThemeFontOverride("bold_font", _monoBold);
+            label.AddThemeFontSizeOverride("bold_font_size", 20);
+        }
         label.AddThemeFontSizeOverride("normal_font_size", 20); // smaller than header to fit 4-col table within panel width
         label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
@@ -340,13 +391,12 @@ internal static class TooltipHelper
         label.AddThemeConstantOverride("line_separation", Fonts.LineSep);
     }
 
-    /// <summary>Wraps text in a BBCode color tag based on sample size. Returns text unchanged for adequate N (16+).</summary>
+    /// <summary>Wraps text in a BBCode color tag based on sample size. Bolds at n≥16 when bold font is loaded.</summary>
     internal static string ColN(string text, int n) => n switch
     {
-        < 4  => $"[color={NeutralShade}]{text}[/color]",
-        < 8  => $"[color=#AAAAAA]{text}[/color]",
-        < 16 => $"[color=#CCCCCC]{text}[/color]",
-        _    => text,
+        < 8  => $"[color={NeutralShade}]{text}[/color]",
+        < 16 => $"[color=#E4E4E4]{text}[/color]",
+        _    => HasBoldFont ? $"[b]{text}[/b]" : text,
     };
 
     // Three shades per direction: light, medium, heavy. Chosen by significance score.
@@ -354,8 +404,8 @@ internal static class TooltipHelper
     internal const string NeutralShade = "#909090";
 
     // Color-blind palette: teal (good) / orange (bad) — distinguishable without red/green.
-    private static readonly string[] _cbBadShades  = { "#A87850", "#B07840", "#E07840" };
-    private static readonly string[] _cbGoodShades = { "#508C8C", "#409090", "#30D0C0" };
+    private static readonly string[] _cbBadShades  = { "#A87850", "#D86828", "#F06020" };
+    private static readonly string[] _cbGoodShades = { "#508C8C", "#30B8B0", "#20E0D0" };
 
     // Normal palette: orange→red (bad) / lime→green (good).
     // Level 0 uses orange/lime so faint signals read as "slightly off" rather than immediately red/green.
@@ -365,9 +415,6 @@ internal static class TooltipHelper
 
     private static string[] BadShades  => SlayTheStatsConfig.ColorBlindMode ? _cbBadShades  : _normalBadShades;
     private static string[] GoodShades => SlayTheStatsConfig.ColorBlindMode ? _cbGoodShades : _normalGoodShades;
-
-    // When true, appends the significance level (0=neutral, 1=light, 2=med, 3=strong) to ColWR/ColPR output.
-    internal const bool DebugColorLevels = true;
 
     // k_win calibrated for Win%, where n = RunsPresent.
     // k_pick = k_win * KPickFactor: Pick% uses RunsOffered as n, which is ~4× larger than
@@ -395,11 +442,11 @@ internal static class TooltipHelper
     /// </summary>
     internal static string ColWR(string text, double pct, int n, double baseline = 50.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
+        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
         var level = SigLevel(Significance(pct, baseline, n, KWin));
-        if (level < 0) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
-        var dbg = DebugColorLevels ? $"{level + 1}" : "";
-        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}{dbg}[/color]";
+        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
+        var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{inner}[/color]";
     }
 
     /// <summary>
@@ -410,11 +457,11 @@ internal static class TooltipHelper
     /// </summary>
     internal static string ColPR(string text, double pct, int n, double baseline = 100.0 / 3.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
+        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
         var level = SigLevel(Significance(pct, baseline, n, KWin * KPickFactor));
-        if (level < 0) return $"[color={NeutralShade}]{text}{(DebugColorLevels ? "0" : "")}[/color]";
-        var dbg = DebugColorLevels ? $"{level + 1}" : "";
-        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{text}{dbg}[/color]";
+        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
+        var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{inner}[/color]";
     }
 
     private static StyleBox BuildPanelStyle()

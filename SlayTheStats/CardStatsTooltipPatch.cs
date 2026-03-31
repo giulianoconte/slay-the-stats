@@ -231,8 +231,12 @@ public static class CardHoverShowPatch
                 // Pad before wrapping in color tags — BBCode tags are invisible to layout but
                 // would break fixed-width padding if included in the format string width.
                 // Pick% significance uses RunsOffered (total trials), not RunsPicked (successes).
-                var picks  = $"{stat.RunsPresent}/{stat.RunsOffered}";
-                var cPicks = TooltipHelper.ColN($"{picks,7}", stat.RunsPresent);
+                // Picks: numerator colored by ColN (bold if strong), /denominator always neutral.
+                var numStr = $"{stat.RunsPresent}";
+                var denStr = $"{stat.RunsOffered}";
+                var cPicks = $"{new string(' ', Math.Max(0, 7 - numStr.Length - 1 - denStr.Length))}"
+                           + $"{TooltipHelper.ColN(numStr, stat.RunsPresent)}"
+                           + $"[color={TooltipHelper.NeutralShade}]/{denStr}[/color]";
                 var cPr    = prPct >= 0 ? TooltipHelper.ColPR($"{pr,5}", prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
                 var cWr    = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
 
@@ -249,10 +253,13 @@ public static class CardHoverShowPatch
         var totWrPct  = totPresent > 0 ? 100.0 * totWon     / totPresent : -1;
         var totPr     = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
         var totWr     = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var totPicks  = $"{totPresent}/{totOffered}";
-        var cTotPicks = TooltipHelper.ColN($"{totPicks,7}", totPresent / 3);
-        var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,5}", totPrPct, totOffered / 3, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
-        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent / 3, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
+        var totNumStr  = $"{totPresent}";
+        var totDenStr  = $"{totOffered}";
+        var cTotPicks  = $"{new string(' ', Math.Max(0, 7 - totNumStr.Length - 1 - totDenStr.Length))}"
+                       + $"{TooltipHelper.ColN(totNumStr, totPresent)}"
+                       + $"[color={TooltipHelper.NeutralShade}]/{totDenStr}[/color]";
+        var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,5}", totPrPct, totOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
+        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
 
         var ascPrefix = maxAscension != null ? $"A{maxAscension} " : "";
