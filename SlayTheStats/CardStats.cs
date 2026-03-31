@@ -25,6 +25,10 @@ public class CardStat
     // Per-run counters (Win% — end-of-run deck presence, all acquisition sources)
     [JsonPropertyName("runs_present")] public int RunsPresent { get; set; }
     [JsonPropertyName("runs_won")]     public int RunsWon     { get; set; }
+
+    // Per-run counters (Shop% — shop appearances and purchases)
+    [JsonPropertyName("runs_shop_seen")]   public int RunsShopSeen   { get; set; }
+    [JsonPropertyName("runs_shop_bought")] public int RunsShopBought { get; set; }
 }
 
 /// <summary>
@@ -60,7 +64,7 @@ public class CharacterStat
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.1.0-2";
+    public const string CurrentModVersion = "v0.1.0-6";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();
@@ -74,7 +78,6 @@ public class StatsDb
     /// Used by the OnlyHighestWonAscension config option to filter stats.
     /// </summary>
     [JsonPropertyName("highest_won_ascensions")] public Dictionary<string, int> HighestWonAscensions { get; set; } = new();
-
     public static StatsDb Load(string path, Action<string>? warn = null)
     {
         try

@@ -9,4 +9,8 @@ public class RelicStat
 {
     [JsonPropertyName("runs_present")] public int RunsPresent { get; set; }
     [JsonPropertyName("runs_won")]    public int RunsWon     { get; set; }
+
+    // Per-run counters (Shop% — shop appearances and purchases)
+    [JsonPropertyName("runs_shop_seen")]   public int RunsShopSeen   { get; set; }
+    [JsonPropertyName("runs_shop_bought")] public int RunsShopBought { get; set; }
 }

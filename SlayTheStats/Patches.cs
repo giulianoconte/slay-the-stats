@@ -1,9 +1,33 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using MegaCrit.Sts2.Core.Runs;
 using System.Reflection;
 
 namespace SlayTheStats;
+
+/// <summary>
+/// Extracts "CATEGORY.ENTRY" from a CharacterModel instance via reflection.
+/// Returns null if the chain is missing or throws.
+/// </summary>
+internal static class CharacterIdHelper
+{
+    internal static string? Extract(object? character)
+    {
+        if (character == null) return null;
+        var charId = character.GetType()
+            .GetProperty("Id", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(character);
+        if (charId == null) return null;
+        var category = charId.GetType()
+            .GetProperty("Category", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(charId) as string;
+        var entry = charId.GetType()
+            .GetProperty("Entry", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(charId) as string;
+        return category != null && entry != null ? $"{category}.{entry}".ToUpper() : null;
+    }
+}
 
 /// <summary>
 /// Triggers run parsing whenever the player returns to the main menu,
@@ -31,32 +55,43 @@ public static class StartRunPatch
         try
         {
             // NGame → Run → Player → Character → Id (all via reflection — types may change)
-            var run = __instance.GetType()
-                .GetProperty("Run", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(__instance);
-            if (run == null) return;
-
-            var player = run.GetType()
-                .GetProperty("Player", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(run);
-            if (player == null) return;
-
-            var character = player.GetType()
-                .GetProperty("Character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(player);
-            if (character == null) return;
-
-            var id = character.GetType()
-                .GetProperty("Id", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(character) as string;
+            var run       = __instance.GetType().GetProperty("Run", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance);
+            var player    = run?.GetType().GetProperty("Player", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(run);
+            var character = player?.GetType().GetProperty("Character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(player);
+            var id        = CharacterIdHelper.Extract(character);
             if (id == null) return;
-
             CardHoverShowPatch.CurrentCharacter = id;
             MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}'");
         }
         catch (Exception e)
         {
             MainFile.Logger.Warn($"[SlayTheStats] StartRun reflection failed: {e.Message}");
+        }
+    }
+}
+
+/// <summary>
+/// Sets the current run character when a saved run is loaded (Continue button, or returning
+/// from a boss chest screen). LoadRun fires in all cases where StartRun does not — the two
+/// together cover every path into a run.
+/// </summary>
+[HarmonyPatch(typeof(NGame), "LoadRun")]
+public static class LoadRunPatch
+{
+    static void Prefix(RunState runState)
+    {
+        try
+        {
+            var players = runState?.Players;
+            if (players == null || players.Count == 0) return;
+            var id = CharacterIdHelper.Extract(players[0].Character);
+            if (id == null) return;
+            CardHoverShowPatch.CurrentCharacter = id;
+            MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}'");
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] LoadRun reflection failed: {e.Message}");
         }
     }
 }

@@ -91,6 +91,12 @@ public static class RunParser
         var relicsAcquired = new List<(string relicId, RunContext context)>();
         var relicsSeenInFloors = new HashSet<string>();
 
+        // Per-run shop tracking (deduplicated per item+context)
+        var shopSeenThisRun        = new HashSet<(string id, string contextKey)>();
+        var shopBoughtThisRun      = new HashSet<(string id, string contextKey)>();
+        var relicShopSeenThisRun   = new HashSet<(string id, string contextKey)>();
+        var relicShopBoughtThisRun = new HashSet<(string id, string contextKey)>();
+
         var actArray = root["map_point_history"]?.AsArray();
         if (actArray == null)
         {
@@ -126,6 +132,10 @@ public static class RunParser
 
             foreach (var floor in floors)
             {
+                var mapPointType = floor?["map_point_type"]?.GetValue<string>();
+                bool isShop        = mapPointType == "shop";
+                bool isFightReward = mapPointType == "monster" || mapPointType == "elite" || mapPointType == "boss";
+
                 var playerStatsArr = floor?["player_stats"]?.AsArray();
                 if (playerStatsArr == null) continue;
 
@@ -134,28 +144,71 @@ public static class RunParser
                     var cardChoices = playerStats?["card_choices"]?.AsArray();
                     if (cardChoices != null)
                     {
-                        bool anyPicked = false;
-                        foreach (var choice in cardChoices)
+                        if (isFightReward)
                         {
-                            var cardId = choice?["card"]?["id"]?.GetValue<string>();
-                            if (cardId == null) continue;
+                            // Fight reward screen (monster/elite/boss): track for Pick% stats
+                            bool anyPicked = false;
+                            foreach (var choice in cardChoices)
+                            {
+                                var cardId = choice?["card"]?["id"]?.GetValue<string>();
+                                if (cardId == null) continue;
 
-                            var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
-                            var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
+                                var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
+                                var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
 
-                            bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
-                            allChoices.Add((cardKey, wasPicked, context));
-                            if (wasPicked) anyPicked = true;
+                                bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
+                                allChoices.Add((cardKey, wasPicked, context));
+                                if (wasPicked) anyPicked = true;
+                            }
+
+                            // Record a skip if a reward screen was shown but nothing was picked
+                            if (cardChoices.Count > 0)
+                            {
+                                db.TotalRewardScreens++;
+                                if (!anyPicked)
+                                {
+                                    db.TotalSkips++;
+                                    allChoices.Add((SkipId, true, context));
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Shop floor: card_choices lists the shop inventory; track for Shop% seen
+                            foreach (var choice in cardChoices)
+                            {
+                                var cardId = choice?["card"]?["id"]?.GetValue<string>();
+                                if (cardId == null) continue;
+                                var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
+                                var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
+                                shopSeenThisRun.Add((cardKey, context.ToKey()));
+                            }
+                        }
+                    }
+
+                    if (isShop)
+                    {
+                        // cards_gained on shop floors = purchased cards (no upgrade level available)
+                        var cardsGained = playerStats?["cards_gained"]?.AsArray();
+                        if (cardsGained != null)
+                        {
+                            foreach (var card in cardsGained)
+                            {
+                                var cardId = card?["id"]?.GetValue<string>();
+                                if (cardId != null)
+                                    shopBoughtThisRun.Add((cardId, context.ToKey()));
+                            }
                         }
 
-                        // Record a skip if a reward screen was shown but nothing was picked
-                        if (cardChoices.Count > 0)
+                        // bought_relics = purchased relics
+                        var boughtRelics = playerStats?["bought_relics"]?.AsArray();
+                        if (boughtRelics != null)
                         {
-                            db.TotalRewardScreens++;
-                            if (!anyPicked)
+                            foreach (var entry in boughtRelics)
                             {
-                                db.TotalSkips++;
-                                allChoices.Add((SkipId, true, context));
+                                var relicId = entry?.GetValue<string>();
+                                if (relicId != null)
+                                    relicShopBoughtThisRun.Add((relicId, context.ToKey()));
                             }
                         }
                     }
@@ -173,6 +226,10 @@ public static class RunParser
                             bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
                             if (wasPicked)
                                 relicsAcquired.Add((relicId, context));
+
+                            // Shop floor: relic_choices lists the shop's relic inventory
+                            if (isShop)
+                                relicShopSeenThisRun.Add((relicId, context.ToKey()));
                         }
                     }
                 }
@@ -244,6 +301,25 @@ public static class RunParser
             stat.RunsPresent++;
             if (won) stat.RunsWon++;
         }
+
+        // Enforce consistency: a purchased item must have been seen.
+        // Colorless cards sold from a special shop section appear in cards_gained but not in
+        // card_choices, so their seen entry is missing. Add it here so RunsShopBought ≤ RunsShopSeen.
+        foreach (var entry in shopBoughtThisRun)    shopSeenThisRun.Add(entry);
+        foreach (var entry in relicShopBoughtThisRun) relicShopSeenThisRun.Add(entry);
+
+        // Per-run shop counters
+        foreach (var (id, contextKey) in shopSeenThisRun)
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopSeen++;
+
+        foreach (var (id, contextKey) in shopBoughtThisRun)
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopBought++;
+
+        foreach (var (id, contextKey) in relicShopSeenThisRun)
+            db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopSeen++;
+
+        foreach (var (id, contextKey) in relicShopBoughtThisRun)
+            db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopBought++;
 
         // Relic stats: one entry per acquired relic
         foreach (var (relicId, context) in relicsAcquired)

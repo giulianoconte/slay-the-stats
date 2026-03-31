@@ -450,6 +450,19 @@ internal static class TooltipHelper
     }
 
     /// <summary>
+    /// Colours text by shop buy-rate significance relative to a baseline.
+    /// Uses KWin as k because RunsShopSeen is comparable in scale to RunsPresent.
+    /// </summary>
+    internal static string ColBuys(string text, double pct, int n, double baseline = 20.0)
+    {
+        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        var level = SigLevel(Significance(pct, baseline, n, KWin));
+        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
+        var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
+        return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{inner}[/color]";
+    }
+
+    /// <summary>
     /// Colours text by pick-rate significance relative to a baseline.
     /// Baseline should be (1 - skipRate) / 3. Uses KWin * KPickFactor as k because
     /// RunsOffered (the n for Pick%) is ~4× larger than RunsPresent (n for Win%),

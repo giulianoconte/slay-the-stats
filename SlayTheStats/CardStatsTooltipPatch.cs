@@ -1,10 +1,12 @@
 using System.Text;
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
 using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 
 namespace SlayTheStats;
 
@@ -59,12 +61,14 @@ public static class CardHoverShowPatch
             }
             else
             {
-                var contextMap       = GetContextMap(lookupId);
-                var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
-                var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel   = character != null ? FormatCharacterName(character) : "All chars";
-                var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? NoDataText(character, maxAscension) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
+                var showBuysLayout      = IsColorlessCard(__instance.CardModel);
+                var contextMap          = GetContextMap(lookupId);
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
+                var characterWR         = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
+                var characterLabel      = character != null ? FormatCharacterName(character) : "All chars";
+                var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
+                statsText = actStats.Count == 0 ? NoDataText(character, maxAscension) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension, showBuysLayout, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -122,18 +126,30 @@ public static class CardHoverShowPatch
             if (merged.TryGetValue(key, out var existing))
                 merged[key] = new CardStat
                 {
-                    Offered     = existing.Offered     + stat.Offered,
-                    Picked      = existing.Picked      + stat.Picked,
-                    Won         = existing.Won         + stat.Won,
-                    RunsOffered = existing.RunsOffered + stat.RunsOffered,
-                    RunsPicked  = existing.RunsPicked  + stat.RunsPicked,
-                    RunsPresent = existing.RunsPresent + stat.RunsPresent,
-                    RunsWon     = existing.RunsWon     + stat.RunsWon,
+                    Offered        = existing.Offered        + stat.Offered,
+                    Picked         = existing.Picked         + stat.Picked,
+                    Won            = existing.Won            + stat.Won,
+                    RunsOffered    = existing.RunsOffered    + stat.RunsOffered,
+                    RunsPicked     = existing.RunsPicked     + stat.RunsPicked,
+                    RunsPresent    = existing.RunsPresent    + stat.RunsPresent,
+                    RunsWon        = existing.RunsWon        + stat.RunsWon,
+                    RunsShopSeen   = existing.RunsShopSeen   + stat.RunsShopSeen,
+                    RunsShopBought = existing.RunsShopBought + stat.RunsShopBought,
                 };
             else
                 merged[key] = stat;
         }
         return merged;
+    }
+
+    /// <summary>
+    /// Returns true if this card should use the colorless layout (Buys column instead of Pick%).
+    /// Uses the game's own CardModel.Pool.IsColorless — authoritative and covers ColorlessCardPool,
+    /// EventCardPool, TokenCardPool, and DeprecatedCardPool.
+    /// </summary>
+    internal static bool IsColorlessCard(CardModel? model)
+    {
+        return model?.Pool?.IsColorless ?? false;
     }
 
     internal static string FormatCharacterName(string character)
@@ -216,12 +232,16 @@ public static class CardHoverShowPatch
         return $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data for {ctx}[/color][/font]";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0)
     {
         var sb = new StringBuilder();
-        // Columns: Act(3)  Picks(7)  Pick%(5)  Win%(4)
-        // Picks shows RunsPresent/RunsOffered, e.g. "12/30"
-        sb.Append("Act    Picks  Pick%  Win%\n");
+
+        if (showBuysLayout)
+            return BuildBuysStatsText(actStats, characterWR, characterLabel, maxAscension, shopBuyRateBaseline);
+
+        // Class card columns: Act(3)  Runs(7)  Pick%(5)  Win%(4)
+        // Runs shows RunsPresent/RunsOffered, e.g. "12/30"
+        sb.Append("Act     Runs  Pick%  Win%\n");
 
         int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
 
@@ -279,6 +299,78 @@ public static class CardHoverShowPatch
         sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Colorless card layout: Act | Runs | Buys | Win%
+    /// Runs shows RunsPresent only (no fight-reward denominator).
+    /// Buys shows RunsShopBought/RunsShopSeen (purchases / shop appearances).
+    /// Win% is placed last, consistent across all stat tables.
+    /// </summary>
+    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? maxAscension, double shopBuyRateBaseline)
+    {
+        var sb = new StringBuilder();
+        // Columns: Act(3)  Runs(5)  Buys(7)  Win%(4)
+        // "Buys" right-aligned in 7-char field: "   Buys"
+        sb.Append("Act  Runs     Buys  Win%\n");
+
+        int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
+
+        for (int act = 1; act <= 3; act++)
+        {
+            if (actStats.TryGetValue(act, out var stat) && (stat.RunsPresent > 0 || stat.RunsShopSeen > 0))
+            {
+                totPresent    += stat.RunsPresent;
+                totWon        += stat.RunsWon;
+                totShopSeen   += stat.RunsShopSeen;
+                totShopBought += stat.RunsShopBought;
+
+                var wrPct   = stat.RunsPresent  > 0 ? 100.0 * stat.RunsWon          / stat.RunsPresent  : -1;
+                var buysPct = stat.RunsShopSeen > 0 ? 100.0 * stat.RunsShopBought   / stat.RunsShopSeen : -1;
+                var wr      = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
+
+                var cPicks = TooltipHelper.ColN($"{stat.RunsPresent,5}", stat.RunsPresent);
+                var cBuys  = FormatBuysCell(stat.RunsShopBought, stat.RunsShopSeen, buysPct, shopBuyRateBaseline);
+                var cWr    = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
+
+                sb.Append($"{act,3} {cPicks}  {cBuys}  {cWr}\n");
+            }
+            else
+            {
+                sb.Append($"{act,3} [color={TooltipHelper.NeutralShade}]{"-",5}  {"-",7}  {"-",4}[/color]\n");
+            }
+        }
+
+        var totWrPct   = totPresent  > 0 ? 100.0 * totWon        / totPresent  : -1;
+        var totBuysPct = totShopSeen > 0 ? 100.0 * totShopBought / totShopSeen : -1;
+        var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
+
+        var cTotPicks = TooltipHelper.ColN($"{totPresent,5}", totPresent);
+        var cTotBuys  = FormatBuysCell(totShopBought, totShopSeen, totBuysPct, shopBuyRateBaseline);
+        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
+        sb.Append($"All {cTotPicks}  {cTotBuys}  {cTotWr}");
+
+        var ascPrefix    = maxAscension != null ? $"A{maxAscension} " : "";
+        var wrStr        = $"{Math.Round(characterWR):F0}%";
+        var buysBaseStr  = $"{Math.Round(shopBuyRateBaseline):F0}%";
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Buys: {buysBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats a Buys cell as "bought/seen" right-aligned in a 7-char visual field,
+    /// with the numerator colored by buy-rate significance. Returns neutral "-" when no data.
+    /// </summary>
+    internal static string FormatBuysCell(int bought, int seen, double pct, double baseline)
+    {
+        if (pct < 0)
+            return $"[color={TooltipHelper.NeutralShade}]{"-",7}[/color]";
+        var numStr = $"{bought}";
+        var denStr = $"{seen}";
+        return $"{new string(' ', Math.Max(0, 7 - numStr.Length - 1 - denStr.Length))}"
+             + $"{TooltipHelper.ColBuys(numStr, pct, seen, baseline)}"
+             + $"[color={TooltipHelper.NeutralShade}]/{denStr}[/color]";
     }
 }
 
@@ -385,14 +477,16 @@ public static class InspectCardDisplayPatch
             }
             else
             {
-                var contextMap       = CardHoverShowPatch.GetContextMap(lookupId);
-                var actStats         = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
-                var characterWR      = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel   = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
-                var pickRateBaseline = StatsAggregator.GetPickRateBaseline(MainFile.Db);
+                var showBuysLayout      = CardHoverShowPatch.IsColorlessCard(model as CardModel);
+                var contextMap          = CardHoverShowPatch.GetContextMap(lookupId);
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
+                var characterWR         = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
+                var characterLabel      = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
+                var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(character, maxAscension)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension);
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension, showBuysLayout, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -424,5 +518,83 @@ public static class InspectCardClosePatch
             CardHoverShowPatch.HideTooltip();
         }
         catch { }
+    }
+}
+
+/// <summary>
+/// Shows card stats when hovering a card in the shop. NMerchantCard extends NMerchantSlot
+/// and uses CreateHoverTip/ClearHoverTip rather than the NCardHolder.CreateHoverTips mechanism.
+/// </summary>
+[HarmonyPatch(typeof(NMerchantCard), "CreateHoverTip")]
+public static class MerchantCardCreateHoverTipPatch
+{
+    private static bool _warnedOnce;
+
+    static void Postfix(NMerchantCard __instance)
+    {
+        try
+        {
+            TooltipHelper.EnsurePanelExists();
+
+            // Get the card via the private _cardNode field (NCard?)
+            var cardNode = AccessTools.Field(typeof(NMerchantCard), "_cardNode")?.GetValue(__instance);
+            if (cardNode == null) return;
+
+            var model = AccessTools.Property(cardNode.GetType(), "Model")?.GetValue(cardNode);
+            if (model == null) return;
+
+            var id = AccessTools.Property(model.GetType(), "Id")?.GetValue(model);
+            if (id == null) return;
+
+            var rawId = AccessTools.Field(id.GetType(), "Entry")?.GetValue(id) as string
+                     ?? AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string
+                     ?? id.ToString();
+            if (rawId == null) return;
+
+            var upgradeLevel = AccessTools.Property(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
+                            ?? AccessTools.Field(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
+                            ?? 0;
+            var suffix = upgradeLevel > 0 ? "+" : "";
+
+            var lookupId = MainFile.Db.Cards.ContainsKey("CARD." + rawId + suffix) ? "CARD." + rawId + suffix
+                         : MainFile.Db.Cards.ContainsKey("CARD." + rawId)          ? "CARD." + rawId
+                         : MainFile.Db.Cards.ContainsKey(rawId + suffix)           ? rawId + suffix
+                         : MainFile.Db.Cards.ContainsKey(rawId)                    ? rawId
+                         : null;
+
+            var character    = CardHoverShowPatch.CurrentCharacter;
+            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
+                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
+                : (int?)null;
+
+            string statsText;
+            if (lookupId == null)
+            {
+                statsText = CardHoverShowPatch.NoDataText(character, maxAscension);
+            }
+            else
+            {
+                // In the shop, always use the Runs/Buys layout regardless of card class
+                var contextMap          = CardHoverShowPatch.GetContextMap(lookupId);
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
+                var characterWR         = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
+                var characterLabel      = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
+                statsText = actStats.Count == 0
+                    ? CardHoverShowPatch.NoDataText(character, maxAscension)
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, maxAscension, showBuysLayout: true, shopBuyRateBaseline);
+            }
+
+            TooltipHelper.TrySceneTheftOnce();
+            TooltipHelper.ShowPanel(statsText);
+        }
+        catch (Exception e)
+        {
+            if (!_warnedOnce)
+            {
+                MainFile.Logger.Warn($"SlayTheStats: merchant card tooltip unavailable — {e.Message}");
+                _warnedOnce = true;
+            }
+        }
     }
 }

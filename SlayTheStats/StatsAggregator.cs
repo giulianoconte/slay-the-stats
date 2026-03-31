@@ -35,13 +35,15 @@ public static class StatsAggregator
                 result[ctx.Act] = agg;
             }
 
-            agg.Offered     += stat.Offered;
-            agg.Picked      += stat.Picked;
-            agg.Won         += stat.Won;
-            agg.RunsOffered += stat.RunsOffered;
-            agg.RunsPicked  += stat.RunsPicked;
-            agg.RunsPresent += stat.RunsPresent;
-            agg.RunsWon     += stat.RunsWon;
+            agg.Offered      += stat.Offered;
+            agg.Picked       += stat.Picked;
+            agg.Won          += stat.Won;
+            agg.RunsOffered  += stat.RunsOffered;
+            agg.RunsPicked   += stat.RunsPicked;
+            agg.RunsPresent  += stat.RunsPresent;
+            agg.RunsWon      += stat.RunsWon;
+            agg.RunsShopSeen   += stat.RunsShopSeen;
+            agg.RunsShopBought += stat.RunsShopBought;
         }
 
         return result;
@@ -156,10 +158,28 @@ public static class StatsAggregator
                 result[ctx.Act] = agg;
             }
 
-            agg.RunsPresent += stat.RunsPresent;
-            agg.RunsWon     += stat.RunsWon;
+            agg.RunsPresent    += stat.RunsPresent;
+            agg.RunsWon        += stat.RunsWon;
+            agg.RunsShopSeen   += stat.RunsShopSeen;
+            agg.RunsShopBought += stat.RunsShopBought;
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Returns the overall shop buy rate as a percentage (0–100): total shop purchases / total shop
+    /// appearances across all cards and relics. Falls back to 20.0 if no shop data exists yet.
+    /// </summary>
+    public static double GetShopBuyRateBaseline(StatsDb db)
+    {
+        int totalSeen = 0, totalBought = 0;
+        foreach (var contextMap in db.Cards.Values)
+            foreach (var stat in contextMap.Values)
+            { totalSeen += stat.RunsShopSeen; totalBought += stat.RunsShopBought; }
+        foreach (var contextMap in db.Relics.Values)
+            foreach (var stat in contextMap.Values)
+            { totalSeen += stat.RunsShopSeen; totalBought += stat.RunsShopBought; }
+        return totalSeen == 0 ? 20.0 : 100.0 * totalBought / totalSeen;
     }
 }
