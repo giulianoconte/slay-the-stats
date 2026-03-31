@@ -14,13 +14,14 @@ Every time you finish or abandon a run, SlayTheStats updates your personal stats
 
 - **Pick%** — how often you pick a card when it's offered on a fight reward screen
 - **Win%** — how often you win runs that include a given card or relic
-- **N** — number of runs the card/relic appeared in (the sample size behind Win%)
+- **Picks** — shown as `present/offered` (e.g. `12/30`): runs the card was in your final deck / runs it appeared on a fight reward screen. For relics, just the number of runs it was present.
 
-Stats are shown as a tooltip when you hover over cards and relics. Stats are broken out by act.
+Stats are shown as a tooltip when you hover over cards and relics. Stats are broken out by act acquired.
 
 **Color coding** helps you read the data at a glance:
-- Pick% and Win% numbers are highlighted when significant. Significance calculation is aware of sample-size, so stats with more evidence are given more significance.
-- A Color-blind setting is available.
+- Pick% and Win% are colored relative to your personal baseline — your overall win rate for the current character, and your average pick rate across all fight reward screens (accounting for how often you skip). Green/teal means above baseline, orange/red means below.
+- Color intensity scales with evidence: a small sample barely shifts the color; a large sample at the same deviation shows vivid color.
+- A color-blind mode (teal/orange instead of green/red) is available in settings.
 
 ### Installation
 
@@ -29,11 +30,11 @@ Stats are shown as a tooltip when you hover over cards and relics. Stats are bro
 
 ### Understanding the Stats
 
-**Pick%** is sourced only from fight reward scenes. Shop purchases, event cards, and other acquisition sources are not included in the pick rate calculation.
+**Pick%** is sourced only from fight reward screens — the 3-card choice after defeating an enemy. Shop purchases, event cards, ancient (Neow) rewards, and other acquisition sources are not counted. Some relics modify reward screens (e.g. adding an extra card or replacing choices); those modified screens are also excluded since the pool is no longer a standard 3-card offer.
 
 **Win%** counts all runs in which the card was present in your final deck, from any source.
 
-**Picks** is the number of runs where the card or relic was present.
+**Picks** shows `present/offered` for cards (e.g. `12/30` — present in 12 runs, offered on a fight reward screen in 30) and just the present count for relics.
 
 **Upgraded cards** (e.g. Tremble+) are tracked separately from each other. This can be changed in the settings.
 

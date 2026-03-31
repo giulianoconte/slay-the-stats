@@ -2,7 +2,7 @@
   "id": "SlayTheStats",
   "name": "SlayTheStats",
   "author": "Giuliano Conte",
-  "description": "Tracks card pick rates and win rates across runs",
+  "description": "Tracks card and relic pick rates and win rates across your runs. Stats appear as tooltips when hovering over cards and relics, broken out by act acquired.",
   "version": "v0.1.0",
   "has_pck": false,
   "has_dll": true,
