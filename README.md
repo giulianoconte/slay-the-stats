@@ -36,7 +36,9 @@ Stats are shown as a tooltip when you hover over cards and relics. Stats are bro
 
 **Picks** shows `present/offered` for cards (e.g. `12/30` — present in 12 runs, offered on a fight reward screen in 30) and just the present count for relics.
 
-**Upgraded cards** (e.g. Tremble+) are tracked separately from each other. This can be changed in the settings.
+**Upgraded cards** (e.g. Tremble+) are tracked separately from each other by default. This can be changed in the settings.
+
+> **Note (split upgrades mode):** When upgrades are tracked separately, the Picks column for an upgraded card (e.g. Tremble+) can show a higher "present" count than "offered" count — for example `5/1`. This happens because "present" counts all runs the card ended up in your deck from any source (including upgrading the base card at a campfire or event), while "offered" only counts fight reward screens where the card appeared already upgraded. Pick% is similarly unreliable for upgraded cards in this mode. If you find this confusing, enable **Group card upgrades** in settings to merge base and upgraded stats together.
 
 ### Where Stats Are Saved
 
