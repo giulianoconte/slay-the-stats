@@ -573,7 +573,8 @@ public partial class SlayTheStatsPositionFollower : Node
             float tcX = textContainer.GlobalPosition.X;
 
             bool flipToLeft;
-            var holder = CardHoverShowPatch.ActiveHolderControl;
+            var holder = CardHoverShowPatch.ActiveHolderControl
+                      ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
             if (holder != null && GodotObject.IsInstanceValid(holder))
             {
                 // Game flips when placing panel to the right of the card would overflow.

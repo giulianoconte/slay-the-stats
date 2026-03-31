@@ -530,10 +530,13 @@ public static class MerchantCardCreateHoverTipPatch
 {
     private static bool _warnedOnce;
 
+    internal static Control? ActiveMerchantCard;
+
     static void Postfix(NMerchantCard __instance)
     {
         try
         {
+            ActiveMerchantCard = __instance;
             TooltipHelper.EnsurePanelExists();
 
             // Get the card via the private _cardNode field (NCard?)
@@ -596,5 +599,15 @@ public static class MerchantCardCreateHoverTipPatch
                 _warnedOnce = true;
             }
         }
+    }
+}
+
+[HarmonyPatch(typeof(NMerchantCard), "ClearHoverTip")]
+public static class MerchantCardClearHoverTipPatch
+{
+    static void Postfix(NMerchantCard __instance)
+    {
+        if (MerchantCardCreateHoverTipPatch.ActiveMerchantCard == __instance)
+            MerchantCardCreateHoverTipPatch.ActiveMerchantCard = null;
     }
 }
