@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Override the mods deployment path for your local setup.
+         Copy this file to local.props and set your path. -->
+    <ModsPath>/your/path/Slay the Spire 2/mods</ModsPath>
+  </PropertyGroup>
+</Project>

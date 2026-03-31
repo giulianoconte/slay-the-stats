@@ -1,0 +1,32 @@
+memory/
+agents.md
+agents.private.md
+SlayTheStats/libs/
+
+# Release archives
+SlayTheStats-*.zip
+
+# .NET build outputs
+**/bin/
+**/obj/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/packages/
+
+# Rider / VS / VS Code
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+
+# Godot
+*.import
+SlayTheStats/dist/
+
+# OS
+.DS_Store
+Thumbs.db
