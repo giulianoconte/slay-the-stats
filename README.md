@@ -25,7 +25,7 @@ Stats are shown as a tooltip when you hover over cards and relics. Stats are bro
 ### Installation
 
 1. Install [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) in STS2
-2. Copy `SlayTheStats.dll` and `SlayTheStats.json` into your STS2 mods folder
+2. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll`, `SlayTheStats.json`, and a `fonts/` subfolder
 
 ### Understanding the Stats
 
@@ -83,6 +83,14 @@ Without `local.props`, build output goes to `SlayTheStats/dist/` and you need to
 ```
 
 Compiles the mod and copies the DLL and manifest to `ModsPath` (or `dist/` if not configured).
+
+To create a distributable release archive:
+
+```bash
+./deploy.sh --release
+```
+
+Builds with Release configuration and produces `SlayTheStats-vX.X.X.zip` next to `deploy.sh`, ready for upload to Nexus and attaching to GitHub releases.
 
 ### Running Tests
 

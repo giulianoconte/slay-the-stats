@@ -31,6 +31,14 @@ internal static class RelicHoverHelper
 
     internal static void Show(object holder)
     {
+        // Lazily populate CurrentCharacter from the relic owner chain as a fallback for cases where
+        // StartRunPatch fired before the run object was fully initialised. Only applies to in-run
+        // holders (NRelicBasicHolder/NRelicInventoryHolder); merchant and collection holders have no owner.
+        if (CardHoverShowPatch.CurrentCharacter == null)
+        {
+            var character = TryGetCharacterFromRelicHolder(holder);
+            if (character != null) CardHoverShowPatch.CurrentCharacter = character;
+        }
         ShowCore(holder, GetRelicId(holder));
         ShouldPushCardContainer = _activeHolder == holder;
         HideIfNotActive(holder);
@@ -75,24 +83,25 @@ internal static class RelicHoverHelper
                          : MainFile.Db.Relics.ContainsKey(rawId)             ? rawId
                          : null;
 
+            var character    = CardHoverShowPatch.CurrentCharacter;
+            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
+                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
+                : (int?)null;
+
             string statsText;
             if (lookupId == null)
             {
-                statsText = $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]";
+                statsText = CardHoverShowPatch.NoDataText(character, maxAscension);
             }
             else
             {
-                var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
-                    ? StatsAggregator.GetHighestWonAscension(MainFile.Db, CardHoverShowPatch.CurrentCharacter)
-                    : (int?)null;
-
                 var actStats = StatsAggregator.AggregateRelicsByAct(
                     MainFile.Db.Relics[lookupId], character: null, gameMode: "standard", onlyAscension: maxAscension);
-                var character = CardHoverShowPatch.CurrentCharacter;
                 var wrBaseline = character != null
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, character)
                     : StatsAggregator.GetGlobalWR(MainFile.Db);
-                statsText = actStats.Count == 0 ? $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]" : BuildStatsText(actStats, wrBaseline);
+                var characterLabel = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
+                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(character, maxAscension) : BuildStatsText(actStats, wrBaseline, characterLabel, maxAscension);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -117,6 +126,29 @@ internal static class RelicHoverHelper
         ShouldPushCardContainer = false;
         TooltipHelper.HasActiveHover = false;
         TooltipHelper.HideWithDelay();
+    }
+
+    /// <summary>
+    /// Walks holder.Relic (NRelic) → .Owner (NPlayer) → .Character → .Id to recover the
+    /// current run character. Used as a fallback when CurrentCharacter is not yet set
+    /// (e.g. if StartRunPatch fired before the run object was fully initialised).
+    /// </summary>
+    private static string? TryGetCharacterFromRelicHolder(object holder)
+    {
+        try
+        {
+            // Mirror the card chain: holder → Relic (NRelic) → Model (RelicModel) → Owner (NPlayer) → Character → Id
+            var relic     = AccessTools.Property(holder.GetType(), "Relic")?.GetValue(holder);
+            var model     = relic != null ? AccessTools.Property(relic.GetType(), "Model")?.GetValue(relic) : null;
+            var owner     = model != null ? AccessTools.Property(model.GetType(), "Owner")?.GetValue(model) : null;
+            var character = owner != null ? AccessTools.Property(owner.GetType(), "Character")?.GetValue(owner) : null;
+            var id        = character != null ? AccessTools.Property(character.GetType(), "Id")?.GetValue(character) : null;
+            if (id == null) return null;
+            var category  = AccessTools.Property(id.GetType(), "Category")?.GetValue(id) as string;
+            var entry     = AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string;
+            return category != null && entry != null ? $"{category}.{entry}".ToUpper() : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -165,7 +197,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All chars", int? maxAscension = null)
     {
         var sb = new StringBuilder();
         // Columns: Act(3)  Picks(5)  Win%(4)
@@ -198,6 +230,10 @@ internal static class RelicHoverHelper
         var cTotRuns = TooltipHelper.ColN($"{totPresent,5}", totPresent);
         var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]{totWr,4}[/color]";
         sb.Append($"All {cTotRuns}  {cTotWr}");
+
+        var ascPrefix = maxAscension != null ? $"A{maxAscension} " : "";
+        var wrStr = $"{Math.Round(wrBaseline):F0}%";
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Win%: {wrStr}[/color][/font_size][/font]");
 
         return sb.ToString();
     }

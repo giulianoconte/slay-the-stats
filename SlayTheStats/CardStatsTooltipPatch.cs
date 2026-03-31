@@ -16,6 +16,8 @@ namespace SlayTheStats;
 public static class CardHoverShowPatch
 {
     private static bool         _warnedOnce;
+    private static bool         _upgradeWarnedOnce;
+    private static bool         _ownerWarnedOnce;
     private static NCardHolder? _activeHolder;
 
     internal static string? CurrentCharacter;
@@ -139,6 +141,7 @@ public static class CardHoverShowPatch
         var name = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
             ? character.Substring("CHARACTER.".Length)
             : character;
+        if (name.Length == 0) return character;
         return char.ToUpper(name[0]) + name.Substring(1).ToLower();
     }
 
@@ -166,7 +169,11 @@ public static class CardHoverShowPatch
                 ?? AccessTools.Field(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
                 ?? 0;
         }
-        catch { return 0; }
+        catch (Exception e)
+        {
+            if (!_upgradeWarnedOnce) { MainFile.Logger.Warn($"SlayTheStats: GetUpgradeLevel failed — {e.Message}"); _upgradeWarnedOnce = true; }
+            return 0;
+        }
     }
 
     private static string? GetCharacterFromOwner(NCardHolder holder)
@@ -183,7 +190,11 @@ public static class CardHoverShowPatch
             var entry    = AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string;
             return category != null && entry != null ? $"{category}.{entry}".ToUpper() : null;
         }
-        catch { return null; }
+        catch (Exception e)
+        {
+            if (!_ownerWarnedOnce) { MainFile.Logger.Warn($"SlayTheStats: GetCharacterFromOwner failed — {e.Message}"); _ownerWarnedOnce = true; }
+            return null;
+        }
     }
 
     /// <summary>
@@ -274,10 +285,15 @@ public static class CardHoverShowPatch
 [HarmonyPatch(typeof(NCardHolder), "ClearHoverTips")]
 public static class CardHoverHidePatch
 {
+    private static bool _warnedOnce;
+
     static void Postfix(NCardHolder __instance)
     {
         try { CardHoverShowPatch.HideTooltip(__instance); }
-        catch { }
+        catch (Exception e)
+        {
+            if (!_warnedOnce) { MainFile.Logger.Warn($"SlayTheStats: CardHoverHidePatch failed — {e.Message}"); _warnedOnce = true; }
+        }
     }
 }
 
@@ -290,6 +306,8 @@ public static class CardHoverHidePatch
 [HarmonyPatch(typeof(NCard), "OnFreedToPool")]
 public static class CardFreedToPoolPatch
 {
+    private static bool _warnedOnce;
+
     static void Postfix()
     {
         try
@@ -299,7 +317,10 @@ public static class CardFreedToPoolPatch
             if (TooltipHelper.HasActiveHover) return;
             TooltipHelper.HideWithDelay();
         }
-        catch { }
+        catch (Exception e)
+        {
+            if (!_warnedOnce) { MainFile.Logger.Warn($"SlayTheStats: CardFreedToPoolPatch failed — {e.Message}"); _warnedOnce = true; }
+        }
     }
 }
 

@@ -3,6 +3,9 @@ agents.md
 agents.private.md
 SlayTheStats/libs/
 
+# Release archives
+SlayTheStats-*.zip
+
 # .NET build outputs
 **/bin/
 **/obj/

@@ -249,4 +249,62 @@ public class RunParserTests : IDisposable
         Assert.Equal(1, stat.RunsOffered);
         Assert.Equal(1, stat.RunsPicked);
     }
+
+    // --- FloorToAct boundary cases ---
+
+    [Fact]
+    public void DeckCard_AtExactActBoundary_AssignedToCurrentAct()
+    {
+        var db = new StatsDb();
+        // Act 1 has 2 floors (boundary = 2); a deck card at floor 2 (exact boundary) should land in act 1
+        // Act 2 reward offers a different card so CARD.STRIKE only appears in the deck, not in any offer set
+        var path = TempRun(Build(
+            acts: [
+                [[new("CARD.DEFEND", Picked: false)], [new("CARD.DEFEND", Picked: false)]],
+                [[new("CARD.DEFEND", Picked: false)]]
+            ],
+            deck: [new DeckCard("CARD.STRIKE", FloorAdded: 2)]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        // Presence should be recorded under act 1, not act 2
+        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"].RunsPresent);
+        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
+    }
+
+    [Fact]
+    public void DeckCard_BeyondAllActFloors_AssignedToLastAct()
+    {
+        var db = new StatsDb();
+        // Acts have 1 floor each (boundaries = [1, 2]); floor 99 is beyond both — should fall into act 2 (last act)
+        var path = TempRun(Build(
+            acts: [[[new("CARD.DEFEND", Picked: false)]], [[new("CARD.STRIKE", Picked: false)]]],
+            deck: [new DeckCard("CARD.STRIKE", FloorAdded: 99)]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
+        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
+    }
+
+    [Fact]
+    public void DeckCard_SameCardAcrossMultipleActs_GetsSeparateContextEntries()
+    {
+        var db = new StatsDb();
+        // Act 1 has 1 floor; two copies of the same card acquired in act 1 and act 2
+        // should produce separate context entries (one per act), each with RunsPresent = 1
+        var path = TempRun(Build(
+            acts: [[[new("CARD.STRIKE", Picked: false)]], [[new("CARD.STRIKE", Picked: false)]]],
+            deck: [
+                new DeckCard("CARD.STRIKE", FloorAdded: 1), // act 1 (floor 1 <= boundary 1)
+                new DeckCard("CARD.STRIKE", FloorAdded: 2), // act 2 (floor 2 > boundary 1, <= boundary 2)
+            ]));
+
+        RunParser.ProcessRun(path, "run1", db);
+
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
+        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"].RunsPresent);
+        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"].RunsPresent);
+    }
 }

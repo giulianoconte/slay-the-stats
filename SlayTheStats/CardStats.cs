@@ -39,7 +39,11 @@ public readonly record struct RunContext(string Character, int Ascension, int Ac
     public static RunContext Parse(string key)
     {
         var parts = key.Split('|');
-        return new RunContext(parts[0], int.Parse(parts[1]), int.Parse(parts[2]), parts[3], parts[4]);
+        if (parts.Length < 5
+            || !int.TryParse(parts[1], out var asc)
+            || !int.TryParse(parts[2], out var act))
+            return new RunContext("UNKNOWN", 0, 1, "UNKNOWN", "UNKNOWN");
+        return new RunContext(parts[0], asc, act, parts[3], parts[4]);
     }
 }
 
