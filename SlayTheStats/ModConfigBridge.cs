@@ -115,7 +115,7 @@ internal static class ModConfigBridge
             Set(cfg, "Label",        "Group Card Upgrades");
             Set(cfg, "Type",         EnumVal("Toggle"));
             Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.GroupCardUpgrades);
-            Set(cfg, "Description",  "Merge stats for a card and its upgraded form (e.g. Strike and Strike+ count as one entry).");
+            Set(cfg, "Description",  "Merge stats for a card and its upgraded form (e.g. Strike and Strike+ count as one entry). When off, upgraded cards may show a Picks count higher than the offered count (e.g. 5/1) because 'present' includes copies upgraded at campfires or events, while 'offered' only counts pre-upgraded fight reward offerings.");
             Set(cfg, "OnChanged",    new Action<object>(v =>
             {
                 SlayTheStatsConfig.GroupCardUpgrades = Convert.ToBoolean(v);
