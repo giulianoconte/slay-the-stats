@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Nodes.Relics;
 using MegaCrit.Sts2.Core.Nodes.Screens.RelicCollection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
+using MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic;
 
 namespace SlayTheStats;
 
@@ -31,6 +32,8 @@ internal static class RelicHoverHelper
 
     internal static void Show(object holder)
     {
+        if (!SlayTheStatsConfig.ShowInRunStats) return;
+
         // Lazily populate CurrentCharacter from the relic owner chain as a fallback for cases where
         // StartRunPatch fired before the run object was fully initialised. Only applies to in-run
         // holders (NRelicBasicHolder/NRelicInventoryHolder); merchant and collection holders have no owner.
@@ -46,6 +49,8 @@ internal static class RelicHoverHelper
 
     internal static void ShowMerchant(object holder)
     {
+        if (!SlayTheStatsConfig.ShowInRunStats) return;
+
         ShowCore(holder, GetRelicIdFromMerchant(holder));
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
@@ -75,6 +80,8 @@ internal static class RelicHoverHelper
     {
         try
         {
+            if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
+
             TooltipHelper.EnsurePanelExists();
 
             if (rawId == null) return;
@@ -315,4 +322,20 @@ public static class RelicCollectionEntryFocusPatch
 public static class RelicCollectionEntryUnfocusPatch
 {
     static void Postfix(NRelicCollectionEntry __instance) => RelicHoverHelper.Hide(__instance);
+}
+
+/// <summary>
+/// Shows relic stats when hovering a relic on a chest reward screen (treasure room).
+/// NTreasureRoomRelicHolder exposes a Relic property (NRelic) — same chain as NRelicBasicHolder.
+/// </summary>
+[HarmonyPatch(typeof(NTreasureRoomRelicHolder), "OnFocus")]
+public static class TreasureRoomRelicHolderFocusPatch
+{
+    static void Postfix(NTreasureRoomRelicHolder __instance) => RelicHoverHelper.Show(__instance);
+}
+
+[HarmonyPatch(typeof(NTreasureRoomRelicHolder), "OnUnfocus")]
+public static class TreasureRoomRelicHolderUnfocusPatch
+{
+    static void Postfix(NTreasureRoomRelicHolder __instance) => RelicHoverHelper.Hide(__instance);
 }

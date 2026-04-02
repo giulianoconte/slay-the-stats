@@ -199,17 +199,18 @@ public static class RunParser
                                     shopBoughtThisRun.Add((cardId, context.ToKey()));
                             }
                         }
+                    }
 
-                        // bought_relics = purchased relics
-                        var boughtRelics = playerStats?["bought_relics"]?.AsArray();
-                        if (boughtRelics != null)
+                    // bought_relics appears on shop floors AND on fake-shop events (type=unknown).
+                    // Collect from all floor types so fake shop purchases appear in the Buys column.
+                    var boughtRelics = playerStats?["bought_relics"]?.AsArray();
+                    if (boughtRelics != null)
+                    {
+                        foreach (var entry in boughtRelics)
                         {
-                            foreach (var entry in boughtRelics)
-                            {
-                                var relicId = entry?.GetValue<string>();
-                                if (relicId != null)
-                                    relicShopBoughtThisRun.Add((relicId, context.ToKey()));
-                            }
+                            var relicId = entry?.GetValue<string>();
+                            if (relicId != null)
+                                relicShopBoughtThisRun.Add((relicId, context.ToKey()));
                         }
                     }
 
