@@ -23,6 +23,7 @@ public static class CardHoverShowPatch
     private static NCardHolder? _activeHolder;
 
     internal static string? CurrentCharacter;
+    internal static bool    IsInRun;
 
     static void Postfix(NCardHolder __instance)
     {
@@ -42,9 +43,18 @@ public static class CardHoverShowPatch
 
             // Derive character context first — needed for contextual "no data" messages
             // regardless of whether the card has stats data.
-            var character = CurrentCharacter ?? GetCharacterFromOwner(__instance);
-            if (character != null && CurrentCharacter == null)
-                CurrentCharacter = character;
+            // Only use the owner-chain fallback when we're in a run: outside a run (main-menu
+            // compendium) CurrentCharacter == null means "all chars" and should stay null.
+            var character = CurrentCharacter;
+            if (character == null && IsInRun)
+            {
+                character = GetCharacterFromOwner(__instance);
+                if (character != null)
+                {
+                    CurrentCharacter = character;
+                    MainFile.Logger.Info($"[SlayTheStats] CardHover: character derived from owner '{character}'");
+                }
+            }
 
             var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
                 ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
@@ -417,10 +427,35 @@ public static class CardHoverHidePatch
 }
 
 /// <summary>
-/// Safety net: hides the panel when a card is returned to the pool without going through
-/// ClearHoverTips. Skips if any hover (card or relic) is still active.
-/// Uses HideWithDelay (not direct hide) so that a relic OnFocus postfix firing in the same
-/// frame can cancel the hide by incrementing ShowGen before the timer fires.
+/// Safety net: when an NGridCardHolder is returned to the pool, clear any tooltip it was showing.
+/// NGridCardHolder is used by NCardRewardSelectionScreen (mid-combat and end-of-fight rewards).
+/// If the player was hovering a card in this holder when the screen closed — including during
+/// abrupt closures where ClearHoverTips was never called — this patch clears the stuck state.
+/// </summary>
+[HarmonyPatch(typeof(NGridCardHolder), "OnFreedToPool")]
+public static class GridCardHolderFreedToPoolPatch
+{
+    private static bool _warnedOnce;
+
+    static void Postfix(NGridCardHolder __instance)
+    {
+        try
+        {
+            // HideTooltip is a no-op if __instance is not the active holder.
+            MainFile.Logger.Info($"[SlayTheStats] GridCardHolderFreedToPool: clearing hover for holder (hasActiveHover={TooltipHelper.HasActiveHover})");
+            CardHoverShowPatch.HideTooltip(__instance);
+        }
+        catch (Exception e)
+        {
+            if (!_warnedOnce) { MainFile.Logger.Warn($"SlayTheStats: GridCardHolderFreedToPoolPatch failed — {e.Message}"); _warnedOnce = true; }
+        }
+    }
+}
+
+/// <summary>
+/// Belt-and-suspenders: hides the panel when any NCard is returned to the pool, but only
+/// if the active card holder is no longer a valid Godot node. This catches non-poolable
+/// holders (e.g. Godot-freed screens) where GridCardHolderFreedToPoolPatch doesn't fire.
 /// </summary>
 [HarmonyPatch(typeof(NCard), "OnFreedToPool")]
 public static class CardFreedToPoolPatch
@@ -433,8 +468,12 @@ public static class CardFreedToPoolPatch
         {
             var node = TooltipHelper.GetPanelPublic();
             if (node == null || !node.Visible) return;
-            if (TooltipHelper.HasActiveHover) return;
-            TooltipHelper.HideWithDelay();
+            if (RelicHoverHelper.IsActiveHover()) return;
+            var holder = CardHoverShowPatch.ActiveHolder;
+            if (holder != null && GodotObject.IsInstanceValid(holder)) return;
+            // Holder is null or Godot-freed — orphaned hover state, force-clear.
+            MainFile.Logger.Info($"[SlayTheStats] CardFreedToPool: holder invalid, clearing stuck hover (hasActiveHover={TooltipHelper.HasActiveHover})");
+            CardHoverShowPatch.HideTooltip();
         }
         catch (Exception e)
         {
@@ -449,6 +488,8 @@ public static class ClearCurrentCharacterPatch
     static void Prefix()
     {
         CardHoverShowPatch.CurrentCharacter = null;
+        CardHoverShowPatch.IsInRun = false;
+        MainFile.Logger.Info("[SlayTheStats] ReturnToMainMenu: CurrentCharacter cleared, IsInRun=false");
     }
 }
 
