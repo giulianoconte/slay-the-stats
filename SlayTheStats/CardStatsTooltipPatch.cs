@@ -29,6 +29,8 @@ public static class CardHoverShowPatch
         try
         {
             if (__instance is NHandCardHolder) return;
+            if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
+            if (!SlayTheStatsConfig.ShowInRunStats && !IsInsideCardLibrary(__instance)) return;
 
             TooltipHelper.EnsurePanelExists();
 
@@ -150,6 +152,18 @@ public static class CardHoverShowPatch
     internal static bool IsColorlessCard(CardModel? model)
     {
         return model?.Pool?.IsColorless ?? false;
+    }
+
+    private static bool IsInsideCardLibrary(Control control)
+    {
+        Node? node = ((Node)control).GetParent();
+        while (node != null)
+        {
+            if (node.GetType().FullName == "MegaCrit.Sts2.Core.Nodes.Screens.CardLibrary.NCardLibrary")
+                return true;
+            node = node.GetParent();
+        }
+        return false;
     }
 
     internal static string FormatCharacterName(string character)
@@ -440,6 +454,8 @@ public static class InspectCardDisplayPatch
     {
         try
         {
+            if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
+
             TooltipHelper.EnsurePanelExists();
 
             // _card is a private NCard field on NInspectCardScreen.
@@ -536,6 +552,9 @@ public static class MerchantCardCreateHoverTipPatch
     {
         try
         {
+            if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
+            if (!SlayTheStatsConfig.ShowInRunStats) return;
+
             ActiveMerchantCard = __instance;
             TooltipHelper.EnsurePanelExists();
 

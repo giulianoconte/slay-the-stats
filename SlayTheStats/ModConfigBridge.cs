@@ -137,6 +137,48 @@ internal static class ModConfigBridge
             }));
         }));
 
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "show_in_run_stats");
+            Set(cfg, "Label",        "Show In-Run Stats");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.ShowInRunStats);
+            Set(cfg, "Description",  "Show stat tooltips during a run (card rewards, shop, relic hovers). When off, stats only appear in the compendium.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.ShowInRunStats = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "disable_tooltips_entirely");
+            Set(cfg, "Label",        "Disable All Stat Tooltips");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.DisableTooltipsEntirely);
+            Set(cfg, "Description",  "Master switch — turns off all stat tooltips everywhere in the game.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.DisableTooltipsEntirely = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "debug_mode");
+            Set(cfg, "Label",        "Debug Mode");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.DebugMode);
+            Set(cfg, "Description",  "Surface internal state in tooltips (context key, raw counters, build version) to help diagnose issues without reading logs.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.DebugMode = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
         var result = Array.CreateInstance(_entryType!, list.Count);
         for (int i = 0; i < list.Count; i++)
             result.SetValue(list[i], i);
