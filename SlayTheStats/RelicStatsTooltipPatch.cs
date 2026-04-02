@@ -1,6 +1,7 @@
 using System.Text;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.UI;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Nodes.Relics;
 using MegaCrit.Sts2.Core.Nodes.Screens.RelicCollection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
@@ -59,6 +60,19 @@ internal static class RelicHoverHelper
     internal static void ShowCollection(object holder)
     {
         ShowCore(holder, GetRelicIdFromCollection(holder));
+        ShouldPushCardContainer = false;
+        HideIfNotActive(holder);
+    }
+
+    /// <summary>
+    /// Shows stats for a relic option on an ancient event choice screen (NEventOptionButton).
+    /// Only fires when the option carries a relic (Option.Relic != null).
+    /// </summary>
+    internal static void ShowAncientOption(object holder)
+    {
+        if (!SlayTheStatsConfig.ShowInRunStats) return;
+
+        ShowCore(holder, GetRelicIdFromEventOption(holder));
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
     }
@@ -189,6 +203,21 @@ internal static class RelicHoverHelper
         if (id == null) return null;
         return AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string
             ?? id.ToString();
+    }
+
+    /// <summary>
+    /// Walks NEventOptionButton.Option → .Relic (RelicModel) → .Id → .Entry.
+    /// Returns null when the option carries no relic (non-relic ancient choices).
+    /// </summary>
+    private static string? GetRelicIdFromEventOption(object holder)
+    {
+        var option = AccessTools.Property(holder.GetType(), "Option")?.GetValue(holder);
+        if (option == null) return null;
+        var model = AccessTools.Property(option.GetType(), "Relic")?.GetValue(option);
+        if (model == null) return null;
+        var id = AccessTools.Property(model.GetType(), "Id")?.GetValue(model);
+        if (id == null) return null;
+        return AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string;
     }
 
     /// <summary>
@@ -338,4 +367,21 @@ public static class TreasureRoomRelicHolderFocusPatch
 public static class TreasureRoomRelicHolderUnfocusPatch
 {
     static void Postfix(NTreasureRoomRelicHolder __instance) => RelicHoverHelper.Hide(__instance);
+}
+
+/// <summary>
+/// Shows relic stats when hovering an ancient event option that carries a relic reward
+/// (e.g. Neow choices). NEventOptionButton.Option.Relic is non-null only for relic options;
+/// ShowAncientOption returns early if null so non-relic options are silently skipped.
+/// </summary>
+[HarmonyPatch(typeof(NEventOptionButton), "OnFocus")]
+public static class AncientEventOptionFocusPatch
+{
+    static void Postfix(NEventOptionButton __instance) => RelicHoverHelper.ShowAncientOption(__instance);
+}
+
+[HarmonyPatch(typeof(NEventOptionButton), "OnUnfocus")]
+public static class AncientEventOptionUnfocusPatch
+{
+    static void Postfix(NEventOptionButton __instance) => RelicHoverHelper.Hide(__instance);
 }
