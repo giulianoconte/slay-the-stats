@@ -1,4 +1,5 @@
 using Godot;
+using MegaCrit.Sts2.Core.Nodes;
 
 namespace SlayTheStats;
 
@@ -123,6 +124,7 @@ internal static class TooltipHelper
     /// </summary>
     internal static void ShowPanel(string tableText)
     {
+        MainFile.Logger.Info($"[SlayTheStats] ShowPanel gen={ShowGen}→{ShowGen + 1} activeHover={HasActiveHover}");
         ShowGen++;
         HasActiveHover = true;
 
@@ -185,7 +187,9 @@ internal static class TooltipHelper
 
         timer.Timeout += () =>
         {
-            if (ShowGen != genAtHide || HasActiveHover || InspectActive) return;
+            var hiding = ShowGen == genAtHide && !HasActiveHover && !InspectActive;
+            MainFile.Logger.Info($"[SlayTheStats] HideTimer gen={ShowGen} expected={genAtHide} activeHover={HasActiveHover} hiding={hiding}");
+            if (!hiding) return;
             var node = GetPanelPublic();
             if (node != null) node.Visible = false;
             if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
@@ -308,8 +312,7 @@ internal static class TooltipHelper
     internal static void ConnectFontTheft()
     {
         if (FontStealConnected) return;
-        var root = (Engine.GetMainLoop() as SceneTree)?.Root;
-        var tipSet = FindNodeByTypeName(root, "NHoverTipSet");
+        var tipSet = FindTipSet(null);
         var textContainer = tipSet?.GetNodeOrNull<Node>("textHoverTipContainer");
         if (textContainer == null) return;
         FontStealConnected = true;
@@ -505,7 +508,22 @@ internal static class TooltipHelper
         return flat;
     }
 
-    internal static Node? FindTipSet(Node? root) => FindNodeByTypeName(root, "NHoverTipSet");
+    internal static Node? FindTipSet(Node? _)
+    {
+        // Access HoverTipsContainer directly and return the last (most recently added) child.
+        // A QueueFreed stale NHoverTipSet may still be in the container during the same frame
+        // as a transition — children are appended by AddChild, so the newest is always last.
+        var container = NGame.Instance?.HoverTipsContainer;
+        if (container == null) return null;
+        var count = container.GetChildCount();
+        for (int i = count - 1; i >= 0; i--)
+        {
+            var child = container.GetChild(i);
+            if (child?.GetType().Name == "NHoverTipSet" && GodotObject.IsInstanceValid(child))
+                return child;
+        }
+        return null;
+    }
 
     internal static void UpdatePanelPosition(Control p, Container textContainer)
     {
@@ -544,6 +562,8 @@ internal static class TooltipHelper
 /// </summary>
 public partial class SlayTheStatsPositionFollower : Node
 {
+    private int _lastDiagGen = -1;
+
     public override void _Process(double delta)
     {
         var p = TooltipHelper.GetPanelPublic();
@@ -552,7 +572,41 @@ public partial class SlayTheStatsPositionFollower : Node
         var root          = (Engine.GetMainLoop() as SceneTree)?.Root;
         var tipSet        = TooltipHelper.FindTipSet(root);
         var textContainer = tipSet?.GetNodeOrNull<Container>("textHoverTipContainer");
-        if (textContainer == null) return;
+
+        // Log once per ShowGen so the log isn't flooded every frame.
+        var logOnce = TooltipHelper.ShowGen != _lastDiagGen;
+        if (logOnce) _lastDiagGen = TooltipHelper.ShowGen;
+
+        if (textContainer == null)
+        {
+            if (logOnce)
+                MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: textContainer null (tipSet={(tipSet == null ? "null" : "found")}), using holder fallback");
+
+            // NHoverTipSet absent — position relative to the active holder directly.
+            // This happens when the game hasn't created a hover tip set yet (e.g. QueueFree
+            // hasn't flushed the old one) or when FindTipSet can't locate it.
+            var holder = CardHoverShowPatch.ActiveHolderControl ?? RelicHoverHelper.ActiveHolderControl;
+            if (holder == null || !GodotObject.IsInstanceValid(holder)) return;
+
+            p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
+            var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+            float holderRight = holder.GlobalPosition.X + holder.Size.X;
+            bool flipToLeft   = holderRight + TooltipHelper.TooltipWidth > viewportSize.X;
+            float x           = flipToLeft ? holder.GlobalPosition.X - TooltipHelper.TooltipWidth : holderRight;
+            x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
+            p.Position = new Vector2(x, holder.GlobalPosition.Y);
+
+            var shadowFallback = TooltipHelper.GetShadowPublic();
+            if (shadowFallback != null)
+            {
+                shadowFallback.Position = p.Position + new Vector2(TooltipHelper.ShadowOffset, TooltipHelper.ShadowOffset);
+                shadowFallback.Size     = p.Size;
+            }
+            return;
+        }
+
+        if (logOnce)
+            MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: textContainer at {textContainer.GlobalPosition} children={textContainer.GetChildCount()}");
 
         if (textContainer.GetChildCount() > 0)
         {

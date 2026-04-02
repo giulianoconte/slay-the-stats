@@ -1,4 +1,5 @@
 using System.Text;
+using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Nodes.Relics;
@@ -20,6 +21,8 @@ internal static class RelicHoverHelper
 
     internal static bool IsActiveHover() => _activeHolder != null;
 
+    internal static Control? ActiveHolderControl => _activeHolder as Control;
+
     /// <summary>
     /// True only for NRelicBasicHolder / NRelicInventoryHolder, which use SetAlignmentForRelic
     /// and position the card container BELOW the text container.
@@ -31,13 +34,19 @@ internal static class RelicHoverHelper
 
     internal static void Show(object holder)
     {
+        MainFile.Logger.Info($"[SlayTheStats] RelicHover.Show: type={holder.GetType().Name} activeHolder={((object?)_activeHolder == null ? "null" : _activeHolder.GetType().Name)} hasActiveHover={TooltipHelper.HasActiveHover}");
         // Lazily populate CurrentCharacter from the relic owner chain as a fallback for cases where
         // StartRunPatch fired before the run object was fully initialised. Only applies to in-run
         // holders (NRelicBasicHolder/NRelicInventoryHolder); merchant and collection holders have no owner.
-        if (CardHoverShowPatch.CurrentCharacter == null)
+        // Guard on IsInRun: outside a run, CurrentCharacter == null means "all chars" and should stay null.
+        if (CardHoverShowPatch.CurrentCharacter == null && CardHoverShowPatch.IsInRun)
         {
             var character = TryGetCharacterFromRelicHolder(holder);
-            if (character != null) CardHoverShowPatch.CurrentCharacter = character;
+            if (character != null)
+            {
+                CardHoverShowPatch.CurrentCharacter = character;
+                MainFile.Logger.Info($"[SlayTheStats] RelicHover: character derived from owner '{character}'");
+            }
         }
         ShowCore(holder, GetRelicId(holder));
         ShouldPushCardContainer = _activeHolder == holder;
@@ -96,7 +105,7 @@ internal static class RelicHoverHelper
             else
             {
                 var actStats = StatsAggregator.AggregateRelicsByAct(
-                    MainFile.Db.Relics[lookupId], character: null, gameMode: "standard", onlyAscension: maxAscension);
+                    MainFile.Db.Relics[lookupId], character: character, gameMode: "standard", onlyAscension: maxAscension);
                 var wrBaseline = character != null
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, character)
                     : StatsAggregator.GetGlobalWR(MainFile.Db);
@@ -119,9 +128,18 @@ internal static class RelicHoverHelper
         }
     }
 
+    /// <summary>Unconditionally clears relic hover state. Used by combat-room transition safety net.</summary>
+    internal static void ForceHide()
+    {
+        _activeHolder           = null;
+        ShouldPushCardContainer = false;
+    }
+
     internal static void Hide(object source)
     {
-        if (source != _activeHolder) return;
+        var matched = source == _activeHolder;
+        MainFile.Logger.Info($"[SlayTheStats] RelicHover.Hide: type={source.GetType().Name} matched={matched} hasActiveHover={TooltipHelper.HasActiveHover}");
+        if (!matched) return;
 
         _activeHolder = null;
         ShouldPushCardContainer = false;
