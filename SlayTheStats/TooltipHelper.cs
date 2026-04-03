@@ -569,6 +569,18 @@ public partial class SlayTheStatsPositionFollower : Node
         var p = TooltipHelper.GetPanelPublic();
         if (p == null || !p.Visible) return;
 
+        // If there is no active hover, the panel is either in the 50ms hide-delay window or
+        // was briefly touched and released. Either way, don't reposition — stay put and let
+        // the timer hide the panel. This prevents a blink when the mouse quickly passes over
+        // an element: Show fires (making panel visible) then Hide fires immediately, and
+        // without this guard _Process would reposition the panel at the new element before
+        // the hide timer catches up.
+        // Exception: inspect mode — the inspect screen keeps the panel alive via InspectActive
+        // but HasActiveHover goes false when the original card's ClearHoverTips fires, so we
+        // must continue running to reposition when a native NHoverTipSet appears (e.g. on
+        // hovering the upgrade button or any card keyword).
+        if (!TooltipHelper.HasActiveHover && !TooltipHelper.InspectActive) return;
+
         var root          = (Engine.GetMainLoop() as SceneTree)?.Root;
         var tipSet        = TooltipHelper.FindTipSet(root);
         var textContainer = tipSet?.GetNodeOrNull<Container>("textHoverTipContainer");
@@ -581,13 +593,6 @@ public partial class SlayTheStatsPositionFollower : Node
         {
             if (logOnce)
                 MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: textContainer null (tipSet={(tipSet == null ? "null" : "found")}) activeHover={TooltipHelper.HasActiveHover}");
-
-            // Only reposition when there is an active hover.
-            // When HasActiveHover=false the panel is in the 50ms hide-delay window — the
-            // NHoverTipSet has already been freed (QueueFree ran), so textContainer is null,
-            // but the panel is about to hide and should stay put rather than jumping to a
-            // stale holder position.
-            if (!TooltipHelper.HasActiveHover) return;
 
             // NHoverTipSet absent during an active hover — position relative to the active
             // holder directly (e.g. QueueFree hasn't flushed yet, or no native tip set).
@@ -621,46 +626,44 @@ public partial class SlayTheStatsPositionFollower : Node
         }
         else
         {
-            // No native tooltips: the game still positions textContainer at the card's right
-            // edge (normal) or left edge (flipped, when card is near the right of the screen).
-            // textContainer.X is the correct placement anchor — use it directly.
-            // The only thing we need to decide is which side: use the card holder's actual
-            // right edge for an exact overflow check instead of the old midpoint heuristic,
-            // which misfired for cards in the middle-right area of the screen.
+            // No native tooltips. Use textContainer.GlobalPosition as the anchor — the game's
+            // SetFollowOwner reliably places textContainer at the card's right edge each frame,
+            // making tcX/tcY the most accurate position reference available.
             p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
-            int sep = textContainer.GetThemeConstant("separation");
-            var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-            float tcX = textContainer.GlobalPosition.X;
+            int   sep          = textContainer.GetThemeConstant("separation");
+            var   viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+            float tcX          = textContainer.GlobalPosition.X;
+            float tcY          = textContainer.GlobalPosition.Y;
 
             var ancientBtn = AncientEventOptionFocusPatch.ActiveAncientOptionControl;
+            var cardHolder = CardHoverShowPatch.ActiveHolderControl
+                          ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
+
+            float x;
             if (ancientBtn != null && GodotObject.IsInstanceValid(ancientBtn))
             {
-                // Ancient event options use HoverTipAlignment.Left — position panel to the left of the button.
-                float x = Math.Max(0, ancientBtn.GlobalPosition.X - TooltipHelper.TooltipWidth);
+                // Ancient event options use HoverTipAlignment.Left — panel goes to the LEFT.
+                x = ancientBtn.GlobalPosition.X - TooltipHelper.TooltipWidth;
+                x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
                 p.Position = new Vector2(x, ancientBtn.GlobalPosition.Y);
+            }
+            else if (cardHolder != null && GodotObject.IsInstanceValid(cardHolder))
+            {
+                // Card hover: tcX is the card's right edge (game-placed). Use the holder's
+                // actual right edge only for overflow detection; keep tcX as the placement
+                // anchor so the panel aligns with the game's own tooltip column.
+                float cardRight = cardHolder.GlobalPosition.X + cardHolder.Size.X;
+                bool  flipToLeft = cardRight + TooltipHelper.TooltipWidth > viewportSize.X;
+                x = flipToLeft ? cardHolder.GlobalPosition.X - TooltipHelper.TooltipWidth : tcX;
+                x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
+                p.Position = new Vector2(x, tcY + sep);
             }
             else
             {
-                bool flipToLeft;
-                var holder = CardHoverShowPatch.ActiveHolderControl
-                          ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
-                if (holder != null && GodotObject.IsInstanceValid(holder))
-                {
-                    // Game flips when placing panel to the right of the card would overflow.
-                    float cardRight = holder.GlobalPosition.X + holder.Size.X;
-                    flipToLeft = cardRight + TooltipHelper.TooltipWidth > viewportSize.X;
-                }
-                else
-                {
-                    // Fallback: if textContainer (= card right edge when not flipped) + panel
-                    // overflows, the game must have already flipped textContainer to the left edge.
-                    flipToLeft = tcX + TooltipHelper.TooltipWidth > viewportSize.X;
-                }
-
-                // textContainer.X is at the card's right edge (no flip) or left edge (flip).
-                float x = flipToLeft ? tcX - TooltipHelper.TooltipWidth : tcX;
+                bool flipToLeft = tcX + TooltipHelper.TooltipWidth > viewportSize.X;
+                x = flipToLeft ? tcX - TooltipHelper.TooltipWidth : tcX;
                 x = Math.Max(0, x);
-                p.Position = new Vector2(x, textContainer.GlobalPosition.Y + sep);
+                p.Position = new Vector2(x, tcY + sep);
             }
         }
 
