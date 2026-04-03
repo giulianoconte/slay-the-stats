@@ -654,6 +654,23 @@ public partial class SlayTheStatsPositionFollower : Node
             p.Position = new Vector2(x, textContainer.GlobalPosition.Y + sep);
         }
 
+        // Overflow correction: if our panel bottom goes below the viewport, shift the
+        // game's NHoverTipSet (parent of textHoverTipContainer + cardHoverTipContainer)
+        // upward by the overshoot so the whole tooltip column stays on screen.
+        // p.Size.Y may be 0 on the very first frame before layout runs — skip in that case.
+        if (tipSet is Control tipSetCtrl && p.Size.Y > 0)
+        {
+            var vpSize    = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+            float overflow = (p.Position.Y + p.Size.Y) - vpSize.Y;
+            if (overflow > 0)
+            {
+                if (logOnce)
+                    MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: overflow={overflow:F0} shifting NHoverTipSet up");
+                tipSetCtrl.GlobalPosition = new Vector2(tipSetCtrl.GlobalPosition.X, tipSetCtrl.GlobalPosition.Y - overflow);
+                p.Position = new Vector2(p.Position.X, p.Position.Y - overflow);
+            }
+        }
+
         var shadow = TooltipHelper.GetShadowPublic();
         if (shadow != null)
         {
