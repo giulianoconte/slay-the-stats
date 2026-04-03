@@ -1,7 +1,5 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes;
-using MegaCrit.Sts2.Core.Nodes.Events;
-using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Runs;
 using System.Reflection;
@@ -32,44 +30,29 @@ internal static class CharacterIdHelper
 }
 
 /// <summary>
-/// Triggers run parsing whenever the player returns to the main menu,
-/// which happens after every run ends (win, loss, or quit to menu).
-/// </summary>
-[HarmonyPatch(typeof(NGame), "ReturnToMainMenuAfterRun")]
-public static class RunEndedPatch
-{
-    static void Prefix()
-    {
-        RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info(msg); }, msg => MainFile.Logger.Warn(msg));
-    }
-}
-
-/// <summary>
-/// Sets the current run character as soon as a run starts, so the compendium shows the
-/// correct character's stats from the first card reward screen (not only after first hover).
-/// Best-effort: silently skipped in MainFile if StartRun does not exist in this game version.
+/// Sets run state as soon as a run starts. Reads character from the RunState parameter
+/// (fully initialized before the method is called) rather than from the NGame instance
+/// (which may not be fully set up yet).
 /// </summary>
 [HarmonyPatch(typeof(NGame), "StartRun")]
 public static class StartRunPatch
 {
-    static void Postfix(NGame __instance)
+    static void Prefix(RunState runState)
     {
         CardHoverShowPatch.IsInRun = true;
         if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun fired: IsInRun=true");
         try
         {
-            // NGame → Run → Player → Character → Id (all via reflection — types may change)
-            var run       = __instance.GetType().GetProperty("Run", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance);
-            var player    = run?.GetType().GetProperty("Player", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(run);
-            var character = player?.GetType().GetProperty("Character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(player);
-            var id        = CharacterIdHelper.Extract(character);
+            var players = runState?.Players;
+            if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: no players in runState"); return; }
+            var id = CharacterIdHelper.Extract(players[0].Character);
             if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: character id was null"); return; }
-            CardHoverShowPatch.CurrentCharacter = id;
+            CardHoverShowPatch.RunCharacter = id;
             if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}'");
         }
         catch (Exception e)
         {
-            MainFile.Logger.Warn($"[SlayTheStats] StartRun reflection failed: {e.Message}");
+            MainFile.Logger.Warn($"[SlayTheStats] StartRun character extraction failed: {e.Message}");
         }
     }
 }
@@ -92,7 +75,7 @@ public static class LoadRunPatch
             if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: no players in runState"); return; }
             var id = CharacterIdHelper.Extract(players[0].Character);
             if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: character id was null"); return; }
-            CardHoverShowPatch.CurrentCharacter = id;
+            CardHoverShowPatch.RunCharacter = id;
             if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}'");
         }
         catch (Exception e)
@@ -103,67 +86,19 @@ public static class LoadRunPatch
 }
 
 /// <summary>
-/// Sets CurrentCharacter when any event layout loads its event data. This fires after
-/// EventModel.Owner is guaranteed set (BeginEvent completes before SetupLayout → SetEvent),
-/// which is earlier and more reliable than StartRun for new runs (Neow, ancient choices).
-/// Covers every event screen including the first Neow choice on run start.
-/// </summary>
-[HarmonyPatch(typeof(NEventLayout), "SetEvent")]
-public static class EventLayoutSetEventPatch
-{
-    static void Postfix(object __0)
-    {
-        try
-        {
-            if (__0 == null) return;
-            var owner     = __0.GetType().GetProperty("Owner", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__0);
-            var character = owner?.GetType().GetProperty("Character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(owner);
-            var id        = CharacterIdHelper.Extract(character);
-            if (id == null) return;
-            CardHoverShowPatch.CurrentCharacter = id;
-            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] EventLayout.SetEvent: character set to '{id}'");
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] EventLayout.SetEvent reflection failed: {e.Message}");
-        }
-    }
-}
-
-/// <summary>
-/// Belt-and-suspenders: clears any orphaned card/relic tooltip when a new combat room becomes
-/// ready. Covers the case where a card-reward overlay was showing when the previous room ended,
-/// and the game destroyed the card nodes without firing ClearHoverTips — leaving HasActiveHover
-/// stuck True and the panel visible.
-/// </summary>
-[HarmonyPatch(typeof(NCombatRoom), "_Ready")]
-public static class CombatRoomReadyPatch
-{
-    static void Postfix()
-    {
-        var panel = TooltipHelper.GetPanelPublic();
-        if (panel == null || !panel.Visible) return;
-        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] CombatRoomReady: panel still visible on room start, force-hiding (hasActiveHover={TooltipHelper.HasActiveHover})");
-        TooltipHelper.HasActiveHover = false;
-        TooltipHelper.InspectActive  = false;
-        CardHoverShowPatch.HideTooltip();
-        RelicHoverHelper.ForceHide();
-    }
-}
-
-/// <summary>
-/// Belt-and-suspenders: clears the cached run character whenever the main menu loads,
-/// so the compendium always shows "all characters" stats after a run ends.
-/// Covers any exit path that ReturnToMainMenuAfterRun might not catch, and also guards
-/// against compendium card holders having stale owner data from the previous run.
+/// Single cleanup and data refresh point. Fires on game boot and after every run ends
+/// (returning to the main menu always loads this node). Clears run state and triggers
+/// RunParser to process any new .run files (the just-completed run, or runs from before
+/// the mod was installed on first boot).
 /// </summary>
 [HarmonyPatch(typeof(NMainMenu), "_Ready")]
 public static class MainMenuReadyPatch
 {
     static void Postfix()
     {
-        CardHoverShowPatch.CurrentCharacter = null;
+        CardHoverShowPatch.RunCharacter = null;
         CardHoverShowPatch.IsInRun = false;
-        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: CurrentCharacter cleared, IsInRun=false");
+        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: RunCharacter cleared, IsInRun=false");
+        RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info(msg); }, msg => MainFile.Logger.Warn(msg));
     }
 }

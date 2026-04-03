@@ -64,7 +64,7 @@ public class CharacterStat
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.1.2";
+    public const string CurrentModVersion = "v0.1.3";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();

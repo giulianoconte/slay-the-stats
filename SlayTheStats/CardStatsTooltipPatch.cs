@@ -19,10 +19,9 @@ public static class CardHoverShowPatch
 {
     private static bool         _warnedOnce;
     private static bool         _upgradeWarnedOnce;
-    private static bool         _ownerWarnedOnce;
     private static NCardHolder? _activeHolder;
 
-    internal static string? CurrentCharacter;
+    internal static string? RunCharacter;
     internal static bool    IsInRun;
 
     static void Postfix(NCardHolder __instance)
@@ -41,20 +40,7 @@ public static class CardHoverShowPatch
             var upgradeLevel = GetUpgradeLevel(__instance);
             var lookupId = FindCardLookupId(rawId, upgradeLevel);
 
-            // Derive character context first — needed for contextual "no data" messages
-            // regardless of whether the card has stats data.
-            // Only use the owner-chain fallback when we're in a run: outside a run (main-menu
-            // compendium) CurrentCharacter == null means "all chars" and should stay null.
-            var character = CurrentCharacter;
-            if (character == null && IsInRun)
-            {
-                character = GetCharacterFromOwner(__instance);
-                if (character != null)
-                {
-                    CurrentCharacter = character;
-                    MainFile.Logger.Info($"[SlayTheStats] CardHover: character derived from owner '{character}'");
-                }
-            }
+            var character = RunCharacter;
 
             var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
                 ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
@@ -225,27 +211,6 @@ public static class CardHoverShowPatch
         {
             if (!_upgradeWarnedOnce) { MainFile.Logger.Warn($"SlayTheStats: GetUpgradeLevel failed — {e.Message}"); _upgradeWarnedOnce = true; }
             return 0;
-        }
-    }
-
-    private static string? GetCharacterFromOwner(NCardHolder holder)
-    {
-        try
-        {
-            var cardNode  = AccessTools.Property(typeof(NCardHolder), "CardNode")?.GetValue(holder);
-            var model     = cardNode != null ? AccessTools.Property(cardNode.GetType(), "Model")?.GetValue(cardNode) : null;
-            var owner     = model != null ? AccessTools.Property(model.GetType(), "Owner")?.GetValue(model) : null;
-            var character = owner != null ? AccessTools.Property(owner.GetType(), "Character")?.GetValue(owner) : null;
-            var id        = character != null ? AccessTools.Property(character.GetType(), "Id")?.GetValue(character) : null;
-            if (id == null) return null;
-            var category = AccessTools.Property(id.GetType(), "Category")?.GetValue(id) as string;
-            var entry    = AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string;
-            return category != null && entry != null ? $"{category}.{entry}".ToUpper() : null;
-        }
-        catch (Exception e)
-        {
-            if (!_ownerWarnedOnce) { MainFile.Logger.Warn($"SlayTheStats: GetCharacterFromOwner failed — {e.Message}"); _ownerWarnedOnce = true; }
-            return null;
         }
     }
 
@@ -482,17 +447,6 @@ public static class CardFreedToPoolPatch
     }
 }
 
-[HarmonyPatch(typeof(NGame), "ReturnToMainMenuAfterRun")]
-public static class ClearCurrentCharacterPatch
-{
-    static void Prefix()
-    {
-        CardHoverShowPatch.CurrentCharacter = null;
-        CardHoverShowPatch.IsInRun = false;
-        MainFile.Logger.Info("[SlayTheStats] ReturnToMainMenu: CurrentCharacter cleared, IsInRun=false");
-    }
-}
-
 /// <summary>
 /// Shows card stats in the inspect screen (opened by right-clicking a card on a reward/shop screen).
 /// NInspectCardScreen.UpdateCardDisplay fires whenever the displayed card changes (on open, on
@@ -529,7 +483,7 @@ public static class InspectCardDisplayPatch
                             ?? 0;
             var lookupId = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel);
 
-            var character    = CardHoverShowPatch.CurrentCharacter;
+            var character    = CardHoverShowPatch.RunCharacter;
             var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
                 ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
                 : (int?)null;
@@ -626,7 +580,7 @@ public static class MerchantCardCreateHoverTipPatch
                             ?? 0;
             var lookupId = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel);
 
-            var character    = CardHoverShowPatch.CurrentCharacter;
+            var character    = CardHoverShowPatch.RunCharacter;
             var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
                 ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
                 : (int?)null;

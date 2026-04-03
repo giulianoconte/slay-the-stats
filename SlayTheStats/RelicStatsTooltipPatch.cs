@@ -39,19 +39,6 @@ internal static class RelicHoverHelper
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
         MainFile.Logger.Info($"[SlayTheStats] RelicHover.Show: type={holder.GetType().Name} activeHolder={((object?)_activeHolder == null ? "null" : _activeHolder.GetType().Name)} hasActiveHover={TooltipHelper.HasActiveHover}");
-        // Lazily populate CurrentCharacter from the relic owner chain as a fallback for cases where
-        // StartRunPatch fired before the run object was fully initialised. Only applies to in-run
-        // holders (NRelicBasicHolder/NRelicInventoryHolder); merchant and collection holders have no owner.
-        // Guard on IsInRun: outside a run, CurrentCharacter == null means "all chars" and should stay null.
-        if (CardHoverShowPatch.CurrentCharacter == null && CardHoverShowPatch.IsInRun)
-        {
-            var character = TryGetCharacterFromRelicHolder(holder);
-            if (character != null)
-            {
-                CardHoverShowPatch.CurrentCharacter = character;
-                MainFile.Logger.Info($"[SlayTheStats] RelicHover: character derived from owner '{character}'");
-            }
-        }
         ShowCore(holder, GetRelicId(holder));
         ShouldPushCardContainer = _activeHolder == holder;
         HideIfNotActive(holder);
@@ -76,36 +63,15 @@ internal static class RelicHoverHelper
     /// <summary>
     /// Shows stats for a relic option on an ancient event choice screen (NEventOptionButton).
     /// Only fires when the option carries a relic (Option.Relic != null).
-    /// Falls back to walking Event.Owner.Character.Id when CurrentCharacter is not yet set.
+    /// Only fires when the option carries a relic (Option.Relic != null).
     /// </summary>
     internal static void ShowAncientOption(object holder)
     {
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
-        if (CardHoverShowPatch.CurrentCharacter == null)
-        {
-            var character = TryGetCharacterFromEventOption(holder);
-            if (character != null) CardHoverShowPatch.CurrentCharacter = character;
-        }
         ShowCore(holder, GetRelicIdFromEventOption(holder));
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
-    }
-
-    /// <summary>
-    /// Walks NEventOptionButton.Event → .Owner → .Character → .Id to recover the current run
-    /// character. Used as fallback when CurrentCharacter is not yet set on ancient choice screens.
-    /// </summary>
-    private static string? TryGetCharacterFromEventOption(object holder)
-    {
-        try
-        {
-            var eventModel = AccessTools.Property(holder.GetType(), "Event")?.GetValue(holder);
-            var owner      = eventModel != null ? AccessTools.Property(eventModel.GetType(), "Owner")?.GetValue(eventModel) : null;
-            var character  = owner      != null ? AccessTools.Property(owner.GetType(),      "Character")?.GetValue(owner)  : null;
-            return CharacterIdHelper.Extract(character);
-        }
-        catch { return null; }
     }
 
     /// <summary>
@@ -135,7 +101,7 @@ internal static class RelicHoverHelper
                          : MainFile.Db.Relics.ContainsKey(rawId)             ? rawId
                          : null;
 
-            var character    = CardHoverShowPatch.CurrentCharacter;
+            var character    = CardHoverShowPatch.RunCharacter;
             var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
                 ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
                 : (int?)null;
@@ -171,13 +137,6 @@ internal static class RelicHoverHelper
         }
     }
 
-    /// <summary>Unconditionally clears relic hover state. Used by combat-room transition safety net.</summary>
-    internal static void ForceHide()
-    {
-        _activeHolder           = null;
-        ShouldPushCardContainer = false;
-    }
-
     internal static void Hide(object source)
     {
         var matched = source == _activeHolder;
@@ -188,29 +147,6 @@ internal static class RelicHoverHelper
         ShouldPushCardContainer = false;
         TooltipHelper.HasActiveHover = false;
         TooltipHelper.HideWithDelay();
-    }
-
-    /// <summary>
-    /// Walks holder.Relic (NRelic) → .Owner (NPlayer) → .Character → .Id to recover the
-    /// current run character. Used as a fallback when CurrentCharacter is not yet set
-    /// (e.g. if StartRunPatch fired before the run object was fully initialised).
-    /// </summary>
-    private static string? TryGetCharacterFromRelicHolder(object holder)
-    {
-        try
-        {
-            // Mirror the card chain: holder → Relic (NRelic) → Model (RelicModel) → Owner (NPlayer) → Character → Id
-            var relic     = AccessTools.Property(holder.GetType(), "Relic")?.GetValue(holder);
-            var model     = relic != null ? AccessTools.Property(relic.GetType(), "Model")?.GetValue(relic) : null;
-            var owner     = model != null ? AccessTools.Property(model.GetType(), "Owner")?.GetValue(model) : null;
-            var character = owner != null ? AccessTools.Property(owner.GetType(), "Character")?.GetValue(owner) : null;
-            var id        = character != null ? AccessTools.Property(character.GetType(), "Id")?.GetValue(character) : null;
-            if (id == null) return null;
-            var category  = AccessTools.Property(id.GetType(), "Category")?.GetValue(id) as string;
-            var entry     = AccessTools.Property(id.GetType(), "Entry")?.GetValue(id) as string;
-            return category != null && entry != null ? $"{category}.{entry}".ToUpper() : null;
-        }
-        catch { return null; }
     }
 
     /// <summary>

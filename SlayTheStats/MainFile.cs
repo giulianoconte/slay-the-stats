@@ -28,10 +28,6 @@ public partial class MainFile : Node
             catch (Exception e) { Logger.Warn($"SlayTheStats: Patch {type.Name} skipped — {e.Message}"); }
         }
 
-        var patched = harmony.GetPatchedMethods().ToList();
-        if (!patched.Any(m => m.DeclaringType?.Name == "NGame" && m.Name == "ReturnToMainMenuAfterRun"))
-            Logger.Warn("SlayTheStats: RunEndedPatch did not apply — stats will not update after runs. Game update may have changed NGame.");
-
         var config = new SlayTheStatsConfig();
         ModConfigRegistry.Register(ModId, config);
         ModConfigBridge.DeferredRegister();
@@ -39,7 +35,8 @@ public partial class MainFile : Node
         TooltipHelper.TryLoadModFonts();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
-        RunParser.ProcessNewRuns(Db, SavePath, msg => { if (SlayTheStatsConfig.DebugMode) Logger.Info(msg); }, msg => Logger.Warn(msg));
+        // RunParser.ProcessNewRuns is called from MainMenuReadyPatch (NMainMenu._Ready),
+        // which fires on boot and after every run ends.
     }
 
     public override void _Ready()
