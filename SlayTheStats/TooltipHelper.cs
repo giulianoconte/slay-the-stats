@@ -52,6 +52,14 @@ internal static class TooltipHelper
     internal static int  ShowGen;
     private  static bool _sceneTheftDone;
 
+    /// <summary>
+    /// Snapshot of the card/relic holder that triggered the current ShowPanel call.
+    /// Captured at ShowPanel time because ClearHoverTips can null out the patch-level
+    /// _activeHolder before _Process runs (tooltip-less cards call Create+Clear in the
+    /// same frame). Cleared by HideWithDelay's timer when the panel actually hides.
+    /// </summary>
+    internal static Control? LastShowHolder;
+
     internal const string TooltipNodeName = "SlayTheStatsTooltip";
 
     internal static void EnsurePanelExists()
@@ -122,11 +130,12 @@ internal static class TooltipHelper
     /// Increments ShowGen (cancels any pending hide timers), sets panel text, attaches to root,
     /// injects the position follower on first call, and makes the panel visible.
     /// </summary>
-    internal static void ShowPanel(string tableText)
+    internal static void ShowPanel(string tableText, Control? holder = null)
     {
         MainFile.Logger.Info($"[SlayTheStats] ShowPanel gen={ShowGen}→{ShowGen + 1} activeHover={HasActiveHover}");
         ShowGen++;
         HasActiveHover = true;
+        if (holder != null) LastShowHolder = holder;
 
         var panel = GetPanelPublic();
         if (panel == null) return;
@@ -190,6 +199,7 @@ internal static class TooltipHelper
             var hiding = ShowGen == genAtHide && !HasActiveHover && !InspectActive;
             MainFile.Logger.Info($"[SlayTheStats] HideTimer gen={ShowGen} expected={genAtHide} activeHover={HasActiveHover} hiding={hiding}");
             if (!hiding) return;
+            LastShowHolder = null;
             var node = GetPanelPublic();
             if (node != null) node.Visible = false;
             if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
@@ -596,7 +606,7 @@ public partial class SlayTheStatsPositionFollower : Node
 
             // NHoverTipSet absent during an active hover — position relative to the active
             // holder directly (e.g. QueueFree hasn't flushed yet, or no native tip set).
-            var holder = CardHoverShowPatch.ActiveHolderControl ?? RelicHoverHelper.ActiveHolderControl;
+            var holder = CardHoverShowPatch.ActiveHolderControl ?? RelicHoverHelper.ActiveHolderControl ?? TooltipHelper.LastShowHolder;
             if (holder == null || !GodotObject.IsInstanceValid(holder)) return;
 
             p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
@@ -637,7 +647,8 @@ public partial class SlayTheStatsPositionFollower : Node
 
             var ancientBtn = AncientEventOptionFocusPatch.ActiveAncientOptionControl;
             var cardHolder = CardHoverShowPatch.ActiveHolderControl
-                          ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
+                          ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard
+                          ?? TooltipHelper.LastShowHolder;
 
             float x;
             if (ancientBtn != null && GodotObject.IsInstanceValid(ancientBtn))
@@ -649,14 +660,25 @@ public partial class SlayTheStatsPositionFollower : Node
             }
             else if (cardHolder != null && GodotObject.IsInstanceValid(cardHolder))
             {
-                // Card hover: tcX is the card's right edge (game-placed). Use the holder's
-                // actual right edge only for overflow detection; keep tcX as the placement
-                // anchor so the panel aligns with the game's own tooltip column.
-                float cardRight = cardHolder.GlobalPosition.X + cardHolder.Size.X;
-                bool  flipToLeft = cardRight + TooltipHelper.TooltipWidth > viewportSize.X;
-                x = flipToLeft ? cardHolder.GlobalPosition.X - TooltipHelper.TooltipWidth : tcX;
+                // NCardHolder has Size=(0,0); GlobalPosition is the card's visual centre.
+                // The game places textHoverTipContainer at the card's right edge normally,
+                // but flips it to the left edge when the card is near the right viewport edge.
+                // Detect which side the game chose by comparing tcX to the holder centre.
+                bool gameFlippedLeft = tcX < cardHolder.GlobalPosition.X;
+                if (gameFlippedLeft)
+                {
+                    // tcX is the card's left edge; place our panel to the left of it.
+                    x = tcX - TooltipHelper.TooltipWidth;
+                }
+                else
+                {
+                    // tcX is the card's right edge; place our panel there.
+                    x = tcX;
+                }
                 x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
                 p.Position = new Vector2(x, tcY + sep);
+                if (logOnce)
+                    MainFile.Logger.Info($"[SlayTheStats] _Process no-tip card: holder.GlobalPos={cardHolder.GlobalPosition} tcX={tcX} gameFlippedLeft={gameFlippedLeft} x={x}");
             }
             else
             {

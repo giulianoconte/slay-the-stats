@@ -79,7 +79,7 @@ public static class CardHoverShowPatch
 
             TooltipHelper.TrySceneTheftOnce();
             _activeHolder = __instance;
-            TooltipHelper.ShowPanel(statsText);
+            TooltipHelper.ShowPanel(statsText, __instance as Control);
         }
         catch (Exception e)
         {
