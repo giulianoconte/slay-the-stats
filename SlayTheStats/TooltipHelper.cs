@@ -632,26 +632,36 @@ public partial class SlayTheStatsPositionFollower : Node
             var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
             float tcX = textContainer.GlobalPosition.X;
 
-            bool flipToLeft;
-            var holder = CardHoverShowPatch.ActiveHolderControl
-                      ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
-            if (holder != null && GodotObject.IsInstanceValid(holder))
+            var ancientBtn = AncientEventOptionFocusPatch.ActiveAncientOptionControl;
+            if (ancientBtn != null && GodotObject.IsInstanceValid(ancientBtn))
             {
-                // Game flips when placing panel to the right of the card would overflow.
-                float cardRight = holder.GlobalPosition.X + holder.Size.X;
-                flipToLeft = cardRight + TooltipHelper.TooltipWidth > viewportSize.X;
+                // Ancient event options use HoverTipAlignment.Left — position panel to the left of the button.
+                float x = Math.Max(0, ancientBtn.GlobalPosition.X - TooltipHelper.TooltipWidth);
+                p.Position = new Vector2(x, ancientBtn.GlobalPosition.Y);
             }
             else
             {
-                // Fallback: if textContainer (= card right edge when not flipped) + panel
-                // overflows, the game must have already flipped textContainer to the left edge.
-                flipToLeft = tcX + TooltipHelper.TooltipWidth > viewportSize.X;
-            }
+                bool flipToLeft;
+                var holder = CardHoverShowPatch.ActiveHolderControl
+                          ?? MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
+                if (holder != null && GodotObject.IsInstanceValid(holder))
+                {
+                    // Game flips when placing panel to the right of the card would overflow.
+                    float cardRight = holder.GlobalPosition.X + holder.Size.X;
+                    flipToLeft = cardRight + TooltipHelper.TooltipWidth > viewportSize.X;
+                }
+                else
+                {
+                    // Fallback: if textContainer (= card right edge when not flipped) + panel
+                    // overflows, the game must have already flipped textContainer to the left edge.
+                    flipToLeft = tcX + TooltipHelper.TooltipWidth > viewportSize.X;
+                }
 
-            // textContainer.X is at the card's right edge (no flip) or left edge (flip).
-            float x = flipToLeft ? tcX - TooltipHelper.TooltipWidth : tcX;
-            x = Math.Max(0, x);
-            p.Position = new Vector2(x, textContainer.GlobalPosition.Y + sep);
+                // textContainer.X is at the card's right edge (no flip) or left edge (flip).
+                float x = flipToLeft ? tcX - TooltipHelper.TooltipWidth : tcX;
+                x = Math.Max(0, x);
+                p.Position = new Vector2(x, textContainer.GlobalPosition.Y + sep);
+            }
         }
 
         // Overflow correction: if our panel bottom goes below the viewport, shift the

@@ -39,7 +39,7 @@ public partial class MainFile : Node
         TooltipHelper.TryLoadModFonts();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
-        RunParser.ProcessNewRuns(Db, SavePath, msg => Logger.Info(msg), msg => Logger.Warn(msg));
+        RunParser.ProcessNewRuns(Db, SavePath, msg => { if (SlayTheStatsConfig.DebugMode) Logger.Info(msg); }, msg => Logger.Warn(msg));
     }
 
     public override void _Ready()

@@ -76,14 +76,36 @@ internal static class RelicHoverHelper
     /// <summary>
     /// Shows stats for a relic option on an ancient event choice screen (NEventOptionButton).
     /// Only fires when the option carries a relic (Option.Relic != null).
+    /// Falls back to walking Event.Owner.Character.Id when CurrentCharacter is not yet set.
     /// </summary>
     internal static void ShowAncientOption(object holder)
     {
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
+        if (CardHoverShowPatch.CurrentCharacter == null)
+        {
+            var character = TryGetCharacterFromEventOption(holder);
+            if (character != null) CardHoverShowPatch.CurrentCharacter = character;
+        }
         ShowCore(holder, GetRelicIdFromEventOption(holder));
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
+    }
+
+    /// <summary>
+    /// Walks NEventOptionButton.Event → .Owner → .Character → .Id to recover the current run
+    /// character. Used as fallback when CurrentCharacter is not yet set on ancient choice screens.
+    /// </summary>
+    private static string? TryGetCharacterFromEventOption(object holder)
+    {
+        try
+        {
+            var eventModel = AccessTools.Property(holder.GetType(), "Event")?.GetValue(holder);
+            var owner      = eventModel != null ? AccessTools.Property(eventModel.GetType(), "Owner")?.GetValue(eventModel) : null;
+            var character  = owner      != null ? AccessTools.Property(owner.GetType(),      "Character")?.GetValue(owner)  : null;
+            return CharacterIdHelper.Extract(character);
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -395,11 +417,22 @@ public static class TreasureRoomRelicHolderUnfocusPatch
 [HarmonyPatch(typeof(NEventOptionButton), "OnFocus")]
 public static class AncientEventOptionFocusPatch
 {
-    static void Postfix(NEventOptionButton __instance) => RelicHoverHelper.ShowAncientOption(__instance);
+    internal static Control? ActiveAncientOptionControl;
+
+    static void Postfix(NEventOptionButton __instance)
+    {
+        ActiveAncientOptionControl = __instance;
+        RelicHoverHelper.ShowAncientOption(__instance);
+    }
 }
 
 [HarmonyPatch(typeof(NEventOptionButton), "OnUnfocus")]
 public static class AncientEventOptionUnfocusPatch
 {
-    static void Postfix(NEventOptionButton __instance) => RelicHoverHelper.Hide(__instance);
+    static void Postfix(NEventOptionButton __instance)
+    {
+        if (AncientEventOptionFocusPatch.ActiveAncientOptionControl == __instance)
+            AncientEventOptionFocusPatch.ActiveAncientOptionControl = null;
+        RelicHoverHelper.Hide(__instance);
+    }
 }

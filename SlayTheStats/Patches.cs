@@ -1,5 +1,6 @@
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Events;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Runs;
@@ -39,7 +40,7 @@ public static class RunEndedPatch
 {
     static void Prefix()
     {
-        RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => MainFile.Logger.Info(msg), msg => MainFile.Logger.Warn(msg));
+        RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info(msg); }, msg => MainFile.Logger.Warn(msg));
     }
 }
 
@@ -54,7 +55,7 @@ public static class StartRunPatch
     static void Postfix(NGame __instance)
     {
         CardHoverShowPatch.IsInRun = true;
-        MainFile.Logger.Info("[SlayTheStats] StartRun fired: IsInRun=true");
+        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun fired: IsInRun=true");
         try
         {
             // NGame → Run → Player → Character → Id (all via reflection — types may change)
@@ -62,9 +63,9 @@ public static class StartRunPatch
             var player    = run?.GetType().GetProperty("Player", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(run);
             var character = player?.GetType().GetProperty("Character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(player);
             var id        = CharacterIdHelper.Extract(character);
-            if (id == null) { MainFile.Logger.Info("[SlayTheStats] StartRun: character id was null"); return; }
+            if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: character id was null"); return; }
             CardHoverShowPatch.CurrentCharacter = id;
-            MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}'");
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}'");
         }
         catch (Exception e)
         {
@@ -84,19 +85,47 @@ public static class LoadRunPatch
     static void Prefix(RunState runState)
     {
         CardHoverShowPatch.IsInRun = true;
-        MainFile.Logger.Info("[SlayTheStats] LoadRun fired: IsInRun=true");
+        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun fired: IsInRun=true");
         try
         {
             var players = runState?.Players;
-            if (players == null || players.Count == 0) { MainFile.Logger.Info("[SlayTheStats] LoadRun: no players in runState"); return; }
+            if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: no players in runState"); return; }
             var id = CharacterIdHelper.Extract(players[0].Character);
-            if (id == null) { MainFile.Logger.Info("[SlayTheStats] LoadRun: character id was null"); return; }
+            if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: character id was null"); return; }
             CardHoverShowPatch.CurrentCharacter = id;
-            MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}'");
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}'");
         }
         catch (Exception e)
         {
             MainFile.Logger.Warn($"[SlayTheStats] LoadRun reflection failed: {e.Message}");
+        }
+    }
+}
+
+/// <summary>
+/// Sets CurrentCharacter when any event layout loads its event data. This fires after
+/// EventModel.Owner is guaranteed set (BeginEvent completes before SetupLayout → SetEvent),
+/// which is earlier and more reliable than StartRun for new runs (Neow, ancient choices).
+/// Covers every event screen including the first Neow choice on run start.
+/// </summary>
+[HarmonyPatch(typeof(NEventLayout), "SetEvent")]
+public static class EventLayoutSetEventPatch
+{
+    static void Postfix(object __0)
+    {
+        try
+        {
+            if (__0 == null) return;
+            var owner     = __0.GetType().GetProperty("Owner", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__0);
+            var character = owner?.GetType().GetProperty("Character", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(owner);
+            var id        = CharacterIdHelper.Extract(character);
+            if (id == null) return;
+            CardHoverShowPatch.CurrentCharacter = id;
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] EventLayout.SetEvent: character set to '{id}'");
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] EventLayout.SetEvent reflection failed: {e.Message}");
         }
     }
 }
@@ -114,7 +143,7 @@ public static class CombatRoomReadyPatch
     {
         var panel = TooltipHelper.GetPanelPublic();
         if (panel == null || !panel.Visible) return;
-        MainFile.Logger.Info($"[SlayTheStats] CombatRoomReady: panel still visible on room start, force-hiding (hasActiveHover={TooltipHelper.HasActiveHover})");
+        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] CombatRoomReady: panel still visible on room start, force-hiding (hasActiveHover={TooltipHelper.HasActiveHover})");
         TooltipHelper.HasActiveHover = false;
         TooltipHelper.InspectActive  = false;
         CardHoverShowPatch.HideTooltip();
@@ -135,6 +164,6 @@ public static class MainMenuReadyPatch
     {
         CardHoverShowPatch.CurrentCharacter = null;
         CardHoverShowPatch.IsInRun = false;
-        MainFile.Logger.Info("[SlayTheStats] MainMenuReady: CurrentCharacter cleared, IsInRun=false");
+        if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: CurrentCharacter cleared, IsInRun=false");
     }
 }
