@@ -344,8 +344,19 @@ public static class RunParser
     {
         var found = new List<string>();
 
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var sts2Root = Path.Combine(appData, "SlayTheSpire2", "steam");
+        string sts2Root;
+        if (!string.IsNullOrWhiteSpace(SlayTheStatsConfig.DataDirectory))
+        {
+            sts2Root = Path.Combine(SlayTheStatsConfig.DataDirectory.Trim(), "steam");
+        }
+        else
+        {
+            var specialFolder = OperatingSystem.IsWindows()
+                ? Environment.SpecialFolder.ApplicationData
+                : Environment.SpecialFolder.LocalApplicationData;
+            var appData = Environment.GetFolderPath(specialFolder);
+            sts2Root = Path.Combine(appData, "SlayTheSpire2", "steam");
+        }
 
         if (!Directory.Exists(sts2Root))
             return found;
@@ -373,4 +384,5 @@ public static class RunParser
 
         return found;
     }
+
 }

@@ -38,4 +38,12 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// to aid troubleshooting without requiring log inspection.
     /// </summary>
     public static bool DebugMode { get; set; } = false;
+
+    /// <summary>
+    /// Override the root directory where SlayTheSpire2 stores its data
+    /// (the folder that contains the "steam" subfolder).
+    /// Leave empty to use the platform default.
+    /// Example: /home/deck/.local/share/SlayTheSpire2
+    /// </summary>
+    public static string DataDirectory { get; set; } = "";
 }
