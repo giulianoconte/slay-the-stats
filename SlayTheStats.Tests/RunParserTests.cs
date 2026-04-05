@@ -32,13 +32,13 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true), new("CARD.DEFEND", Picked: false)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var strike = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var strike = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, strike.RunsOffered);
         Assert.Equal(1, strike.RunsPicked);
 
-        var defend = db.Cards["CARD.DEFEND"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var defend = db.Cards["CARD.DEFEND"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, defend.RunsOffered);
         Assert.Equal(0, defend.RunsPicked);
     }
@@ -54,7 +54,7 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true, UpgradeLevel: 1)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.True(db.Cards.ContainsKey("CARD.STRIKE+"));
         Assert.False(db.Cards.ContainsKey("CARD.STRIKE"));
@@ -69,7 +69,7 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true, UpgradeLevel: 0)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.True(db.Cards.ContainsKey("CARD.STRIKE"));
         Assert.False(db.Cards.ContainsKey("CARD.STRIKE+"));
@@ -86,10 +86,10 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: false), new("CARD.DEFEND", Picked: false)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.True(db.Cards.ContainsKey(RunParser.SkipId));
-        var skip = db.Cards[RunParser.SkipId]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var skip = db.Cards[RunParser.SkipId]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, skip.RunsPicked);
     }
 
@@ -104,9 +104,9 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true)]
         ]], deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
         Assert.Equal(1, stat.RunsWon);
     }
@@ -120,9 +120,9 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true)]
         ]], deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
         Assert.Equal(0, stat.RunsWon);
     }
@@ -135,9 +135,9 @@ public class RunParserTests : IDisposable
             won: true,
             deck: [new DeckCard("CARD.STRIKE_IRONCLAD", FloorAdded: 1)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Cards["CARD.STRIKE_IRONCLAD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Cards["CARD.STRIKE_IRONCLAD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
         Assert.Equal(1, stat.RunsWon);
         Assert.Equal(0, stat.RunsOffered);
@@ -153,9 +153,9 @@ public class RunParserTests : IDisposable
             acts: [[[new("CARD.STRIKE", Picked: false)], [new("CARD.STRIKE", Picked: false)]]],
             deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1), new DeckCard("CARD.STRIKE", FloorAdded: 2)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
     }
 
@@ -171,10 +171,10 @@ public class RunParserTests : IDisposable
             ],
             deck: [new DeckCard("CARD.STRIKE", FloorAdded: 3)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
-        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN|default"));
+        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"));
     }
 
     [Fact]
@@ -184,10 +184,10 @@ public class RunParserTests : IDisposable
         var path = TempRun(Build(
             deck: [new DeckCard("CARD.STRIKE", FloorAdded: 1, UpgradeLevel: 1)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.True(db.Cards.ContainsKey("CARD.STRIKE+"));
-        Assert.Equal(1, db.Cards["CARD.STRIKE+"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"].RunsPresent);
+        Assert.Equal(1, db.Cards["CARD.STRIKE+"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"].RunsPresent);
     }
 
     // --- Abandoned runs ---
@@ -201,7 +201,7 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.Empty(db.Cards);
     }
@@ -221,8 +221,8 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(soloPath, "run1", db);
-        RunParser.ProcessRun(multiPath, "run2", db);
+        RunParser.ProcessRun(soloPath, "run1", "default", db);
+        RunParser.ProcessRun(multiPath, "run2", "default", db);
 
         var strikeKeys = db.Cards["CARD.STRIKE"].Keys.ToList();
         Assert.Equal(2, strikeKeys.Count);
@@ -243,9 +243,9 @@ public class RunParserTests : IDisposable
             [new("CARD.STRIKE", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsOffered);
         Assert.Equal(1, stat.RunsPicked);
     }
@@ -265,11 +265,11 @@ public class RunParserTests : IDisposable
             ],
             deck: [new DeckCard("CARD.STRIKE", FloorAdded: 2)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         // Presence should be recorded under act 1, not act 2
-        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"].RunsPresent);
-        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
+        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"].RunsPresent);
+        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN|default"));
     }
 
     [Fact]
@@ -281,10 +281,10 @@ public class RunParserTests : IDisposable
             acts: [[[new("CARD.DEFEND", Picked: false)]], [[new("CARD.STRIKE", Picked: false)]]],
             deck: [new DeckCard("CARD.STRIKE", FloorAdded: 99)]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
-        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN|default"));
+        Assert.False(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"));
     }
 
     [Fact]
@@ -300,11 +300,11 @@ public class RunParserTests : IDisposable
                 new DeckCard("CARD.STRIKE", FloorAdded: 2), // act 2 (floor 2 > boundary 1, <= boundary 2)
             ]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
-        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
-        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"].RunsPresent);
-        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"].RunsPresent);
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"));
+        Assert.True(db.Cards["CARD.STRIKE"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN|default"));
+        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"].RunsPresent);
+        Assert.Equal(1, db.Cards["CARD.STRIKE"]["CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN|default"].RunsPresent);
     }
 }

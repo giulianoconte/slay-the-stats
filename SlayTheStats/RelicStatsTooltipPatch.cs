@@ -101,26 +101,24 @@ internal static class RelicHoverHelper
                          : MainFile.Db.Relics.ContainsKey(rawId)             ? rawId
                          : null;
 
-            var character    = CardHoverShowPatch.RunCharacter;
-            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
-                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
-                : (int?)null;
+            var filter         = CardHoverShowPatch.BuildFilter(CardHoverShowPatch.RunCharacter);
+            var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
+            var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
 
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(character, maxAscension);
+                statsText = CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
             }
             else
             {
                 var actStats = StatsAggregator.AggregateRelicsByAct(
-                    MainFile.Db.Relics[lookupId], character: character, gameMode: "standard", onlyAscension: maxAscension);
-                var wrBaseline = character != null
-                    ? StatsAggregator.GetCharacterWR(MainFile.Db, character)
+                    MainFile.Db.Relics[lookupId], filter);
+                var wrBaseline = effectiveChar != null
+                    ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar)
                     : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel      = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(character, maxAscension) : BuildStatsText(actStats, wrBaseline, characterLabel, maxAscension, shopBuyRateBaseline);
+                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -210,7 +208,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All chars", int? maxAscension = null, double shopBuyRateBaseline = 20.0)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0)
     {
         var sb = new StringBuilder();
 
@@ -251,7 +249,7 @@ internal static class RelicHoverHelper
         var cTotBuys   = CardHoverShowPatch.FormatBuysCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline);
         sb.Append($"All {cTotRuns}  {cTotBuys}  {cTotWr}");
 
-        var ascPrefix   = maxAscension != null ? $"A{maxAscension} " : "";
+        var ascPrefix   = CardHoverShowPatch.FormatAscensionPrefix(ascensionMin, ascensionMax);
         var wrStr       = $"{Math.Round(wrBaseline):F0}%";
         var buysBaseStr = $"{Math.Round(shopBuyRateBaseline):F0}%";
         sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel}  Buys: {buysBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");

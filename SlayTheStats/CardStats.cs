@@ -29,6 +29,18 @@ public class CardStat
     // Per-run counters (Shop% — shop appearances and purchases)
     [JsonPropertyName("runs_shop_seen")]   public int RunsShopSeen   { get; set; }
     [JsonPropertyName("runs_shop_bought")] public int RunsShopBought { get; set; }
+
+    // Verbose acquisition breakdown — fight rewards (pre-upgraded cards only)
+    [JsonPropertyName("runs_offered_upgraded")] public int RunsOfferedUpgraded { get; set; }
+    [JsonPropertyName("runs_picked_upgraded")]  public int RunsPickedUpgraded  { get; set; }
+
+    // Verbose acquisition breakdown — shop (pre-upgraded cards only)
+    [JsonPropertyName("runs_shop_seen_upgraded")]   public int RunsShopSeenUpgraded   { get; set; }
+    [JsonPropertyName("runs_shop_bought_upgraded")] public int RunsShopBoughtUpgraded { get; set; }
+
+    // Verbose acquisition breakdown — upgrades from non-reward sources
+    [JsonPropertyName("campfire_upgrades")]    public int CampfireUpgrades    { get; set; }
+    [JsonPropertyName("event_relic_upgrades")] public int EventRelicUpgrades  { get; set; }
 }
 
 /// <summary>
@@ -36,9 +48,9 @@ public class CardStat
 /// e.g. "CHARACTER.IRONCLAD|0|1|standard|v0.98.0".
 /// Acts are 1-indexed. Use RunContext.ToKey() to build and RunContext.Parse() to read.
 /// </summary>
-public readonly record struct RunContext(string Character, int Ascension, int Act, string GameMode, string BuildVersion)
+public readonly record struct RunContext(string Character, int Ascension, int Act, string GameMode, string BuildVersion, string Profile = "default")
 {
-    public string ToKey() => $"{Character}|{Ascension}|{Act}|{GameMode}|{BuildVersion}";
+    public string ToKey() => $"{Character}|{Ascension}|{Act}|{GameMode}|{BuildVersion}|{Profile}";
 
     public static RunContext Parse(string key)
     {
@@ -46,8 +58,9 @@ public readonly record struct RunContext(string Character, int Ascension, int Ac
         if (parts.Length < 5
             || !int.TryParse(parts[1], out var asc)
             || !int.TryParse(parts[2], out var act))
-            return new RunContext("UNKNOWN", 0, 1, "UNKNOWN", "UNKNOWN");
-        return new RunContext(parts[0], asc, act, parts[3], parts[4]);
+            return new RunContext("UNKNOWN", 0, 1, "UNKNOWN", "UNKNOWN", "default");
+        var profile = parts.Length >= 6 ? parts[5] : "default";
+        return new RunContext(parts[0], asc, act, parts[3], parts[4], profile);
     }
 }
 
@@ -64,7 +77,7 @@ public class CharacterStat
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.1.4";
+    public const string CurrentModVersion = "v0.2.0";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();

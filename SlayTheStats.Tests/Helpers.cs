@@ -46,7 +46,7 @@ public static class RunFixture
                         var upgradeField = c.UpgradeLevel > 0 ? $@", ""current_upgrade_level"": {c.UpgradeLevel}" : "";
                         return $@"{{ ""card"": {{ ""id"": ""{c.Id}""{upgradeField} }}, ""was_picked"": {c.Picked.ToString().ToLower()} }}";
                     }));
-                    floorJsons.Add($@"{{ ""player_stats"": [{{ ""card_choices"": [{choicesJson}] }}] }}");
+                    floorJsons.Add($@"{{ ""map_point_type"": ""monster"", ""player_stats"": [{{ ""card_choices"": [{choicesJson}] }}] }}");
                 }
             }
 

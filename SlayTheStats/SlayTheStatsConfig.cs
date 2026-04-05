@@ -46,4 +46,29 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// Example: /home/deck/.local/share/SlayTheSpire2
     /// </summary>
     public static string DataDirectory { get; set; } = "";
+
+    // ── Aggregation filter properties (v0.2.0) ──────────────────────────────
+
+    /// <summary>Minimum ascension to include in aggregation (0 = no min).</summary>
+    public static int AscensionMin { get; set; } = 0;
+
+    /// <summary>Maximum ascension to include in aggregation (10 = default max, STS2 max is 20).</summary>
+    public static int AscensionMax { get; set; } = 10;
+
+    /// <summary>Minimum game version to include (empty = no min). Compared semantically.</summary>
+    public static string VersionMin { get; set; } = "";
+
+    /// <summary>Maximum game version to include (empty = no max). Compared semantically.</summary>
+    public static string VersionMax { get; set; } = "";
+
+    /// <summary>
+    /// Comma-separated list of character IDs to include (e.g. "CHARACTER.IRONCLAD,CHARACTER.SILENT").
+    /// Empty = all characters.
+    /// </summary>
+    public static string FilterCharacters { get; set; } = "";
+
+    /// <summary>
+    /// Profile to filter by (e.g. "profile1"). Empty = all profiles.
+    /// </summary>
+    public static string FilterProfile { get; set; } = "";
 }

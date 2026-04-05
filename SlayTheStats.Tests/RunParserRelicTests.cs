@@ -32,9 +32,9 @@ public class RunParserRelicTests : IDisposable
             [new("RELIC.BURNING_BLOOD", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
     }
 
@@ -47,7 +47,7 @@ public class RunParserRelicTests : IDisposable
             [new("RELIC.BURNING_BLOOD", Picked: false)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.False(db.Relics.ContainsKey("RELIC.BURNING_BLOOD"));
     }
@@ -63,9 +63,9 @@ public class RunParserRelicTests : IDisposable
             [new("RELIC.BURNING_BLOOD", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsWon);
     }
 
@@ -78,9 +78,9 @@ public class RunParserRelicTests : IDisposable
             [new("RELIC.BURNING_BLOOD", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(0, stat.RunsWon);
     }
 
@@ -95,7 +95,7 @@ public class RunParserRelicTests : IDisposable
             [new("RELIC.BURNING_BLOOD", Picked: true)]
         ]]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
         Assert.Empty(db.Relics);
     }
@@ -112,10 +112,10 @@ public class RunParserRelicTests : IDisposable
             [[new("RELIC.VAJRA", Picked: true)]]
         ]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.True(db.Relics["RELIC.VAJRA"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN"));
-        Assert.False(db.Relics["RELIC.VAJRA"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"));
+        Assert.True(db.Relics["RELIC.VAJRA"].ContainsKey("CHARACTER.IRONCLAD|0|2|UNKNOWN|UNKNOWN|default"));
+        Assert.False(db.Relics["RELIC.VAJRA"].ContainsKey("CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"));
     }
 
     // --- Starter relic ---
@@ -126,9 +126,9 @@ public class RunParserRelicTests : IDisposable
         var db = new StatsDb();
         var path = TempRun(Build(starterRelics: ["RELIC.BURNING_BLOOD"]));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
     }
 
@@ -142,9 +142,9 @@ public class RunParserRelicTests : IDisposable
             starterRelics: ["RELIC.BURNING_BLOOD"]
         ));
 
-        RunParser.ProcessRun(path, "run1", db);
+        RunParser.ProcessRun(path, "run1", "default", db);
 
-        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN"];
+        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
         Assert.Equal(1, stat.RunsPresent);
     }
 }

@@ -28,9 +28,9 @@ public static class RunParser
 
         int newCount = 0;
 
-        foreach (var historyDir in historyDirs)
+        foreach (var (historyDir, profile) in historyDirs)
         {
-            log?.Invoke($"Scanning history directory: {historyDir}");
+            log?.Invoke($"Scanning history directory: {historyDir} (profile: {profile})");
             var runFiles = Directory.GetFiles(historyDir, "*.run");
 
             foreach (var path in runFiles)
@@ -41,7 +41,7 @@ public static class RunParser
 
                 try
                 {
-                    ProcessRun(path, runId, db, warn);
+                    ProcessRun(path, runId, profile, db, warn);
                     db.ProcessedRuns.Add(runId);
                     newCount++;
                 }
@@ -58,7 +58,7 @@ public static class RunParser
             db.Save(savePath, warn);
     }
 
-    internal static void ProcessRun(string path, string runId, StatsDb db, Action<string>? warn = null)
+    internal static void ProcessRun(string path, string runId, string profile, StatsDb db, Action<string>? warn = null)
     {
         var json = File.ReadAllText(path);
         var root = JsonNode.Parse(json) ?? throw new Exception("Failed to parse JSON");
@@ -87,15 +87,21 @@ public static class RunParser
         gameMode ??= "UNKNOWN";
 
         // Walk all map points across all acts and collect card choices and relic acquisitions with context
-        var allChoices = new List<(string cardId, bool wasPicked, RunContext context)>();
+        var allChoices = new List<(string cardId, bool wasPicked, bool wasUpgraded, RunContext context)>();
         var relicsAcquired = new List<(string relicId, RunContext context)>();
         var relicsSeenInFloors = new HashSet<string>();
 
         // Per-run shop tracking (deduplicated per item+context)
         var shopSeenThisRun        = new HashSet<(string id, string contextKey)>();
         var shopBoughtThisRun      = new HashSet<(string id, string contextKey)>();
+        var shopSeenUpgradedThisRun   = new HashSet<(string id, string contextKey)>();
+        var shopBoughtUpgradedThisRun = new HashSet<(string id, string contextKey)>();
         var relicShopSeenThisRun   = new HashSet<(string id, string contextKey)>();
         var relicShopBoughtThisRun = new HashSet<(string id, string contextKey)>();
+
+        // Verbose upgrade tracking
+        var campfireUpgradesThisRun    = new List<(string cardId, RunContext context)>();
+        var eventRelicUpgradesThisRun  = new List<(string cardId, RunContext context)>();
 
         var actArray = root["map_point_history"]?.AsArray();
         if (actArray == null)
@@ -128,13 +134,15 @@ public static class RunParser
             var floors = actArray[actIndex]?.AsArray();
             if (floors == null) continue;
 
-            var context = new RunContext(character, ascension, actIndex + 1, gameMode, buildVersion);
+            var context = new RunContext(character, ascension, actIndex + 1, gameMode, buildVersion, profile);
 
             foreach (var floor in floors)
             {
                 var mapPointType = floor?["map_point_type"]?.GetValue<string>();
                 bool isShop        = mapPointType == "shop";
                 bool isFightReward = mapPointType == "monster" || mapPointType == "elite" || mapPointType == "boss";
+                bool isCampfire    = mapPointType == "campfire";
+                bool isEvent       = mapPointType == "unknown";
 
                 var playerStatsArr = floor?["player_stats"]?.AsArray();
                 if (playerStatsArr == null) continue;
@@ -155,9 +163,10 @@ public static class RunParser
 
                                 var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
                                 var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
+                                bool wasUpgraded = upgradeLevel > 0;
 
                                 bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
-                                allChoices.Add((cardKey, wasPicked, context));
+                                allChoices.Add((cardKey, wasPicked, wasUpgraded, context));
                                 if (wasPicked) anyPicked = true;
                             }
 
@@ -168,11 +177,11 @@ public static class RunParser
                                 if (!anyPicked)
                                 {
                                     db.TotalSkips++;
-                                    allChoices.Add((SkipId, true, context));
+                                    allChoices.Add((SkipId, true, false, context));
                                 }
                             }
                         }
-                        else
+                        else if (isShop)
                         {
                             // Shop floor: card_choices lists the shop inventory; track for Shop% seen
                             foreach (var choice in cardChoices)
@@ -182,6 +191,8 @@ public static class RunParser
                                 var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
                                 var cardKey = upgradeLevel > 0 ? cardId + "+" : cardId;
                                 shopSeenThisRun.Add((cardKey, context.ToKey()));
+                                if (upgradeLevel > 0)
+                                    shopSeenUpgradedThisRun.Add((cardKey, context.ToKey()));
                             }
                         }
                     }
@@ -213,6 +224,36 @@ public static class RunParser
                         }
                     }
 
+                    // Campfire upgrades: cards_upgraded on campfire floors
+                    if (isCampfire)
+                    {
+                        var cardsUpgraded = playerStats?["cards_upgraded"]?.AsArray();
+                        if (cardsUpgraded != null)
+                        {
+                            foreach (var card in cardsUpgraded)
+                            {
+                                var cardId = card?["id"]?.GetValue<string>();
+                                if (cardId != null)
+                                    campfireUpgradesThisRun.Add((cardId, context));
+                            }
+                        }
+                    }
+
+                    // Event upgrades: cards_upgraded on event (unknown) floors
+                    if (isEvent)
+                    {
+                        var cardsUpgraded = playerStats?["cards_upgraded"]?.AsArray();
+                        if (cardsUpgraded != null)
+                        {
+                            foreach (var card in cardsUpgraded)
+                            {
+                                var cardId = card?["id"]?.GetValue<string>();
+                                if (cardId != null)
+                                    eventRelicUpgradesThisRun.Add((cardId, context));
+                            }
+                        }
+                    }
+
                     var relicChoices = playerStats?["relic_choices"]?.AsArray();
                     if (relicChoices != null)
                     {
@@ -237,7 +278,7 @@ public static class RunParser
         }
 
         // Starter relic: present in players[0].relics but never appears in relic_choices — assign to act 1
-        var starterContext = new RunContext(character, ascension, 1, gameMode, buildVersion);
+        var starterContext = new RunContext(character, ascension, 1, gameMode, buildVersion, profile);
         var finalRelics = root["players"]?[0]?["relics"]?.AsArray();
         if (finalRelics != null)
         {
@@ -253,8 +294,10 @@ public static class RunParser
         // Per-run tracking: which (card, context) pairs were offered/picked this run (deduplicated)
         var offeredThisRun = new HashSet<(string cardId, string contextKey)>();
         var pickedThisRun = new HashSet<(string cardId, string contextKey)>();
+        var offeredUpgradedThisRun = new HashSet<(string cardId, string contextKey)>();
+        var pickedUpgradedThisRun = new HashSet<(string cardId, string contextKey)>();
 
-        foreach (var (cardId, wasPicked, context) in allChoices)
+        foreach (var (cardId, wasPicked, wasUpgraded, context) in allChoices)
         {
             var stat = db.GetOrCreate(cardId, context);
 
@@ -265,6 +308,13 @@ public static class RunParser
             // Per-run (deduplicated per card+context)
             offeredThisRun.Add((cardId, context.ToKey()));
             if (wasPicked) pickedThisRun.Add((cardId, context.ToKey()));
+
+            // Verbose: track upgraded offers/picks separately
+            if (wasUpgraded)
+            {
+                offeredUpgradedThisRun.Add((cardId, context.ToKey()));
+                if (wasPicked) pickedUpgradedThisRun.Add((cardId, context.ToKey()));
+            }
         }
 
         // Apply per-run fight-reward counters (Pick% stats)
@@ -273,6 +323,13 @@ public static class RunParser
 
         foreach (var (cardId, contextKey) in pickedThisRun)
             db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsPicked++;
+
+        // Apply per-run verbose upgraded fight-reward counters
+        foreach (var (cardId, contextKey) in offeredUpgradedThisRun)
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsOfferedUpgraded++;
+
+        foreach (var (cardId, contextKey) in pickedUpgradedThisRun)
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsPickedUpgraded++;
 
         // End-of-run presence pass: read players[0].deck and record RunsPresent/RunsWon
         // for every card present in the final build, regardless of acquisition source.
@@ -290,7 +347,7 @@ public static class RunParser
 
                 var floor = card?["floor_added_to_deck"]?.GetValue<int>() ?? 1;
                 var act   = FloorToAct(floor);
-                var ctx   = new RunContext(character, ascension, act, gameMode, buildVersion);
+                var ctx   = new RunContext(character, ascension, act, gameMode, buildVersion, profile);
                 presenceThisRun.Add((cardKey, ctx.ToKey()));
             }
         }
@@ -315,11 +372,25 @@ public static class RunParser
         foreach (var (id, contextKey) in shopBoughtThisRun)
             db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopBought++;
 
+        // Verbose: upgraded shop counters
+        foreach (var (id, contextKey) in shopSeenUpgradedThisRun)
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopSeenUpgraded++;
+
+        foreach (var (id, contextKey) in shopBoughtUpgradedThisRun)
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopBoughtUpgraded++;
+
         foreach (var (id, contextKey) in relicShopSeenThisRun)
             db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopSeen++;
 
         foreach (var (id, contextKey) in relicShopBoughtThisRun)
             db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopBought++;
+
+        // Verbose: campfire and event/relic upgrade counters
+        foreach (var (cardId, context) in campfireUpgradesThisRun)
+            db.GetOrCreate(cardId, context).CampfireUpgrades++;
+
+        foreach (var (cardId, context) in eventRelicUpgradesThisRun)
+            db.GetOrCreate(cardId, context).EventRelicUpgrades++;
 
         // Relic stats: one entry per acquired relic
         foreach (var (relicId, context) in relicsAcquired)
@@ -340,9 +411,13 @@ public static class RunParser
         }
     }
 
-    private static List<string> GetHistoryDirectories()
+    /// <summary>
+    /// Returns (historyDirectoryPath, profileName) tuples for all found history directories.
+    /// Profile name is derived from the directory structure (e.g. "profile1", "modded/profile2").
+    /// </summary>
+    private static List<(string path, string profile)> GetHistoryDirectories()
     {
-        var found = new List<string>();
+        var found = new List<(string, string)>();
 
         string sts2Root;
         if (!string.IsNullOrWhiteSpace(SlayTheStatsConfig.DataDirectory))
@@ -366,8 +441,9 @@ public static class RunParser
             foreach (var profileDir in Directory.GetDirectories(steamIdDir, "profile*"))
             {
                 var history = Path.Combine(profileDir, "saves", "history");
+                var profileName = Path.GetFileName(profileDir);
                 if (Directory.Exists(history))
-                    found.Add(history);
+                    found.Add((history, profileName));
             }
 
             var moddedDir = Path.Combine(steamIdDir, "modded");
@@ -376,8 +452,9 @@ public static class RunParser
                 foreach (var profileDir in Directory.GetDirectories(moddedDir, "profile*"))
                 {
                     var history = Path.Combine(profileDir, "saves", "history");
+                    var profileName = "modded/" + Path.GetFileName(profileDir);
                     if (Directory.Exists(history))
-                        found.Add(history);
+                        found.Add((history, profileName));
                 }
             }
         }

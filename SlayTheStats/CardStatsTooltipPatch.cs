@@ -40,27 +40,24 @@ public static class CardHoverShowPatch
             var upgradeLevel = GetUpgradeLevel(__instance);
             var lookupId = FindCardLookupId(rawId, upgradeLevel);
 
-            var character = RunCharacter;
-
-            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
-                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
-                : (int?)null;
+            var filter = BuildFilter(RunCharacter);
+            var effectiveChar = GetEffectiveCharacter(filter);
+            var characterLabel = GetCharacterLabel(filter);
 
             string statsText;
             if (lookupId == null)
             {
-                statsText = NoDataText(character, maxAscension);
+                statsText = NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
             }
             else
             {
                 var showBuysLayout      = IsColorlessCard(__instance.CardModel);
                 var contextMap          = GetContextMap(lookupId);
-                var actStats            = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
-                var characterWR         = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel      = character != null ? FormatCharacterName(character) : "All chars";
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
+                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? NoDataText(character, maxAscension) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension, showBuysLayout, shopBuyRateBaseline);
+                statsText = actStats.Count == 0 ? NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -183,6 +180,48 @@ public static class CardHoverShowPatch
         return char.ToUpper(name[0]) + name.Substring(1).ToLower();
     }
 
+    /// <summary>
+    /// Builds an AggregationFilter from config, applying the OnlyHighestWonAscension
+    /// logic when enabled (overrides the filter's ascension range with the exact highest won).
+    /// In-run character overrides the pane's character filter.
+    /// </summary>
+    internal static AggregationFilter BuildFilter(string? runCharacter)
+    {
+        var filter = new AggregationFilter
+        {
+            GameMode = "standard",
+            AscensionMin = SlayTheStatsConfig.AscensionMin > 0 ? SlayTheStatsConfig.AscensionMin : null,
+            AscensionMax = SlayTheStatsConfig.AscensionMax < 10 ? SlayTheStatsConfig.AscensionMax : null,
+            VersionMin = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
+            VersionMax = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
+            Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
+        };
+
+        // In-run character takes priority over the pane's character filter.
+        if (runCharacter != null)
+        {
+            filter.Character = runCharacter;
+        }
+        else if (!string.IsNullOrEmpty(SlayTheStatsConfig.FilterCharacters))
+        {
+            filter.Characters = new HashSet<string>(
+                SlayTheStatsConfig.FilterCharacters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        // OnlyHighestWonAscension overrides the ascension range with a single exact value.
+        if (SlayTheStatsConfig.OnlyHighestWonAscension)
+        {
+            var highest = StatsAggregator.GetHighestWonAscension(MainFile.Db, runCharacter);
+            if (highest != null)
+            {
+                filter.AscensionMin = highest;
+                filter.AscensionMax = highest;
+            }
+        }
+
+        return filter;
+    }
+
     private static string? GetRawCardId(NCardHolder holder)
     {
         var cardNode = AccessTools.Property(typeof(NCardHolder), "CardNode")?.GetValue(holder);
@@ -218,28 +257,65 @@ public static class CardHoverShowPatch
     /// "No data for A6 Ironclad" / "No data for Ironclad" / "No A7 data for all characters" / "No data for all characters"
     /// depending on the current filter context.
     /// </summary>
-    internal static string NoDataText(string? character, int? maxAscension)
+    internal static string NoDataText(string? character, int? ascensionMin, int? ascensionMax)
     {
+        var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
         string msg;
         if (character != null)
         {
             var name = FormatCharacterName(character);
-            var ctx = maxAscension != null ? $"A{maxAscension} {name}" : name;
-            msg = $"No data for {ctx}";
+            msg = ascPrefix.Length > 0 ? $"No data for {ascPrefix}{name}" : $"No data for {name}";
         }
         else
         {
-            msg = maxAscension != null ? $"No A{maxAscension} data for all characters" : "No data for all characters";
+            msg = ascPrefix.Length > 0 ? $"No {ascPrefix}data for all characters" : "No data for all characters";
         }
         return $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]{msg}[/color][/font]";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? maxAscension = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0)
+    /// <summary>
+    /// Formats an ascension range prefix for the footer.
+    /// Single value: "A5 ". Range: "A5-9 ". No filter: "".
+    /// </summary>
+    /// <summary>
+    /// Returns the single effective character from the filter for WR baseline lookup.
+    /// Returns null if multiple or all characters are selected.
+    /// </summary>
+    internal static string? GetEffectiveCharacter(AggregationFilter filter)
+    {
+        if (filter.Character != null) return filter.Character;
+        if (filter.Characters != null && filter.Characters.Count == 1)
+            return filter.Characters.First();
+        return null;
+    }
+
+    /// <summary>
+    /// Returns a human-readable character label for the footer.
+    /// </summary>
+    internal static string GetCharacterLabel(AggregationFilter filter)
+    {
+        var ch = GetEffectiveCharacter(filter);
+        return ch != null ? FormatCharacterName(ch) : "All chars";
+    }
+
+    internal static string FormatAscensionPrefix(int? ascMin, int? ascMax)
+    {
+        if (ascMin == null && ascMax == null) return "";
+        if (ascMin != null && ascMax != null)
+        {
+            if (ascMin == ascMax) return $"A{ascMin} ";
+            return $"A{ascMin}-{ascMax} ";
+        }
+        if (ascMin != null) return $"A{ascMin}+ ";
+        return $"A0-{ascMax} ";
+    }
+
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0)
     {
         var sb = new StringBuilder();
 
         if (showBuysLayout)
-            return BuildBuysStatsText(actStats, characterWR, characterLabel, maxAscension, shopBuyRateBaseline);
+            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline);
 
         // Class card columns: Act(3)  Runs(7)  Pick%(5)  Win%(4)
         // Runs shows RunsPresent/RunsOffered, e.g. "12/30"
@@ -295,7 +371,7 @@ public static class CardHoverShowPatch
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
 
-        var ascPrefix = maxAscension != null ? $"A{maxAscension} " : "";
+        var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
         var prBaseStr = $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = $"{Math.Round(characterWR):F0}%";
         sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
@@ -309,7 +385,7 @@ public static class CardHoverShowPatch
     /// Buys shows RunsShopBought/RunsShopSeen (purchases / shop appearances).
     /// Win% is placed last, consistent across all stat tables.
     /// </summary>
-    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? maxAscension, double shopBuyRateBaseline)
+    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline)
     {
         var sb = new StringBuilder();
         // Columns: Act(3)  Runs(5)  Buys(7)  Win%(4)
@@ -352,7 +428,7 @@ public static class CardHoverShowPatch
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All {cTotPicks}  {cTotBuys}  {cTotWr}");
 
-        var ascPrefix    = maxAscension != null ? $"A{maxAscension} " : "";
+        var ascPrefix    = FormatAscensionPrefix(ascensionMin, ascensionMax);
         var wrStr        = $"{Math.Round(characterWR):F0}%";
         var buysBaseStr  = $"{Math.Round(shopBuyRateBaseline):F0}%";
         sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Buys: {buysBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
@@ -462,6 +538,7 @@ public static class InspectCardDisplayPatch
     {
         try
         {
+            CompendiumFilterPatch.HideAllPanes();
             if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
 
             TooltipHelper.EnsurePanelExists();
@@ -483,28 +560,26 @@ public static class InspectCardDisplayPatch
                             ?? 0;
             var lookupId = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel);
 
-            var character    = CardHoverShowPatch.RunCharacter;
-            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
-                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
-                : (int?)null;
+            var filter         = CardHoverShowPatch.BuildFilter(CardHoverShowPatch.RunCharacter);
+            var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
+            var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
 
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(character, maxAscension);
+                statsText = CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
             }
             else
             {
                 var showBuysLayout      = CardHoverShowPatch.IsColorlessCard(model as CardModel);
                 var contextMap          = CardHoverShowPatch.GetContextMap(lookupId);
-                var actStats            = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
-                var characterWR         = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel      = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
+                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(character, maxAscension)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, maxAscension, showBuysLayout, shopBuyRateBaseline);
+                    ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax)
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -580,27 +655,25 @@ public static class MerchantCardCreateHoverTipPatch
                             ?? 0;
             var lookupId = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel);
 
-            var character    = CardHoverShowPatch.RunCharacter;
-            var maxAscension = SlayTheStatsConfig.OnlyHighestWonAscension
-                ? StatsAggregator.GetHighestWonAscension(MainFile.Db, character)
-                : (int?)null;
+            var filter         = CardHoverShowPatch.BuildFilter(CardHoverShowPatch.RunCharacter);
+            var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
+            var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
 
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(character, maxAscension);
+                statsText = CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
             }
             else
             {
                 // In the shop, always use the Runs/Buys layout regardless of card class
                 var contextMap          = CardHoverShowPatch.GetContextMap(lookupId);
-                var actStats            = StatsAggregator.AggregateByAct(contextMap, character, gameMode: "standard", onlyAscension: maxAscension);
-                var characterWR         = character != null ? StatsAggregator.GetCharacterWR(MainFile.Db, character) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var characterLabel      = character != null ? CardHoverShowPatch.FormatCharacterName(character) : "All chars";
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
+                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(character, maxAscension)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, maxAscension, showBuysLayout: true, shopBuyRateBaseline);
+                    ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax)
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();

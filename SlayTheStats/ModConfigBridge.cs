@@ -75,14 +75,14 @@ internal static class ModConfigBridge
                 registerMethod.Invoke(null, new object[]
                 {
                     MainFile.ModId,
-                    "Slay the Stats",
-                    new Dictionary<string, string> { ["en"] = "Slay the Stats" },
+                    "SlayTheStats",
+                    new Dictionary<string, string> { ["en"] = "SlayTheStats" },
                     entries
                 });
             }
             else
             {
-                registerMethod.Invoke(null, new object[] { MainFile.ModId, "Slay the Stats", entries });
+                registerMethod.Invoke(null, new object[] { MainFile.ModId, "SlayTheStats", entries });
             }
         }
         catch (Exception e)
