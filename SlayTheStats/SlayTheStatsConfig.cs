@@ -184,4 +184,76 @@ internal class SlayTheStatsConfig : SimpleModConfig
         "GroupUpgrades" => GroupCardUpgrades != DefaultGroupCardUpgrades,
         _ => false,
     };
+
+    // ── Filter sanitisation ─────────────────────────────────────────────────
+    //
+    // Older builds + manual cfg edits could leave the filter properties in a state that
+    // silently rejected every encounter (e.g. AscensionMax = int.MaxValue, VersionMax =
+    // "__lowest__"). BuildSafeFilter clamps every value into a sensible range and ignores
+    // sentinel strings, and Sanitize() pulls the underlying static properties back into a
+    // valid range so the next config save writes clean values.
+    //
+    // BuildSafeFilter is the bestiary's defensive filter constructor. The compendium card/relic
+    // tooltips use BuildCompendiumFilter / BuildInRunFilter instead — those rely on Sanitize()
+    // having scrubbed bad values at startup. The bestiary wraps a similar pane in v0.3.0;
+    // BuildSafeFilter remains as a defensive helper until the bestiary is fully on the new
+    // pane.
+
+    private const int    AscMinDefault = 0;
+    private const int    AscMaxDefault = 20;
+    private static readonly string[] BadVersionSentinels =
+        { "", "__lowest__", "__highest__", "__none__", "any", "Any" };
+
+    /// <summary>
+    /// Builds an AggregationFilter from the current static properties, defensively clamping
+    /// out-of-range values and sentinel strings so callers always get a sane filter.
+    /// </summary>
+    public static AggregationFilter BuildSafeFilter()
+    {
+        var filter = new AggregationFilter();
+
+        int ascMin = AscensionMin;
+        int ascMax = AscensionMax;
+        // Clamp into [0, 20]; reset any garbage values to defaults.
+        if (ascMin < 0 || ascMin > 20) ascMin = AscMinDefault;
+        if (ascMax < 0 || ascMax > 20) ascMax = AscMaxDefault;
+        if (ascMin > ascMax) (ascMin, ascMax) = (AscMinDefault, AscMaxDefault);
+
+        if (ascMin > 0)  filter.AscensionMin = ascMin;
+        if (ascMax < 20) filter.AscensionMax = ascMax;
+
+        if (!IsBadVersionSentinel(VersionMin))
+            filter.VersionMin = VersionMin;
+        if (!IsBadVersionSentinel(VersionMax))
+            filter.VersionMax = VersionMax;
+        if (!string.IsNullOrEmpty(FilterProfile))
+            filter.Profile = FilterProfile;
+
+        return filter;
+    }
+
+    private static bool IsBadVersionSentinel(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return true;
+        foreach (var s in BadVersionSentinels)
+            if (string.Equals(value, s, StringComparison.OrdinalIgnoreCase))
+                return true;
+        // A real version starts with 'v' followed by a digit (e.g. v0.98.3). Anything else is
+        // either a sentinel we don't recognise or noise from a botched edit; ignore it.
+        if (value.Length < 2 || value[0] != 'v' || !char.IsDigit(value[1])) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Pulls the static filter properties back into a valid range so the next save writes
+    /// sane values. Called once after BaseLib has loaded the config from disk.
+    /// </summary>
+    public static void Sanitize()
+    {
+        if (AscensionMin < 0 || AscensionMin > 20) AscensionMin = AscMinDefault;
+        if (AscensionMax < 0 || AscensionMax > 20) AscensionMax = AscMaxDefault;
+        if (AscensionMin > AscensionMax) { AscensionMin = AscMinDefault; AscensionMax = AscMaxDefault; }
+        if (IsBadVersionSentinel(VersionMin)) VersionMin = "";
+        if (IsBadVersionSentinel(VersionMax)) VersionMax = "";
+    }
 }

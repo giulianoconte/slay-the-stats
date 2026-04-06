@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 
 namespace SlayTheStats;
@@ -28,6 +29,29 @@ public static class InjectBestiarySubmenuPatch
     }
 
     public static bool Prefix(NMainMenuSubmenuStack __instance, Type type, ref NSubmenu __result)
+    {
+        if (type != typeof(NBestiaryStatsSubmenu)) return true;
+        __result = SubmenuField.Get(__instance)!;
+        return false;
+    }
+}
+
+// In-combat compendium uses NRunSubmenuStack instead of NMainMenuSubmenuStack. Mirror the
+// inject patch on its GetSubmenuType so the bestiary button works during a run too.
+[HarmonyPatch(typeof(NRunSubmenuStack), nameof(NRunSubmenuStack.GetSubmenuType), typeof(Type))]
+public static class InjectBestiarySubmenuRunPatch
+{
+    private static readonly SpireField<NRunSubmenuStack, NBestiaryStatsSubmenu> SubmenuField = new(CreateSubmenu);
+
+    private static NBestiaryStatsSubmenu CreateSubmenu(NRunSubmenuStack stack)
+    {
+        var menu = new NBestiaryStatsSubmenu();
+        menu.Visible = false;
+        ((Node)stack).AddChild(menu);
+        return menu;
+    }
+
+    public static bool Prefix(NRunSubmenuStack __instance, Type type, ref NSubmenu __result)
     {
         if (type != typeof(NBestiaryStatsSubmenu)) return true;
         __result = SubmenuField.Get(__instance)!;
@@ -78,15 +102,41 @@ public static class BestiaryButtonPatch
             if (labelNode != null)
                 labelNode.Text = "Stats Bestiary";
 
-            // Replace the icon with a composite of the boss icons we have data for. The cloned
-            // TextureRect from the run-history button has its own stretch/expand config tuned
-            // for a square clipboard glyph; force a stretch mode that lets a wide composite
-            // display correctly inside the existing slot. Falls back to a single elite icon
-            // if no boss data is loaded yet.
+            // Tint the background panel slightly more orange than the default stone color so
+            // the button reads as "stats bestiary" rather than another generic compendium tile.
+            // CRITICAL: the cloned BgPanel inherits a *shared* ShaderMaterial reference from
+            // the source button. The HSV value parameter on that shader is what drives the
+            // focus / hover / press tweens — and since it's shared, hovering this button
+            // would also light up the original Run History button. Duplicate the material so
+            // the clone has its own instance and the focus animation is isolated.
+            var bgPanel = ((Node)ourButton).GetNodeOrNull<Control>("BgPanel");
+            if (bgPanel != null)
+            {
+                if (((CanvasItem)bgPanel).Material is ShaderMaterial sharedMat)
+                {
+                    var ownMat = (ShaderMaterial)sharedMat.Duplicate(true);
+                    ((CanvasItem)bgPanel).Material = ownMat;
+                    // The cloned NCompendiumBottomButton's _hsv field still points at the
+                    // *original* shared material — patch the field to the new copy so the
+                    // tween-driven UpdateShaderParam targets the right instance.
+                    var hsvField = AccessTools.Field(typeof(NCompendiumBottomButton), "_hsv");
+                    hsvField?.SetValue(ourButton, ownMat);
+                }
+                // Slightly orange-warm tint, less saturated than before so it sits next to
+                // the other compendium tiles without screaming.
+                ((CanvasItem)bgPanel).SelfModulate = new Color(1.05f, 0.92f, 0.78f, 1f);
+            }
+
+            // Replace the icon with a square grid of boss icons (encountered in full color,
+            // unencountered as silhouettes). The cloned TextureRect from the run-history
+            // button has its own stretch config tuned for a square clipboard glyph; force
+            // KeepAspectCentered so the square composite displays cleanly inside the slot.
+            // Falls back to a single elite icon if no boss data is available yet.
             var iconNode = ((Node)ourButton).GetNodeOrNull<TextureRect>("Icon");
             if (iconNode != null)
             {
-                Texture2D? newTex = EncounterIcons.BuildBossCompositeTexture(48);
+                // Larger per-cell so individual boss silhouettes are recognisable.
+                Texture2D? newTex = EncounterIcons.BuildBossCompositeTexture(80);
                 Color modulate    = Colors.White;
 
                 if (newTex == null)
@@ -116,11 +166,26 @@ public static class BestiaryButtonPatch
                 NClickableControl.SignalName.Released,
                 Callable.From<NButton>(_ =>
                 {
+                    // _stack is an NSubmenuStack base reference — could be either
+                    // NMainMenuSubmenuStack (out-of-run compendium) or NRunSubmenuStack
+                    // (in-combat compendium). Both override PushSubmenuType<T>() and we have
+                    // matching inject patches, so the base call works in either case.
                     var stackField = AccessTools.Field(typeof(NSubmenu), "_stack");
-                    if (stackField?.GetValue(__instance) is NMainMenuSubmenuStack stack)
+                    if (stackField?.GetValue(__instance) is NSubmenuStack stack)
                     {
-                        var submenu = stack.PushSubmenuType<NBestiaryStatsSubmenu>();
-                        submenu.Refresh();
+                        try
+                        {
+                            var submenu = stack.PushSubmenuType<NBestiaryStatsSubmenu>();
+                            submenu.Refresh();
+                        }
+                        catch (Exception e)
+                        {
+                            MainFile.Logger.Warn($"[SlayTheStats] PushSubmenuType failed: {e.Message}");
+                        }
+                    }
+                    else
+                    {
+                        MainFile.Logger.Warn("[SlayTheStats] BestiaryButton click: no NSubmenuStack on _stack");
                     }
                 }),
                 0u);
@@ -148,6 +213,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private HBoxContainer? _statsColumnHeaderRow;
     private VBoxContainer? _encounterList;
     private RichTextLabel? _statsLabel;
+    private RichTextLabel? _statsTitleLabel;
+    private NScrollableContainer? _bestiaryScrollContainer;
+    private MarginContainer? _headerMarginContainer;
     private Control? _renderArea;
     private string? _selectedBiome;
     private string? _hoveredEncounterId;
@@ -166,8 +234,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     internal sealed class CategoryHoverBundle
     {
-        public readonly List<IconHoverHandle> Handles = new();
-        public Tween? ActiveTween;
+        /// <summary>The category header icon (the one that lives on the bold "Boss" / "Elite"
+        /// row at the top of the group).</summary>
+        public IconHoverHandle? HeaderIcon;
+        /// <summary>Per-encounter row icons keyed by encounter id (only populated for boss
+        /// rows currently).</summary>
+        public readonly Dictionary<string, IconHoverHandle> RowIcons = new();
     }
 
     public sealed class IconHoverHandle
@@ -220,10 +292,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // ── Title ──
         var title = new Label();
-        title.Text = "Bestiary — Encounter Stats";
+        title.Text = "SlayTheStats Bestiary";
         title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
         title.AddThemeFontSizeOverride("font_size", 26);
         ApplyKreonFont(title, bold: true);
+        ApplyTextShadow(title);
         outerVbox.AddChild(title);
 
         outerVbox.AddChild(new HSeparator());
@@ -280,12 +353,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         contentSplit.AddChild(leftSection);
 
         // Sticky stats-column header — labels whichever stat the right-hand stat column is
-        // currently displaying so the column is never mysterious.
+        // currently displaying so the column is never mysterious. Wrapped in a margin
+        // container so its right edge lines up with the row stat column (which sits to the
+        // left of the scrollbar gutter).
+        var headerMargin = new MarginContainer();
+        headerMargin.AddThemeConstantOverride("margin_right", 0); // populated below
+        leftSection.AddChild(headerMargin);
+
         _statsColumnHeaderRow = new HBoxContainer();
         _statsColumnHeaderRow.CustomMinimumSize = new Vector2(0, 22);
         _statsColumnHeaderRow.AddThemeConstantOverride("separation", 6);
         _statsColumnHeaderRow.MouseFilter = MouseFilterEnum.Ignore;
-        leftSection.AddChild(_statsColumnHeaderRow);
+        headerMargin.AddChild(_statsColumnHeaderRow);
+
+        _headerMarginContainer = headerMargin;
 
         leftSection.AddChild(new HSeparator());
 
@@ -304,8 +385,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             SizeFlagsVertical = SizeFlags.ExpandFill,
         };
 
-        const float ScrollbarWidth = 28f;
-        const float ScrollbarGap   = 6f;
+        // Slimmer than the BaseLib mod-config scroll (48px) — encounter list cells are short
+        // and we want most of the horizontal space for the names + stat column.
+        const float ScrollbarWidth = 18f;
+        const float ScrollbarGap   = 4f;
 
         // Instantiate the game's scrollbar scene so we get the same texture/animation chrome
         // used by the settings and Mod Configuration pages.
@@ -320,7 +403,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         bestiaryScrollbar.OffsetRight  = 0;
         bestiaryScrollbar.OffsetTop    = 0;
         bestiaryScrollbar.OffsetBottom = 0;
+        // Shrink the scrollbar visuals (track + grabber + arrows) to ~70% of native size so the
+        // chrome reads as a thin column rather than the chunky mod-config scrollbar.
+        bestiaryScrollbar.Scale = new Vector2(0.7f, 0.85f);
         bestiaryScroll.AddChild(bestiaryScrollbar);
+
+        _bestiaryScrollContainer = bestiaryScroll;
 
         // Clipper sits to the left of the scrollbar; its ClipContents=true keeps the long
         // encounter list from drawing outside the visible area while it's scrolled.
@@ -347,7 +435,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // ItemRectChanged signal to recalculate scroll bounds.
         _encounterList.GrowVertical   = Control.GrowDirection.End;
         _encounterList.GrowHorizontal = Control.GrowDirection.End;
-        _encounterList.AddThemeConstantOverride("separation", 1);
+        _encounterList.AddThemeConstantOverride("separation", 0);
         bestiaryClipper.AddChild(_encounterList);
 
         leftSection.AddChild(bestiaryScroll);
@@ -355,6 +443,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // child is in place (otherwise its _Ready throws looking up "Scrollbar").
         bestiaryScroll.SetContent(_encounterList);
         bestiaryScroll.DisableScrollingIfContentFits();
+
+        // Match the column header's right inset to the clipper's right inset so that the
+        // header text column lines up with the row stat column instead of bleeding out into
+        // the scrollbar gutter.
+        if (_headerMarginContainer != null)
+            _headerMarginContainer.AddThemeConstantOverride("margin_right", (int)(ScrollbarWidth + ScrollbarGap));
 
         contentSplit.AddChild(new VSeparator());
 
@@ -371,6 +465,29 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statsBox.CustomMinimumSize = new Vector2(0, 240);
         statsBox.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         rightPanel.AddChild(statsBox);
+
+        // Wrap title + table in a vbox so the title (Kreon, gold) sits above the monospace
+        // table without sharing fonts with it.
+        var statsVbox = new VBoxContainer();
+        statsVbox.AddThemeConstantOverride("separation", 4);
+        statsVbox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        statsVbox.SizeFlagsVertical = SizeFlags.ExpandFill;
+        statsBox.AddChild(statsVbox);
+
+        // Title — encounter / category name in Kreon, golden, matching stats tooltip headers.
+        _statsTitleLabel = new RichTextLabel();
+        _statsTitleLabel.BbcodeEnabled = true;
+        _statsTitleLabel.FitContent = true;
+        _statsTitleLabel.ScrollActive = false;
+        _statsTitleLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _statsTitleLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        _statsTitleLabel.AddThemeColorOverride("default_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        _statsTitleLabel.AddThemeFontSizeOverride("normal_font_size", 22);
+        _statsTitleLabel.AddThemeFontSizeOverride("bold_font_size", 22);
+        ApplyKreonFont(_statsTitleLabel, bold: true);
+        ApplyTextShadow(_statsTitleLabel);
+        _statsTitleLabel.Text = "";
+        statsVbox.AddChild(_statsTitleLabel);
 
         // Stats label uses the monospace font (the table is the only Kreon-exempt UI element).
         _statsLabel = new RichTextLabel();
@@ -394,7 +511,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var boldFont = TooltipHelper.GetMonoBoldFont();
             if (boldFont != null) _statsLabel.AddThemeFontOverride("bold_font", boldFont);
         }
-        statsBox.AddChild(_statsLabel);
+        statsVbox.AddChild(_statsLabel);
 
         rightPanel.AddChild(new HSeparator());
 
@@ -434,9 +551,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
         _rowsByEncounter.Clear();
         _iconBundles.Clear();
+        _grownTargets.Clear();
+        _animatingHandles.Clear();
+        _highlightTween?.Kill();
+        _highlightTween = null;
 
         if (_statsLabel != null)
             _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
+        SetStatsTitle("");
         _hoveredEncounterId = null;
 
         RebuildBiomeTabs();
@@ -472,9 +594,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             catWrap.MouseFilter = MouseFilterEnum.Stop;
 
             var catRow = new HBoxContainer();
-            catRow.CustomMinimumSize = new Vector2(0, 34);
+            catRow.CustomMinimumSize = new Vector2(0, RowHeightPx);
             catRow.AddThemeConstantOverride("separation", 8);
             catRow.MouseFilter = MouseFilterEnum.Ignore;
+            // Vertically center children inside the row.
+            catRow.Alignment = BoxContainer.AlignmentMode.Center;
             catWrap.AddChild(catRow);
 
             // Collapse arrow indicator
@@ -484,7 +608,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             arrowLabel.AddThemeFontSizeOverride("font_size", 13);
             arrowLabel.CustomMinimumSize = new Vector2(14, 0);
             arrowLabel.MouseFilter = MouseFilterEnum.Ignore;
+            arrowLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            arrowLabel.VerticalAlignment = VerticalAlignment.Center;
             ApplyKreonFont(arrowLabel);
+            ApplyTextShadow(arrowLabel);
             catRow.AddChild(arrowLabel);
 
             // Build the category icon inside a hover wrapper so we can scale + outline it.
@@ -492,8 +619,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var catHandle = EncounterIcons.MakeCategoryHoverIcon(category, catSize);
             if (catHandle != null)
             {
+                catHandle.Wrapper.SizeFlagsVertical = SizeFlags.ShrinkCenter;
                 catRow.AddChild(catHandle.Wrapper);
-                bundle.Handles.Add(catHandle);
+                bundle.HeaderIcon = catHandle;
             }
 
             var catLabel = new RichTextLabel();
@@ -501,10 +629,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             catLabel.FitContent = true;
             catLabel.ScrollActive = false;
             catLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            catLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             catLabel.MouseFilter = MouseFilterEnum.Ignore;
             catLabel.AddThemeFontSizeOverride("normal_font_size", 19);
             catLabel.AddThemeFontSizeOverride("bold_font_size", 19);
             ApplyKreonFont(catLabel);
+            ApplyTextShadow(catLabel);
             var catColorHex = EncounterIcons.CategoryColorHex(category);
             catLabel.Text = $"[b][color={catColorHex}]{EncounterCategory.FormatCategory(category)}[/color][/b]";
             catRow.AddChild(catLabel);
@@ -541,10 +671,65 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 _encounterList.AddChild(entry);
             }
         }
+
+        // Force the scroll container to recompute its content limit so scroll bounds match
+        // the actual list size for the current biome (not the largest biome we've shown).
+        // We re-call SetContent on a deferred frame: NScrollableContainer's
+        // UpdateScrollLimitBottom reads _content.Size.Y, which is only accurate after the
+        // VBoxContainer has finished re-laying out its children — i.e. next frame.
+        if (_bestiaryScrollContainer != null && _encounterList != null)
+        {
+            var scroll = _bestiaryScrollContainer;
+            var content = _encounterList;
+            Callable.From(() =>
+            {
+                if (!GodotObject.IsInstanceValid(scroll) || !GodotObject.IsInstanceValid(content)) return;
+                try
+                {
+                    scroll.SetContent(content);
+                    scroll.InstantlyScrollToTop();
+                }
+                catch { /* defensive — content tree may have changed since this was queued */ }
+            }).CallDeferred();
+        }
     }
 
     private const float StatColumnWidthPx = 70f;
     private const float StatColumnRightPadPx = 24f;
+    private const int RowHeightPx = 26;
+    /// <summary>Boss rows get a bit more vertical room than text rows so the per-boss icon
+    /// has breathing space without forcing the text rows to grow with it.</summary>
+    private const int BossRowHeightPx = 34;
+
+    /// <summary>
+    /// Applies the same drop shadow used by the in-game stats tooltip text. Centralised here
+    /// so every label / RichTextLabel / Button in the bestiary picks up consistent text shadows.
+    /// </summary>
+    internal static void ApplyTextShadow(Control control)
+    {
+        var shadow = new Color(0f, 0f, 0f, 0.55f);
+        switch (control)
+        {
+            case RichTextLabel rt:
+                rt.AddThemeColorOverride("font_shadow_color", shadow);
+                rt.AddThemeConstantOverride("shadow_offset_x", 2);
+                rt.AddThemeConstantOverride("shadow_offset_y", 2);
+                rt.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+            case Label lb:
+                lb.AddThemeColorOverride("font_shadow_color", shadow);
+                lb.AddThemeConstantOverride("shadow_offset_x", 2);
+                lb.AddThemeConstantOverride("shadow_offset_y", 2);
+                lb.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+            case Button bt:
+                // Buttons use Godot's font outline rather than shadow_offset_x/y. Use a small
+                // outline as the "shadow" so the chip button text reads against any background.
+                bt.AddThemeColorOverride("font_outline_color", shadow);
+                bt.AddThemeConstantOverride("outline_size", 4);
+                break;
+        }
+    }
 
     private void RefreshStatsColumnHeader()
     {
@@ -578,27 +763,90 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(StatColumnRightPadPx, 0) });
     }
 
-    private void HighlightCategory(string category, bool on)
+    // Global highlight state.
+    //
+    //   _grownTargets    — the icons that *should currently* be at the grown scale (i.e. the
+    //                       latest hover target). Cleared on unhover.
+    //   _animatingHandles — every handle that's been touched by a tween and may not yet be
+    //                       at its base resting state. Used to make sure a row-to-row hover
+    //                       doesn't strand a partially-shrunk icon when its tween is killed
+    //                       and replaced with a new one.
+    //
+    // Both sets are diffed inside TransitionHighlight, which kills any in-flight tween and
+    // builds a fresh one targeting the union (so every relevant icon gets animated to its
+    // correct destination, regardless of where its previous tween left it).
+    private readonly HashSet<IconHoverHandle> _grownTargets    = new();
+    private readonly HashSet<IconHoverHandle> _animatingHandles = new();
+    private Tween? _highlightTween;
+
+    /// <summary>
+    /// Highlights a subset of icons with the run-history-style scale + outline fade tween.
+    /// Hovering a category header highlights only the header icon. Hovering an encounter row
+    /// highlights the header icon plus that row's own icon. Going from one row to another
+    /// (or from a row to a header) animates the previous icons back to base in the same
+    /// tween that grows the new ones, so transitions are seamless.
+    /// </summary>
+    private void HighlightCategory(string category, bool on, string? encounterId = null)
     {
-        if (!_iconBundles.TryGetValue(category, out var bundle)) return;
+        var newGrown = new HashSet<IconHoverHandle>();
+        if (on && _iconBundles.TryGetValue(category, out var bundle))
+        {
+            if (bundle.HeaderIcon != null) newGrown.Add(bundle.HeaderIcon);
+            if (encounterId != null && bundle.RowIcons.TryGetValue(encounterId, out var rowIcon))
+                newGrown.Add(rowIcon);
+        }
 
-        bundle.ActiveTween?.Kill();
+        TransitionHighlight(newGrown);
+    }
+
+    /// <summary>
+    /// Cancels any in-flight tween and builds a single new tween that animates *every*
+    /// handle the bestiary cares about — both the new grown target set and any leftover
+    /// in-flight handles — to its correct destination. Run-history feel: 0.05s ease in on
+    /// highlight, 1.0s ease out on unhighlight.
+    /// </summary>
+    private void TransitionHighlight(HashSet<IconHoverHandle> newGrown)
+    {
+        _grownTargets.RemoveWhere(h => !GodotObject.IsInstanceValid(h.Icon));
+        _animatingHandles.RemoveWhere(h => !GodotObject.IsInstanceValid(h.Icon));
+
+        // Anything we were animating that isn't in the new grown set must shrink. Anything in
+        // the new grown set must grow (even if it was already grown — it's a no-op tween).
+        var allHandles = new HashSet<IconHoverHandle>(_animatingHandles);
+        foreach (var h in newGrown) allHandles.Add(h);
+
+        if (allHandles.Count == 0) return;
+
+        _highlightTween?.Kill();
         var tween = CreateTween().SetParallel(true);
-        bundle.ActiveTween = tween;
+        _highlightTween = tween;
 
-        var targetScale = on ? Vector2.One * 1.5f : Vector2.One;
-        var targetAlpha = on ? 0.5f  : 0f;
-        var dur         = on ? 0.05  : 0.20;
+        var grownScale = Vector2.One * 1.3f;
+        var baseScale  = Vector2.One;
 
-        foreach (var h in bundle.Handles)
+        foreach (var h in allHandles)
         {
             if (!GodotObject.IsInstanceValid(h.Icon) || !GodotObject.IsInstanceValid(h.Highlight))
                 continue;
+
+            bool shouldBeGrown = newGrown.Contains(h);
+            var targetScale = shouldBeGrown ? grownScale : baseScale;
+            var targetAlpha = shouldBeGrown ? 1.0f : 0f;
+            var dur         = shouldBeGrown ? 0.05 : 1.00;
+
             tween.TweenProperty(h.Icon,      "scale",      targetScale, dur)
                 .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quart);
             tween.TweenProperty(h.Highlight, "modulate:a", targetAlpha, dur)
                 .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quart);
         }
+
+        // _grownTargets is the latest desired-grown set. _animatingHandles is the union of
+        // everything we just touched — these stay until the next refresh clears them or
+        // they're explicitly told to shrink in a future transition.
+        _grownTargets.Clear();
+        foreach (var h in newGrown) _grownTargets.Add(h);
+        _animatingHandles.Clear();
+        foreach (var h in allHandles) _animatingHandles.Add(h);
     }
 
     private void ToggleCategoryCollapse(string category)
@@ -721,6 +969,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
         btn.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(btn);
+        ApplyTextShadow(btn);
 
         btn.Pressed += () => onPressed();
         return btn;
@@ -841,6 +1090,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
             btn.AddThemeFontSizeOverride("font_size", 18);
             ApplyKreonFont(btn, bold: true);
+            ApplyTextShadow(btn);
 
             var capturedBiome = biome;
             btn.Pressed += () =>
@@ -903,10 +1153,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         wrap.MouseFilter = MouseFilterEnum.Stop;
         wrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
 
+        // Boss rows get a slightly taller row height so the per-boss icon has breathing
+        // space without crowding the row's text. Other rows stay at the compact text-row
+        // height so the list reads tightly.
+        int rowHeight = category == "boss" ? BossRowHeightPx : RowHeightPx;
         var row = new HBoxContainer();
-        row.CustomMinimumSize = new Vector2(0, 30);
+        row.CustomMinimumSize = new Vector2(0, rowHeight);
         row.AddThemeConstantOverride("separation", 6);
         row.MouseFilter = MouseFilterEnum.Ignore;
+        row.Alignment = BoxContainer.AlignmentMode.Center;
         wrap.AddChild(row);
 
         MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta);
@@ -919,11 +1174,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (category == "boss")
         {
             var bossSize = EncounterIcons.BossRowIconSize;
-            var bossHandle = EncounterIcons.MakeBossHoverIcon(encounterId, bossSize);
+            // Pin the wrapper height to the row height so the boss icon overflows vertically
+            // but the row text stays tightly packed against neighbouring boss rows.
+            var bossHandle = EncounterIcons.MakeBossHoverIcon(encounterId, bossSize, rowHeight);
             if (bossHandle != null)
             {
+                bossHandle.Wrapper.SizeFlagsVertical = SizeFlags.ShrinkCenter;
                 row.AddChild(bossHandle.Wrapper);
-                bundle.Handles.Add(bossHandle);
+                bundle.RowIcons[encounterId] = bossHandle;
             }
             else
             {
@@ -942,10 +1200,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         nameLabel.FitContent = true;
         nameLabel.ScrollActive = false;
         nameLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        nameLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         nameLabel.MouseFilter = MouseFilterEnum.Ignore;
         nameLabel.AddThemeColorOverride("default_color", new Color(0.90f, 0.88f, 0.82f, 1f));
         nameLabel.AddThemeFontSizeOverride("normal_font_size", 17);
         ApplyKreonFont(nameLabel);
+        ApplyTextShadow(nameLabel);
 
         var encounterName = EncounterCategory.FormatName(encounterId);
         string monsterInfo = "";
@@ -966,11 +1226,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statLabel.FitContent = true;
         statLabel.ScrollActive = false;
         statLabel.CustomMinimumSize = new Vector2(StatColumnWidthPx, 0);
+        statLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         statLabel.MouseFilter = MouseFilterEnum.Ignore;
         statLabel.AddThemeFontSizeOverride("normal_font_size", 15);
         ApplyKreonFont(statLabel);
+        ApplyTextShadow(statLabel);
         var displayMode = sortMode == EncounterSortMode.Name ? EncounterSortMode.DmgPct : sortMode;
-        statLabel.Text = $"[right][color=#909090]{EncounterSorting.FormatScore(encounterId, displayMode, filter, sortCharacter)}[/color][/right]";
+        statLabel.Text = $"[right][color=#a8a39a]{EncounterSorting.FormatScore(encounterId, displayMode, filter, sortCharacter)}[/color][/right]";
         row.AddChild(statLabel);
 
         // Right pad so the stat column doesn't kiss the panel edge.
@@ -980,13 +1242,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         wrap.MouseEntered += () =>
         {
             wrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
-            HighlightCategory(capturedCategory, true);
+            // Hovering an encounter row → highlight the category header icon AND this row's
+            // own icon (selective: not every row in the category).
+            HighlightCategory(capturedCategory, true, encounterId);
             OnEncounterHover(encounterId);
         };
         wrap.MouseExited += () =>
         {
             wrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
-            HighlightCategory(capturedCategory, false);
+            HighlightCategory(capturedCategory, false, encounterId);
             OnEncounterUnhover();
         };
 
@@ -1045,7 +1309,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             filter.AscensionMin, filter.AscensionMax, categoryLabel);
 
         var biomeName = _selectedBiome != null ? FormatBiomeName(_selectedBiome) : "";
-        _statsLabel.Text = $"[b]All {categoryLabel} Encounters — {biomeName}[/b]\n{statsText}";
+        SetStatsTitle($"All {categoryLabel} Encounters — {biomeName}");
+        _statsLabel.Text = statsText;
 
         // Clear the monster preview area when hovering a category (no specific monsters to show)
         ClearMonsterPreview();
@@ -1054,6 +1319,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void OnEncounterUnhover()
     {
         _hoveredEncounterId = null;
+        SetStatsTitle("");
         if (_statsLabel != null)
             _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
         ClearMonsterPreview();
@@ -1065,7 +1331,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap))
         {
-            _statsLabel.Text = $"[b]{EncounterCategory.FormatName(encounterId)}[/b]\n[color=#606060]No data[/color]";
+            SetStatsTitle(EncounterCategory.FormatName(encounterId));
+            _statsLabel.Text = "[color=#606060]No data[/color]";
             return;
         }
 
@@ -1089,7 +1356,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 charStats, deathRateBaseline, dmgPctBaseline,
                 filter.AscensionMin, filter.AscensionMax, categoryLabel);
 
-        _statsLabel.Text = $"[b]{EncounterCategory.FormatName(encounterId)}[/b]\n{statsText}";
+        SetStatsTitle(EncounterCategory.FormatName(encounterId));
+        _statsLabel.Text = statsText;
+    }
+
+    private void SetStatsTitle(string title)
+    {
+        if (_statsTitleLabel == null) return;
+        _statsTitleLabel.Text = string.IsNullOrEmpty(title) ? "" : $"[b]{title}[/b]";
     }
 
     // ───────────────────────── Monster Preview ─────────────────────────
@@ -1133,28 +1407,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     // ───────────────────────── Helpers ─────────────────────────
 
-    private static AggregationFilter BuildFilter()
-    {
-        var filter = new AggregationFilter();
-        if (SlayTheStatsConfig.AscensionMin > 0)
-            filter.AscensionMin = SlayTheStatsConfig.AscensionMin;
-        if (SlayTheStatsConfig.AscensionMax < 20)
-            filter.AscensionMax = SlayTheStatsConfig.AscensionMax;
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin))
-            filter.VersionMin = SlayTheStatsConfig.VersionMin;
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax))
-            filter.VersionMax = SlayTheStatsConfig.VersionMax;
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile))
-            filter.Profile = SlayTheStatsConfig.FilterProfile;
-        return filter;
-    }
+    private static AggregationFilter BuildFilter() => SlayTheStatsConfig.BuildSafeFilter();
 
     // Synthetic biome key for act-aggregated tabs (e.g. "act:1" merges Overgrowth + Underdocks).
     private const string ActPrefix = "act:";
+    /// <summary>Synthetic biome key for the "All" tab — every encounter regardless of biome.</summary>
+    private const string AllBiomeKey = "all:";
 
     private static List<string> GetBiomes()
     {
-        // Map biome → act, preserving first-seen order so we can group consistently.
+        // The biome list is built dynamically from whatever encounters appear in
+        // EncounterMeta, so future content (e.g. a second Act 2 biome) appears automatically:
+        //   1. group raw biomes by Act in first-seen order
+        //   2. for any act with >1 biome, prepend a synthetic "act:N" combined tab
+        //   3. always lead with a synthetic "all" tab that aggregates everything
         var biomeAct = new Dictionary<string, int>();
         foreach (var meta in MainFile.Db.EncounterMeta.Values)
         {
@@ -1162,8 +1428,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 biomeAct[meta.Biome] = meta.Act;
         }
 
-        // Group by act, then for any act with multiple biomes prepend a synthetic combined tab.
-        var result = new List<string>();
+        var result = new List<string> { AllBiomeKey };
         foreach (var actGroup in biomeAct.GroupBy(kvp => kvp.Value).OrderBy(g => g.Key))
         {
             var biomesInAct = actGroup.Select(kvp => kvp.Key).ToList();
@@ -1176,17 +1441,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private static string? GetDefaultBiome()
     {
-        // Prefer the Act 1 combined view if present (Overgrowth + Underdocks), otherwise the
-        // first biome.
+        // Prefer "All" — every encounter regardless of biome — as the initial view.
         var biomes = GetBiomes();
         if (biomes.Count == 0) return null;
-        var firstAct = biomes.FirstOrDefault(b => b.StartsWith(ActPrefix));
-        return firstAct ?? biomes[0];
+        return biomes.Contains(AllBiomeKey) ? AllBiomeKey : biomes[0];
     }
 
     private static List<string> GetEncountersForBiome(string? biome)
     {
-        if (biome == null) return MainFile.Db.EncounterMeta.Keys.ToList();
+        if (biome == null || biome == AllBiomeKey)
+            return MainFile.Db.EncounterMeta.Keys.ToList();
 
         if (biome.StartsWith(ActPrefix) && int.TryParse(biome[ActPrefix.Length..], out var act))
         {
@@ -1204,6 +1468,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private static string FormatBiomeName(string biome)
     {
+        if (biome == AllBiomeKey) return "All Acts";
         if (biome.StartsWith(ActPrefix) && int.TryParse(biome[ActPrefix.Length..], out var act))
             return $"Act {act}";
 
@@ -1361,20 +1626,20 @@ internal static class EncounterIcons
     public static string CategoryColorHex(string category) => category switch
     {
         "weak"    => "#7ea88a",  // slight green to differentiate from normal
-        "normal"  => "#bcb29c",  // brownish grey
+        "normal"  => "#e0d4ad",  // warmer / more saturated brownish gold so it reads stronger
         "elite"   => "#c557b8",  // fuchsia/purple — matches run history elite color
         "boss"    => "#d6614f",
-        "event"   => "#e8c247",  // event question mark in run history is yellow
+        "event"   => "#f4dc4a",  // pure-ish yellow matching the run history question mark
         _         => "#a0a0a0",
     };
 
     public static Color CategoryColor(string category) => category switch
     {
         "weak"    => new Color(0.494f, 0.659f, 0.541f, 1f),
-        "normal"  => new Color(0.737f, 0.698f, 0.612f, 1f),
+        "normal"  => new Color(0.878f, 0.831f, 0.678f, 1f),
         "elite"   => new Color(0.773f, 0.341f, 0.722f, 1f),
         "boss"    => new Color(0.839f, 0.380f, 0.310f, 1f),
-        "event"   => new Color(0.910f, 0.760f, 0.278f, 1f),
+        "event"   => new Color(0.957f, 0.863f, 0.290f, 1f),
         _         => new Color(0.627f, 0.627f, 0.627f, 1f),
     };
 
@@ -1408,60 +1673,170 @@ internal static class EncounterIcons
         return BuildHoverHandle(tex, sizePx, CategoryColor(category));
     }
 
-    public static NBestiaryStatsSubmenu.IconHoverHandle? MakeBossHoverIcon(string encounterId, int sizePx)
+    /// <summary>
+    /// Builds a boss row icon. <paramref name="rowHeightOverridePx"/> is passed through so the
+    /// wrapper can claim less vertical space than the icon size, letting the icon overflow
+    /// the row vertically while keeping the row text tightly packed.
+    /// </summary>
+    public static NBestiaryStatsSubmenu.IconHoverHandle? MakeBossHoverIcon(string encounterId, int sizePx, int? rowHeightOverridePx = null)
     {
         var perBoss = LoadBossTexture(encounterId);
         if (perBoss != null)
-            return BuildHoverHandle(perBoss, sizePx, Colors.White);
+            return BuildHoverHandle(perBoss, sizePx, Colors.White, rowHeightOverridePx);
         var fallback = LoadCategoryTexture("boss");
         if (fallback == null) return null;
-        return BuildHoverHandle(fallback, sizePx, CategoryColor("boss"));
+        return BuildHoverHandle(fallback, sizePx, CategoryColor("boss"), rowHeightOverridePx);
     }
 
-    private static NBestiaryStatsSubmenu.IconHoverHandle BuildHoverHandle(Texture2D tex, int sizePx, Color iconModulate)
+    /// <summary>
+    /// Pre-rendered DILATED silhouette of an icon texture, cached by source texture and
+    /// dilation radius. Each output pixel is pure white at full alpha if any source pixel
+    /// within <c>dilationPx</c> is more than 50% opaque, otherwise fully transparent. The
+    /// result is a crisp expanded version of the icon shape that, when drawn behind the icon
+    /// at 1× scale, leaves a clean uniform white halo around the icon's silhouette.
+    ///
+    /// Why this approach instead of a runtime scale or shader:
+    ///   • Scaling a TextureRect bilinearly interpolates the source's anti-aliased edges,
+    ///     making the rim a soft gradient that's hard to see.
+    ///   • A shader that recolors to white still inherits the source's anti-aliased alpha,
+    ///     producing the same gradient problem.
+    ///   • Dilating in pixel space with a hard 0|1 alpha threshold gives a uniform-color
+    ///     halo with crisp edges that reads clearly at any icon size.
+    /// </summary>
+    private static readonly Dictionary<(Texture2D src, int dilation), Texture2D> _silhouetteCache = new();
+
+    private static Texture2D? GetSilhouetteTexture(Texture2D source, int dilationPx = 4)
+    {
+        var key = (source, dilationPx);
+        if (_silhouetteCache.TryGetValue(key, out var cached)) return cached;
+
+        try
+        {
+            var src = source.GetImage();
+            if (src == null || src.IsEmpty()) return null;
+            if (src.IsCompressed())
+            {
+                if (src.Decompress() != Error.Ok) return null;
+            }
+
+            // Convert to RGBA8 so GetPixel returns sane values regardless of source format.
+            var srcRgba = (Image)src.Duplicate();
+            if (srcRgba.GetFormat() != Image.Format.Rgba8)
+                srcRgba.Convert(Image.Format.Rgba8);
+
+            int w = srcRgba.GetWidth();
+            int h = srcRgba.GetHeight();
+            const float opaqueThreshold = 0.5f;
+
+            // Pre-build a hard alpha mask so we only test once per source pixel during the
+            // dilation pass (otherwise we'd hit GetPixel O(dilation²) times per output pixel
+            // and slow first-hover noticeably).
+            var mask = new bool[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    mask[y * w + x] = srcRgba.GetPixel(x, y).A >= opaqueThreshold;
+
+            var dst = Image.CreateEmpty(w, h, false, Image.Format.Rgba8);
+            var white = new Color(1f, 1f, 1f, 1f);
+            int r2 = dilationPx * dilationPx;
+
+            for (int y = 0; y < h; y++)
+            {
+                int yMin = Math.Max(0, y - dilationPx);
+                int yMax = Math.Min(h - 1, y + dilationPx);
+                for (int x = 0; x < w; x++)
+                {
+                    int xMin = Math.Max(0, x - dilationPx);
+                    int xMax = Math.Min(w - 1, x + dilationPx);
+
+                    // Find any opaque pixel within the dilation radius (Euclidean).
+                    bool insideHalo = false;
+                    for (int yy = yMin; yy <= yMax && !insideHalo; yy++)
+                    {
+                        int dy = yy - y;
+                        int rowOffset = yy * w;
+                        for (int xx = xMin; xx <= xMax; xx++)
+                        {
+                            int dx = xx - x;
+                            if (dx * dx + dy * dy > r2) continue;
+                            if (mask[rowOffset + xx]) { insideHalo = true; break; }
+                        }
+                    }
+                    if (insideHalo)
+                        dst.SetPixel(x, y, white);
+                }
+            }
+
+            var tex = ImageTexture.CreateFromImage(dst);
+            _silhouetteCache[key] = tex;
+            return tex;
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] Silhouette build failed: {e.Message}");
+            return null;
+        }
+    }
+
+    private static NBestiaryStatsSubmenu.IconHoverHandle BuildHoverHandle(Texture2D tex, int sizePx, Color iconModulate, int? wrapperHeightOverride = null)
     {
         // Wrap the icon in a fixed-size Control so layout doesn't shift when the icon scales.
-        // The wrapper has padding around the icon to give the scale tween room to breathe
-        // without being clipped by neighbouring siblings.
-        int padding = Math.Max(6, sizePx / 4);
-        int outer = sizePx + padding * 2;
+        // Padding is small so rows stay tight; the scaled icon is allowed to draw outside the
+        // wrapper bounds (siblings don't clip).
+        int padding = 4;
+        int outerW = sizePx + padding * 2;
+        // For boss rows we override the wrapper height so the row stays compact even though
+        // the icon is taller — the icon overflows above and below into the surrounding margin.
+        int outerH = wrapperHeightOverride ?? outerW;
 
         var wrapper = new Control();
-        wrapper.CustomMinimumSize = new Vector2(outer, outer);
+        wrapper.CustomMinimumSize = new Vector2(outerW, outerH);
         wrapper.MouseFilter = Control.MouseFilterEnum.Ignore;
 
-        // Highlight overlay — drawn behind the icon, alpha animated 0→0.5 on hover. Mirrors the
-        // run-history "outline modulate to halfTransparentWhite" effect.
-        var highlight = new Panel();
-        highlight.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        highlight.MouseFilter = Control.MouseFilterEnum.Ignore;
-        var hlStyle = new StyleBoxFlat();
-        hlStyle.BgColor       = new Color(1f, 1f, 1f, 0.18f);
-        hlStyle.BorderColor   = new Color(1f, 1f, 1f, 0.85f);
-        hlStyle.SetBorderWidthAll(2);
-        hlStyle.SetCornerRadiusAll(6);
-        // Insets so the border doesn't touch the wrapper's edges.
-        hlStyle.ContentMarginLeft   = 0;
-        hlStyle.ContentMarginRight  = 0;
-        hlStyle.ContentMarginTop    = 0;
-        hlStyle.ContentMarginBottom = 0;
-        highlight.AddThemeStyleboxOverride("panel", hlStyle);
+        // Highlight overlay — same texture as the icon but rendered through the silhouette
+        // shader so the result is a uniform white glow shaped like the icon. Pre-scaled
+        // slightly larger than the icon so the white halo peeks out around the silhouette
+        // when its alpha fades in.
+        // Position the icon (and the highlight overlay) absolutely with anchors at the
+        // wrapper's center, so when wrapperHeightOverride < sizePx the icon overflows the
+        // wrapper bounds vertically (centered) instead of being squashed to fit.
+        void AnchorCenteredIcon(Control rect)
+        {
+            rect.AnchorLeft = 0.5f; rect.AnchorRight = 0.5f;
+            rect.AnchorTop  = 0.5f; rect.AnchorBottom = 0.5f;
+            rect.OffsetLeft   = -sizePx / 2f;
+            rect.OffsetRight  =  sizePx / 2f;
+            rect.OffsetTop    = -sizePx / 2f;
+            rect.OffsetBottom =  sizePx / 2f;
+            rect.PivotOffset = new Vector2(sizePx / 2f, sizePx / 2f);
+        }
+
+        // Highlight uses a pre-DILATED all-white silhouette of the icon texture (built once
+        // and cached). The dilation expands the icon's shape outward by N pixels with crisp
+        // 0|1 alpha, so when drawn behind the icon at 1× scale the visible portion is a
+        // uniform-color halo that traces the silhouette without any anti-aliasing gradient.
+        // Choose dilation radius proportional to icon size so smaller icons get a smaller
+        // halo and larger icons get a thicker one.
+        int dilation = Math.Max(3, sizePx / 10);
+        var silhouetteTex = GetSilhouetteTexture(tex, dilation) ?? tex;
+        var highlight = new TextureRect();
+        highlight.Texture      = silhouetteTex;
+        AnchorCenteredIcon(highlight);
+        highlight.StretchMode  = TextureRect.StretchModeEnum.KeepAspectCentered;
+        highlight.ExpandMode   = TextureRect.ExpandModeEnum.IgnoreSize;
+        highlight.MouseFilter  = Control.MouseFilterEnum.Ignore;
+        // Modulate.alpha is what we tween 0 → 1 on hover.
         ((CanvasItem)highlight).Modulate = new Color(1f, 1f, 1f, 0f);
+        // No Scale stretch — the dilation in pixel space already expands the silhouette.
         wrapper.AddChild(highlight);
 
         var icon = new TextureRect();
         icon.Texture       = tex;
-        icon.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        icon.OffsetLeft    = padding;
-        icon.OffsetTop     = padding;
-        icon.OffsetRight   = -padding;
-        icon.OffsetBottom  = -padding;
+        AnchorCenteredIcon(icon);
         icon.StretchMode   = TextureRect.StretchModeEnum.KeepAspectCentered;
         icon.ExpandMode    = TextureRect.ExpandModeEnum.IgnoreSize;
         icon.MouseFilter   = Control.MouseFilterEnum.Ignore;
         ((CanvasItem)icon).Modulate = iconModulate;
-        // Pivot at center of the wrapper so scale grows from the middle.
-        icon.PivotOffset   = new Vector2(sizePx / 2f, sizePx / 2f);
         wrapper.AddChild(icon);
 
         return new NBestiaryStatsSubmenu.IconHoverHandle
@@ -1531,83 +1906,172 @@ internal static class EncounterIcons
     private static Texture2D? _bossCompositeCache;
 
     /// <summary>
-    /// Builds a horizontal composite ImageTexture containing every boss icon we have data for,
-    /// each scaled to <paramref name="iconHeightPx"/> tall. Returns null if no boss icons load.
-    /// Used as the icon for the Stats Bestiary button so the button hints at what's inside.
+    /// Builds a square-ish grid composite ImageTexture containing every boss icon the game
+    /// has registered. Encountered bosses use their full-color icon; unencountered ones are
+    /// shown as a darkened silhouette so the button still hints at the full roster.
+    /// Used as the icon for the Stats Bestiary button. Cells are <paramref name="cellPx"/>
+    /// per side. Returns null if no boss icons can be loaded at all.
     /// </summary>
-    public static Texture2D? BuildBossCompositeTexture(int iconHeightPx)
+    public static Texture2D? BuildBossCompositeTexture(int cellPx)
     {
         if (_bossCompositeCache != null) return _bossCompositeCache;
 
-        var bossIds = MainFile.Db.EncounterMeta
-            .Where(kvp => EncounterCategory.Derive(kvp.Key) == "boss")
-            .Select(kvp => kvp.Key)
-            .OrderBy(id => id, StringComparer.Ordinal)
-            .ToList();
-
-        if (bossIds.Count == 0)
+        // Pull the full boss roster from ModelDb (every encounter the game registers with
+        // RoomType.Boss). This is the master list — if a boss is here but not in
+        // EncounterMeta, the player hasn't fought it yet and we render a silhouette.
+        var allBossIds = new List<string>();
+        var encounteredIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
         {
-            MainFile.Logger.Info("[SlayTheStats] Boss composite: no boss encounters in EncounterMeta");
+            foreach (var enc in MegaCrit.Sts2.Core.Models.ModelDb.AllEncounters)
+            {
+                if (enc.RoomType != MegaCrit.Sts2.Core.Rooms.RoomType.Boss) continue;
+                // EncounterModel.Id is a ModelId; ToString() / .ToString() yields "ENCOUNTER.X".
+                var idStr = enc.Id?.ToString();
+                if (string.IsNullOrEmpty(idStr)) continue;
+                allBossIds.Add(idStr.ToUpperInvariant());
+            }
+            allBossIds = allBossIds.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.Ordinal).ToList();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] Boss composite: failed to enumerate ModelDb bosses ({e.Message}); falling back to encountered set");
+            allBossIds.Clear();
+        }
+
+        foreach (var (encId, _) in MainFile.Db.EncounterMeta)
+            if (EncounterCategory.Derive(encId) == "boss")
+                encounteredIds.Add(encId);
+
+        // If ModelDb enumeration produced nothing, fall back to whatever the player has
+        // already fought so the button is still populated.
+        if (allBossIds.Count == 0)
+            allBossIds = encounteredIds.OrderBy(s => s, StringComparer.Ordinal).ToList();
+
+        if (allBossIds.Count == 0)
+        {
+            MainFile.Logger.Info("[SlayTheStats] Boss composite: no bosses available from ModelDb or EncounterMeta");
             return null;
         }
 
-        var images = new List<Image>();
-        int loaded = 0, missing = 0, noImage = 0;
-        foreach (var encounterId in bossIds)
+        // Square-ish grid: cols = ceil(sqrt(N)), rows = ceil(N / cols).
+        int cols = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(allBossIds.Count)));
+        int rows = (int)Math.Ceiling((double)allBossIds.Count / cols);
+
+        int gridW = cols * cellPx;
+        int gridH = rows * cellPx;
+        var composite = Image.CreateEmpty(gridW, gridH, false, Image.Format.Rgba8);
+
+        int loaded = 0, missing = 0, silhouettes = 0;
+        for (int i = 0; i < allBossIds.Count; i++)
         {
-            var tex = LoadBossTexture(encounterId);
+            var id = allBossIds[i];
+            var tex = LoadBossTexture(id);
             if (tex == null) { missing++; continue; }
-            // CompressedTexture2D.GetImage() may return null if the underlying image stream
-            // wasn't kept; in that case we can't blit it into the composite.
             var img = tex.GetImage();
-            if (img == null || img.IsEmpty()) { noImage++; continue; }
-            // Decompress if the source was a compressed format — BlitRect requires uncompressed.
+            if (img == null || img.IsEmpty()) { missing++; continue; }
             if (img.IsCompressed())
             {
-                var err = img.Decompress();
-                if (err != Error.Ok) { noImage++; continue; }
+                if (img.Decompress() != Error.Ok) { missing++; continue; }
             }
-            images.Add(img);
+            // Clone + convert to RGBA8 so we can mutate without touching the cached source.
+            var cell = (Image)img.Duplicate();
+            if (cell.GetFormat() != Image.Format.Rgba8)
+                cell.Convert(Image.Format.Rgba8);
+
+            // Resize to fit cellPx, preserving aspect.
+            int srcW = cell.GetWidth();
+            int srcH = cell.GetHeight();
+            if (srcW == 0 || srcH == 0) { missing++; continue; }
+            double scale = Math.Min((double)cellPx / srcW, (double)cellPx / srcH);
+            int newW = Math.Max(1, (int)Math.Round(srcW * scale));
+            int newH = Math.Max(1, (int)Math.Round(srcH * scale));
+            cell.Resize(newW, newH, Image.Interpolation.Bilinear);
+
+            // Silhouette pass for unencountered bosses: zero out RGB but keep alpha so the
+            // shape remains visible as a black blob.
+            if (!encounteredIds.Contains(id))
+            {
+                SilhouetteImage(cell);
+                silhouettes++;
+            }
+
+            // Add a 1-pixel black outline around every boss icon (encountered or silhouette)
+            // so the icons read clearly against the warm-stone bestiary button background.
+            cell = AddBlackOutline(cell);
+
+            int col = i % cols;
+            int row = i / cols;
+            int dstX = col * cellPx + (cellPx - newW) / 2;
+            int dstY = row * cellPx + (cellPx - newH) / 2;
+            composite.BlitRect(cell,
+                new Rect2I(0, 0, newW, newH),
+                new Vector2I(dstX, dstY));
             loaded++;
         }
 
-        MainFile.Logger.Info($"[SlayTheStats] Boss composite: bosses={bossIds.Count} loaded={loaded} missing={missing} noImage={noImage}");
+        MainFile.Logger.Info($"[SlayTheStats] Boss composite: bosses={allBossIds.Count} loaded={loaded} missing={missing} silhouettes={silhouettes} grid={cols}x{rows}");
 
-        if (images.Count == 0) return null;
-
-        // Scale each image so its height matches iconHeightPx, preserving aspect ratio.
-        int totalWidth = 0;
-        var scaled = new List<Image>();
-        foreach (var src in images)
-        {
-            int srcW = src.GetWidth();
-            int srcH = src.GetHeight();
-            if (srcH == 0) continue;
-            int newW = Math.Max(1, (int)Math.Round((double)srcW * iconHeightPx / srcH));
-
-            // Image.Resize works in place; clone first so we don't mutate the cached source.
-            var copy = (Image)src.Duplicate();
-            copy.Resize(newW, iconHeightPx, Image.Interpolation.Bilinear);
-            scaled.Add(copy);
-            totalWidth += newW;
-        }
-
-        if (scaled.Count == 0 || totalWidth == 0) return null;
-
-        var composite = Image.CreateEmpty(totalWidth, iconHeightPx, false, Image.Format.Rgba8);
-        int x = 0;
-        foreach (var s in scaled)
-        {
-            // Convert to RGBA8 if needed so the formats match (BlitRect requires identical formats).
-            if (s.GetFormat() != Image.Format.Rgba8)
-                s.Convert(Image.Format.Rgba8);
-            composite.BlitRect(s,
-                new Rect2I(0, 0, s.GetWidth(), s.GetHeight()),
-                new Vector2I(x, 0));
-            x += s.GetWidth();
-        }
+        if (loaded == 0) return null;
 
         _bossCompositeCache = ImageTexture.CreateFromImage(composite);
         return _bossCompositeCache;
+    }
+
+    /// <summary>
+    /// In-place silhouette: collapses every visible pixel to black while preserving alpha,
+    /// so the shape remains recognisable but the boss is clearly "locked".
+    /// </summary>
+    private static void SilhouetteImage(Image img)
+    {
+        int w = img.GetWidth();
+        int h = img.GetHeight();
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                var c = img.GetPixel(x, y);
+                if (c.A > 0)
+                    img.SetPixel(x, y, new Color(0f, 0f, 0f, c.A));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds a 1-pixel solid-black outline around every alpha-positive pixel. Returns a new
+    /// image so the source image is left untouched (callers may have already mutated it).
+    /// </summary>
+    private static Image AddBlackOutline(Image src)
+    {
+        int w = src.GetWidth();
+        int h = src.GetHeight();
+        var dst = (Image)src.Duplicate();
+        const float threshold = 0.05f;
+        var black = new Color(0f, 0f, 0f, 1f);
+
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                var center = src.GetPixel(x, y);
+                if (center.A >= threshold) continue; // already opaque, skip
+
+                // 8-neighbour test — if any neighbour is opaque, this border pixel becomes black.
+                bool nearOpaque = false;
+                for (int dy = -1; dy <= 1 && !nearOpaque; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                        if (src.GetPixel(nx, ny).A >= threshold) { nearOpaque = true; break; }
+                    }
+                }
+                if (nearOpaque)
+                    dst.SetPixel(x, y, black);
+            }
+        }
+        return dst;
     }
 }

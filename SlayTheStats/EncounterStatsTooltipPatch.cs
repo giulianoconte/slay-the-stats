@@ -35,6 +35,16 @@ public static class CreatureFocusPatch
         if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
         if (!CardHoverShowPatch.IsInRun) return;
 
+        // Don't pop the stats tooltip while the player is mid-targeting (e.g. clicked an
+        // attack and is now hovering enemies to pick a target). It's distracting and the
+        // mouse passes over enemies very quickly during this state.
+        try
+        {
+            if (NTargetManager.Instance != null && NTargetManager.Instance.IsInSelection)
+                return;
+        }
+        catch { /* defensive: NTargetManager may not exist outside combat */ }
+
         try
         {
             var encounterId = GetEncounterId(__instance);
@@ -99,6 +109,50 @@ public static class CreatureUnfocusPatch
     }
 }
 
+// Extend the hover area to include the health bar / state display. NCreature wires its own
+// MouseEntered/Exited on the Hitbox; we add a parallel pair of handlers on _stateDisplay so
+// that hovering anywhere over the health bar shows the same tooltips as hovering the body.
+[HarmonyPatch(typeof(NCreature), nameof(NCreature._Ready))]
+public static class CreatureReadyPatch
+{
+    private static bool _warnedOnce;
+
+    static void Postfix(NCreature __instance)
+    {
+        try
+        {
+            var stateDisplayField = AccessTools.Field(typeof(NCreature), "_stateDisplay");
+            if (stateDisplayField?.GetValue(__instance) is not Control stateDisplay) return;
+
+            // The state display is normally non-interactive. Bumping its mouse filter to Pass
+            // lets it receive MouseEntered/Exited without intercepting clicks.
+            if (stateDisplay.MouseFilter == Control.MouseFilterEnum.Ignore)
+                stateDisplay.MouseFilter = Control.MouseFilterEnum.Pass;
+
+            var onFocus   = AccessTools.Method(typeof(NCreature), "OnFocus");
+            var onUnfocus = AccessTools.Method(typeof(NCreature), "OnUnfocus");
+            if (onFocus == null || onUnfocus == null) return;
+
+            stateDisplay.MouseEntered += () =>
+            {
+                try { onFocus.Invoke(__instance, null); } catch { }
+            };
+            stateDisplay.MouseExited += () =>
+            {
+                try { onUnfocus.Invoke(__instance, null); } catch { }
+            };
+        }
+        catch (Exception e)
+        {
+            if (!_warnedOnce)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] Health bar hover wire-up failed: {e.Message}");
+                _warnedOnce = true;
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Self-contained hover state machine + panel for combat encounter stats.
 // ─────────────────────────────────────────────────────────────────────
@@ -106,7 +160,7 @@ public static class CreatureUnfocusPatch
 internal static class EncounterStatsHover
 {
     /// <summary>How long the player must hover an enemy before the panel appears.</summary>
-    private const double HoverDelaySeconds = 1.0;
+    private const double HoverDelaySeconds = 0.75;
 
     /// <summary>Vertical gap between our panel and the top of the existing tooltip stack.</summary>
     private const float StackGapPx = 8f;
@@ -146,6 +200,14 @@ internal static class EncounterStatsHover
             // bumped and we silently drop this fire.
             if (token != _gen) return;
             if (_focusedCreature == null || _focusedEncounterId == null) return;
+            // Card targeting may have started during the delay window — bail out so we don't
+            // pop a panel over the targeting reticle.
+            try
+            {
+                if (NTargetManager.Instance != null && NTargetManager.Instance.IsInSelection)
+                    return;
+            }
+            catch { }
             try
             {
                 ShowFor(_focusedCreature, _focusedEncounterId);
@@ -386,19 +448,9 @@ internal static class EncounterStatsHover
 
     private static AggregationFilter BuildFilter(string? character)
     {
-        var filter = new AggregationFilter { Character = character };
-
-        if (SlayTheStatsConfig.AscensionMin > 0)
-            filter.AscensionMin = SlayTheStatsConfig.AscensionMin;
-        if (SlayTheStatsConfig.AscensionMax < 20)
-            filter.AscensionMax = SlayTheStatsConfig.AscensionMax;
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin))
-            filter.VersionMin = SlayTheStatsConfig.VersionMin;
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax))
-            filter.VersionMax = SlayTheStatsConfig.VersionMax;
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile))
-            filter.Profile = SlayTheStatsConfig.FilterProfile;
-
+        // Use the central sanitised filter so corrupt cfg values can never block stats here.
+        var filter = SlayTheStatsConfig.BuildSafeFilter();
+        filter.Character = character;
         return filter;
     }
 

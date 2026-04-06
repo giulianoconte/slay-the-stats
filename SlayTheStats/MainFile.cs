@@ -29,6 +29,10 @@ public partial class MainFile : Node
         }
 
         var config = new SlayTheStatsConfig();
+        // BaseLib's ModConfig.Init() ran the cfg load inside the constructor above. Now
+        // sanitise any filter properties that might have been left in a degenerate state by
+        // older versions or manual edits, so the next save writes clean values.
+        SlayTheStatsConfig.Sanitize();
         ModConfigRegistry.Register(ModId, config);
         ModConfigBridge.DeferredRegister();
 
