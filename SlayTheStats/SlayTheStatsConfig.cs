@@ -49,11 +49,33 @@ internal class SlayTheStatsConfig : SimpleModConfig
 
     // ── Aggregation filter properties (v0.2.0) ──────────────────────────────
 
-    /// <summary>Minimum ascension to include in aggregation (0 = no min).</summary>
-    public static int AscensionMin { get; set; } = 0;
+    /// <summary>
+    /// Sentinel "Lowest" — no lower bound, includes whatever the lowest
+    /// ascension in the data is. Survives mods that introduce negative
+    /// ascensions without needing user reconfiguration.
+    /// </summary>
+    public const int AscensionLowest = int.MinValue;
 
-    /// <summary>Maximum ascension to include in aggregation (10 = default max, STS2 max is 20).</summary>
-    public static int AscensionMax { get; set; } = 10;
+    /// <summary>
+    /// Sentinel "Highest" — no upper bound, includes whatever the highest
+    /// ascension in the data is. Survives mods/future patches that introduce
+    /// 11+ ascensions without needing user reconfiguration.
+    /// </summary>
+    public const int AscensionHighest = int.MaxValue;
+
+    /// <summary>
+    /// Minimum ascension to include in aggregation. AscensionLowest = -∞ (no
+    /// lower bound, auto-tracks new low ascensions); any other int = explicit
+    /// floor (won't auto-include newly-discovered lower ascensions).
+    /// </summary>
+    public static int AscensionMin { get; set; } = AscensionLowest;
+
+    /// <summary>
+    /// Maximum ascension to include in aggregation. AscensionHighest = +∞ (no
+    /// upper bound, auto-tracks new high ascensions); any other int = explicit
+    /// ceiling (won't auto-include newly-discovered higher ascensions).
+    /// </summary>
+    public static int AscensionMax { get; set; } = AscensionHighest;
 
     /// <summary>Minimum game version to include (empty = no min). Compared semantically.</summary>
     public static string VersionMin { get; set; } = "";
@@ -62,16 +84,22 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static string VersionMax { get; set; } = "";
 
     /// <summary>
-    /// Comma-separated list of character IDs to include (e.g. "CHARACTER.IRONCLAD,CHARACTER.SILENT").
-    /// Empty = all characters. Only used as a legacy/internal field now; prefer ClassSpecificStats.
+    /// Class filter selection. Values:
+    /// - "" → All characters
+    /// - "__class__" → Class-specific (use the card's owning class; colorless/curse/etc. show all-char stats)
+    /// - "CHARACTER.X" → Filter to a specific character (e.g. "CHARACTER.IRONCLAD")
     /// </summary>
-    public static string FilterCharacters { get; set; } = "";
+    public static string ClassFilter { get; set; } = "";
 
-    /// <summary>
-    /// When true, class cards show stats for their owning class only.
-    /// Colorless, curse, event, and quest cards always show all-character stats.
-    /// </summary>
-    public static bool ClassSpecificStats { get; set; } = false;
+    /// <summary>Sentinel value for ClassFilter meaning "use the card's owning class".</summary>
+    public const string ClassFilterClassSpecific = "__class__";
+
+    /// <summary>Legacy convenience accessor — true iff ClassFilter is the class-specific sentinel.</summary>
+    public static bool ClassSpecificStats
+    {
+        get => ClassFilter == ClassFilterClassSpecific;
+        set => ClassFilter = value ? ClassFilterClassSpecific : "";
+    }
 
     /// <summary>
     /// Profile to filter by (e.g. "profile1"). Empty = all profiles.
@@ -82,11 +110,11 @@ internal class SlayTheStatsConfig : SimpleModConfig
     // These are the "saved defaults" the user can set via "Save as Defaults".
     // They persist across restarts via SimpleModConfig serialization.
 
-    public static int DefaultAscensionMin { get; set; } = 0;
-    public static int DefaultAscensionMax { get; set; } = 10;
+    public static int DefaultAscensionMin { get; set; } = AscensionLowest;
+    public static int DefaultAscensionMax { get; set; } = AscensionHighest;
     public static string DefaultVersionMin { get; set; } = "";
     public static string DefaultVersionMax { get; set; } = "";
-    public static bool DefaultClassSpecificStats { get; set; } = false;
+    public static string DefaultClassFilter { get; set; } = "";
     public static string DefaultFilterProfile { get; set; } = "";
     public static bool DefaultGroupCardUpgrades { get; set; } = true;
 
@@ -96,7 +124,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         DefaultAscensionMax = AscensionMax;
         DefaultVersionMin = VersionMin;
         DefaultVersionMax = VersionMax;
-        DefaultClassSpecificStats = ClassSpecificStats;
+        DefaultClassFilter = ClassFilter;
         DefaultFilterProfile = FilterProfile;
         DefaultGroupCardUpgrades = GroupCardUpgrades;
     }
@@ -107,18 +135,18 @@ internal class SlayTheStatsConfig : SimpleModConfig
         AscensionMax = DefaultAscensionMax;
         VersionMin = DefaultVersionMin;
         VersionMax = DefaultVersionMax;
-        ClassSpecificStats = DefaultClassSpecificStats;
+        ClassFilter = DefaultClassFilter;
         FilterProfile = DefaultFilterProfile;
         GroupCardUpgrades = DefaultGroupCardUpgrades;
     }
 
     internal static void ClearAllFilters()
     {
-        AscensionMin = 0;
-        AscensionMax = 10;
+        AscensionMin = AscensionLowest;
+        AscensionMax = AscensionHighest;
         VersionMin = "";
         VersionMax = "";
-        ClassSpecificStats = false;
+        ClassFilter = "";
         FilterProfile = "";
         GroupCardUpgrades = true;
     }
@@ -129,7 +157,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         "AscensionMax" => AscensionMax != DefaultAscensionMax,
         "VersionMin" => VersionMin != DefaultVersionMin,
         "VersionMax" => VersionMax != DefaultVersionMax,
-        "ClassSpecific" => ClassSpecificStats != DefaultClassSpecificStats,
+        "ClassFilter" => ClassFilter != DefaultClassFilter,
         "FilterProfile" => FilterProfile != DefaultFilterProfile,
         "GroupUpgrades" => GroupCardUpgrades != DefaultGroupCardUpgrades,
         _ => false,

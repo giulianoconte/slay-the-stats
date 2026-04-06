@@ -12,19 +12,26 @@ internal class SlayTheStatsConfig
     public static bool ShowInRunStats { get; set; } = true;
     public static bool DisableTooltipsEntirely { get; set; } = false;
     public static bool DebugMode { get; set; } = false;
-    public static int AscensionMin { get; set; } = 0;
-    public static int AscensionMax { get; set; } = 10;
+    public const int AscensionLowest = int.MinValue;
+    public const int AscensionHighest = int.MaxValue;
+    public static int AscensionMin { get; set; } = AscensionLowest;
+    public static int AscensionMax { get; set; } = AscensionHighest;
     public static string VersionMin { get; set; } = "";
     public static string VersionMax { get; set; } = "";
-    public static string FilterCharacters { get; set; } = "";
-    public static bool ClassSpecificStats { get; set; } = false;
+    public static string ClassFilter { get; set; } = "";
+    public const string ClassFilterClassSpecific = "__class__";
+    public static bool ClassSpecificStats
+    {
+        get => ClassFilter == ClassFilterClassSpecific;
+        set => ClassFilter = value ? ClassFilterClassSpecific : "";
+    }
     public static string FilterProfile { get; set; } = "";
 
-    public static int DefaultAscensionMin { get; set; } = 0;
-    public static int DefaultAscensionMax { get; set; } = 10;
+    public static int DefaultAscensionMin { get; set; } = AscensionLowest;
+    public static int DefaultAscensionMax { get; set; } = AscensionHighest;
     public static string DefaultVersionMin { get; set; } = "";
     public static string DefaultVersionMax { get; set; } = "";
-    public static bool DefaultClassSpecificStats { get; set; } = false;
+    public static string DefaultClassFilter { get; set; } = "";
     public static string DefaultFilterProfile { get; set; } = "";
     public static bool DefaultGroupCardUpgrades { get; set; } = true;
 
@@ -32,20 +39,21 @@ internal class SlayTheStatsConfig
     {
         DefaultAscensionMin = AscensionMin; DefaultAscensionMax = AscensionMax;
         DefaultVersionMin = VersionMin; DefaultVersionMax = VersionMax;
-        DefaultClassSpecificStats = ClassSpecificStats; DefaultFilterProfile = FilterProfile;
+        DefaultClassFilter = ClassFilter; DefaultFilterProfile = FilterProfile;
         DefaultGroupCardUpgrades = GroupCardUpgrades;
     }
     internal static void RestoreDefaults()
     {
         AscensionMin = DefaultAscensionMin; AscensionMax = DefaultAscensionMax;
         VersionMin = DefaultVersionMin; VersionMax = DefaultVersionMax;
-        ClassSpecificStats = DefaultClassSpecificStats; FilterProfile = DefaultFilterProfile;
+        ClassFilter = DefaultClassFilter; FilterProfile = DefaultFilterProfile;
         GroupCardUpgrades = DefaultGroupCardUpgrades;
     }
     internal static void ClearAllFilters()
     {
-        AscensionMin = 0; AscensionMax = 10; VersionMin = ""; VersionMax = "";
-        ClassSpecificStats = false; FilterProfile = ""; GroupCardUpgrades = true;
+        AscensionMin = AscensionLowest; AscensionMax = AscensionHighest;
+        VersionMin = ""; VersionMax = "";
+        ClassFilter = ""; FilterProfile = ""; GroupCardUpgrades = true;
     }
     internal static bool IsNonDefault(string field) => field switch
     {
@@ -53,7 +61,7 @@ internal class SlayTheStatsConfig
         "AscensionMax" => AscensionMax != DefaultAscensionMax,
         "VersionMin" => VersionMin != DefaultVersionMin,
         "VersionMax" => VersionMax != DefaultVersionMax,
-        "ClassSpecific" => ClassSpecificStats != DefaultClassSpecificStats,
+        "ClassFilter" => ClassFilter != DefaultClassFilter,
         "FilterProfile" => FilterProfile != DefaultFilterProfile,
         "GroupUpgrades" => GroupCardUpgrades != DefaultGroupCardUpgrades,
         _ => false,

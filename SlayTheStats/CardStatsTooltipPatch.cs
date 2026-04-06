@@ -217,18 +217,26 @@ public static class CardHoverShowPatch
         var filter = new AggregationFilter
         {
             GameMode = "standard",
-            AscensionMin = SlayTheStatsConfig.AscensionMin > 0 ? SlayTheStatsConfig.AscensionMin : null,
-            AscensionMax = SlayTheStatsConfig.AscensionMax < 10 ? SlayTheStatsConfig.AscensionMax : null,
+            AscensionMin = SlayTheStatsConfig.AscensionMin == SlayTheStatsConfig.AscensionLowest  ? null : (int?)SlayTheStatsConfig.AscensionMin,
+            AscensionMax = SlayTheStatsConfig.AscensionMax == SlayTheStatsConfig.AscensionHighest ? null : (int?)SlayTheStatsConfig.AscensionMax,
             VersionMin = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
             VersionMax = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
         };
 
-        // Character: only set when ClassSpecificStats is on AND the card has an owning class.
-        // Otherwise all characters — the compendium never falls back to RunCharacter.
-        if (SlayTheStatsConfig.ClassSpecificStats && cardOwnerCharacter != null)
+        // Character: derived from ClassFilter.
+        //   ""              → all characters (no filter)
+        //   "__class__"     → use the card's owning class (null for colorless/curse/etc.)
+        //   "CHARACTER.X"   → that specific character, regardless of card type
+        // The compendium never falls back to RunCharacter.
+        var classFilter = SlayTheStatsConfig.ClassFilter;
+        if (classFilter == SlayTheStatsConfig.ClassFilterClassSpecific)
         {
-            filter.Character = cardOwnerCharacter;
+            if (cardOwnerCharacter != null) filter.Character = cardOwnerCharacter;
+        }
+        else if (!string.IsNullOrEmpty(classFilter))
+        {
+            filter.Character = classFilter;
         }
 
         var effectiveChar = GetEffectiveCharacter(filter);
@@ -257,8 +265,8 @@ public static class CardHoverShowPatch
         {
             GameMode = "standard",
             Character = runCharacter,
-            AscensionMin = SlayTheStatsConfig.DefaultAscensionMin > 0 ? SlayTheStatsConfig.DefaultAscensionMin : null,
-            AscensionMax = SlayTheStatsConfig.DefaultAscensionMax < 10 ? SlayTheStatsConfig.DefaultAscensionMax : null,
+            AscensionMin = SlayTheStatsConfig.DefaultAscensionMin == SlayTheStatsConfig.AscensionLowest  ? null : (int?)SlayTheStatsConfig.DefaultAscensionMin,
+            AscensionMax = SlayTheStatsConfig.DefaultAscensionMax == SlayTheStatsConfig.AscensionHighest ? null : (int?)SlayTheStatsConfig.DefaultAscensionMax,
             VersionMin = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
             VersionMax = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultFilterProfile) ? null : SlayTheStatsConfig.DefaultFilterProfile,
@@ -361,10 +369,11 @@ public static class CardHoverShowPatch
     {
         var parts = new List<string>();
 
-        var asc = FormatAscensionPrefix(filter.AscensionMin, filter.AscensionMax).TrimEnd();
-        if (asc.Length > 0) parts.Add(asc);
+        // Always include the ascension range, even when unfiltered ("A0-10").
+        parts.Add(FormatAscensionFooter(filter.AscensionMin, filter.AscensionMax));
 
-        if (characterLabel != "All chars") parts.Add(characterLabel);
+        // Always include the character label, even when "All chars".
+        parts.Add(characterLabel);
 
         if (filter.VersionMin != null || filter.VersionMax != null)
         {
@@ -382,6 +391,32 @@ public static class CardHoverShowPatch
             parts.Add(filter.Profile);
 
         return parts.Count > 0 ? string.Join(", ", parts) : "";
+    }
+
+    /// <summary>
+    /// Footer-only ascension formatter — always returns a value, even when both
+    /// bounds are unset. Sentinel/null bounds fall back to the actual ascension
+    /// range present in the data so the footer reflects what's really being
+    /// aggregated (and stays correct with mods that add negative or 11+
+    /// ascensions). When the data is empty, falls back to A0-10.
+    /// </summary>
+    internal static string FormatAscensionFooter(int? ascMin, int? ascMax)
+    {
+        int lo, hi;
+        if (ascMin == null || ascMax == null)
+        {
+            var data = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+            var dataLo = data.Count > 0 ? data[0]  : 0;
+            var dataHi = data.Count > 0 ? data[^1] : 10;
+            lo = ascMin ?? dataLo;
+            hi = ascMax ?? dataHi;
+        }
+        else
+        {
+            lo = ascMin.Value;
+            hi = ascMax.Value;
+        }
+        return lo == hi ? $"A{lo}" : $"A{lo}-{hi}";
     }
 
     internal static string FormatAscensionPrefix(int? ascMin, int? ascMax)

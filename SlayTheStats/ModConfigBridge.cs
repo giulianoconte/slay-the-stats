@@ -97,34 +97,6 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
-            Set(cfg, "Key",          "only_highest_won_ascension");
-            Set(cfg, "Label",        "Only Highest Won Ascension");
-            Set(cfg, "Type",         EnumVal("Toggle"));
-            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.OnlyHighestWonAscension);
-            Set(cfg, "Description",  "Show stats only up to the highest ascension you have won per character, rather than all ascensions.");
-            Set(cfg, "OnChanged",    new Action<object>(v =>
-            {
-                SlayTheStatsConfig.OnlyHighestWonAscension = Convert.ToBoolean(v);
-                ModConfig.SaveDebounced<SlayTheStatsConfig>();
-            }));
-        }));
-
-        list.Add(Entry(cfg =>
-        {
-            Set(cfg, "Key",          "group_card_upgrades");
-            Set(cfg, "Label",        "Group Card Upgrades");
-            Set(cfg, "Type",         EnumVal("Toggle"));
-            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.GroupCardUpgrades);
-            Set(cfg, "Description",  "Merge stats for a card and its upgraded form (e.g. Strike and Strike+ count as one entry). When off, upgraded cards may show a Picks count higher than the offered count (e.g. 5/1) because 'present' includes copies upgraded at campfires or events, while 'offered' only counts pre-upgraded fight reward offerings.");
-            Set(cfg, "OnChanged",    new Action<object>(v =>
-            {
-                SlayTheStatsConfig.GroupCardUpgrades = Convert.ToBoolean(v);
-                ModConfig.SaveDebounced<SlayTheStatsConfig>();
-            }));
-        }));
-
-        list.Add(Entry(cfg =>
-        {
             Set(cfg, "Key",          "color_blind_mode");
             Set(cfg, "Label",        "Color Blind Mode");
             Set(cfg, "Type",         EnumVal("Toggle"));
@@ -176,6 +148,35 @@ internal static class ModConfigBridge
             {
                 SlayTheStatsConfig.DebugMode = Convert.ToBoolean(v);
                 ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "data_directory");
+            Set(cfg, "Label",        "Data Directory");
+            Set(cfg, "Type",         EnumVal("TextInput"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.DataDirectory);
+            Set(cfg, "Placeholder",  "(default — leave empty)");
+            Set(cfg, "MaxLength",    256);
+            Set(cfg, "Description",  "Override the root SlayTheSpire2 data directory (the folder containing the 'steam' subfolder). Leave empty to use the platform default. Example: /home/deck/.local/share/SlayTheSpire2");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.DataDirectory = Convert.ToString(v) ?? "";
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "open_filters");
+            Set(cfg, "Label",        "Filter Defaults");
+            Set(cfg, "Type",         EnumVal("Button"));
+            Set(cfg, "ButtonText",   "Open Filters");
+            Set(cfg, "Description",  "Open the SlayTheStats filter pane to edit the saved aggregation defaults (ascension, version, profile, class filter). Use 'Save Defaults' inside the pane to persist your changes.");
+            Set(cfg, "OnChanged",    new Action<object>(_ =>
+            {
+                CompendiumFilterPatch.OpenStandalonePane();
             }));
         }));
 

@@ -13,7 +13,7 @@ namespace SlayTheStats;
 /// screen, each opening a shared floating filter/aggregation pane.
 /// </summary>
 [HarmonyPatch(typeof(NCardLibrary), "_Ready")]
-public static class CompendiumFilterPatch
+public static partial class CompendiumFilterPatch
 {
     // ── Shared colours (game palette from StsColors) ──────────────────────
     private static readonly Color Cream       = new("FFF6E2");        // primary text
@@ -21,6 +21,11 @@ public static class CompendiumFilterPatch
     private static readonly Color MutedButton = new(0.85f, 0.75f, 0.55f, 1f);
     private static readonly Color HoverButton = new(1f, 0.9f, 0.7f, 1f);
     private static readonly Color ActiveFilterColor = new(0.4f, 0.85f, 0.5f, 1f);
+    // Deeper steel-blue used to tint the SlayTheStats sidebar button so it
+    // visually matches the filter pane background. Darker than the pane's
+    // SelfModulate (0.60, 0.68, 0.88) because the button has no stone texture
+    // underneath to brighten it.
+    private static readonly Color SlayTheStatsButtonTint = new(0.32f, 0.42f, 0.78f, 1f);
 
     // Track active pane instances so they can be hidden from external patches.
     private static readonly List<PanelContainer> _activePanes = new();
@@ -213,8 +218,15 @@ public static class CompendiumFilterPatch
             // the template. Duplicate it so our hover animations don't bleed into
             // the original CardTypeSorter button.
             var buttonImage = clone.FindChild("ButtonImage", true, false);
-            if (buttonImage is CanvasItem ci && ci.Material is ShaderMaterial sm)
-                ci.Material = (ShaderMaterial)sm.Duplicate();
+            if (buttonImage is CanvasItem ci)
+            {
+                if (ci.Material is ShaderMaterial sm)
+                    ci.Material = (ShaderMaterial)sm.Duplicate();
+                // Tint the button blue so it visibly differs from vanilla sort buttons.
+                // SelfModulate stacks with the HSV shader's hover tween instead of
+                // fighting it; the tween still brightens/darkens correctly.
+                ci.SelfModulate = SlayTheStatsButtonTint;
+            }
 
             // Hide the sort arrow — our button opens a pane, not a sorter.
             var sortIcon = clone.FindChild("Image", true, false);
@@ -250,6 +262,19 @@ public static class CompendiumFilterPatch
             if (!GodotObject.IsInstanceValid(button)) return;
             UpdateSortButtonActiveState(button);
         };
+
+        // Initial sync — the label text/color should reflect non-default state
+        // even before the user opens the pane for the first time. Deferred so
+        // SetLabel runs after the cloned button's _Ready (which is when its
+        // inner MegaLabel reference is initialised).
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredInitialSync;
+        void DeferredInitialSync()
+        {
+            tree.ProcessFrame -= DeferredInitialSync;
+            if (GodotObject.IsInstanceValid(button))
+                UpdateSortButtonActiveState(button);
+        }
     }
 
     /// <summary>
@@ -281,12 +306,20 @@ public static class CompendiumFilterPatch
     }
 
     /// <summary>
-    /// Updates the cloned sort button's label color to indicate active filters.
-    /// Uses SelfModulate on the MegaLabel child to tint without fighting the HSV shader.
+    /// Updates the cloned sort button's label text + color to indicate that the
+    /// current filters differ from the user's saved defaults. The label text is
+    /// extended with " (not default)" and the whole label is tinted green.
+    ///
+    /// Ideally only the suffix would be green ("SlayTheStats" stays cream), but
+    /// the cloned button uses a plain Label-derived MegaLabel which doesn't
+    /// support inline color markup, and adding a sibling Label would fight the
+    /// existing scene's auto-sizing layout. The combined text + color treatment
+    /// still makes the state unambiguous.
     /// </summary>
     private static void UpdateSortButtonActiveState(NCardViewSortButton button)
     {
         bool active = HasActiveFilters();
+        button.SetLabel(active ? "SlayTheStats (not default)" : "SlayTheStats");
         var label = button.FindChild("Label", true, false);
         if (label is CanvasItem labelItem)
             labelItem.SelfModulate = active ? ActiveFilterColor : Colors.White;
@@ -379,21 +412,243 @@ public static class CompendiumFilterPatch
         button.AddThemeColorOverride("font_color", active ? ActiveFilterColor : MutedButton);
     }
 
+    /// <summary>
+    /// True iff any filter currently differs from the user's saved defaults.
+    /// Used to highlight the SlayTheStats sidebar button — the highlight signals
+    /// "you've changed something this session", not "filters are non-empty".
+    /// </summary>
     internal static bool HasActiveFilters()
     {
-        return SlayTheStatsConfig.AscensionMin > 0
-            || SlayTheStatsConfig.AscensionMax < 10
-            || !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin)
-            || !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax)
-            || SlayTheStatsConfig.ClassSpecificStats
-            || !string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile);
+        return SlayTheStatsConfig.IsNonDefault("AscensionMin")
+            || SlayTheStatsConfig.IsNonDefault("AscensionMax")
+            || SlayTheStatsConfig.IsNonDefault("VersionMin")
+            || SlayTheStatsConfig.IsNonDefault("VersionMax")
+            || SlayTheStatsConfig.IsNonDefault("ClassFilter")
+            || SlayTheStatsConfig.IsNonDefault("FilterProfile")
+            || SlayTheStatsConfig.IsNonDefault("GroupUpgrades");
     }
 
     // ── Filter pane builder ─────────────────────────────────────────────��───
 
-    private static PanelContainer BuildFilterPane()
+    /// <summary>
+    /// Opens the filter pane as a standalone overlay (e.g. from the mod settings menu).
+    /// Adds it to the scene root via a high CanvasLayer with a close button — used to
+    /// edit the saved filter defaults outside of the compendium.
+    /// </summary>
+    internal static void OpenStandalonePane()
     {
-        var pane = new PanelContainer();
+        try
+        {
+            var tree = (SceneTree)Engine.GetMainLoop();
+            if (tree?.Root == null) return;
+
+            // Reuse an existing standalone overlay if one is already open.
+            var existing = tree.Root.GetNodeOrNull<CanvasLayer>("SlayTheStatsStandaloneFilterLayer");
+            if (existing != null && GodotObject.IsInstanceValid(existing))
+            {
+                existing.QueueFree();
+                return;
+            }
+
+            var layer = new CanvasLayer
+            {
+                Name = "SlayTheStatsStandaloneFilterLayer",
+                Layer = 100,
+            };
+
+            // Dimmed full-screen background to capture clicks and dim the menu beneath.
+            var bg = new ColorRect
+            {
+                Color = new Color(0, 0, 0, 0.55f),
+                MouseFilter = Control.MouseFilterEnum.Stop,
+            };
+            bg.AnchorRight = 1f;
+            bg.AnchorBottom = 1f;
+            layer.AddChild(bg);
+
+            Action close = () =>
+            {
+                if (GodotObject.IsInstanceValid(layer)) layer.QueueFree();
+            };
+            bg.GuiInput += (InputEvent ev) =>
+            {
+                if (ev is InputEventMouseButton mb && mb.Pressed) close();
+            };
+
+            var pane = BuildFilterPane(close);
+            pane.Visible = true;
+            layer.AddChild(pane);
+            RegisterPane(pane);
+
+            tree.Root.AddChild(layer);
+
+            // Center after the pane has computed its size.
+            pane.Ready += () => CenterPaneOnViewport(pane);
+            tree.ProcessFrame += DeferredCenter;
+            void DeferredCenter()
+            {
+                tree.ProcessFrame -= DeferredCenter;
+                CenterPaneOnViewport(pane);
+                SyncAllControls();
+            }
+
+            if (SlayTheStatsConfig.DebugMode)
+                MainFile.Logger.Info("[SlayTheStats] Standalone filter pane opened");
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] OpenStandalonePane failed: {e.Message}");
+        }
+    }
+
+    private static void CenterPaneOnViewport(PanelContainer pane)
+    {
+        if (!GodotObject.IsInstanceValid(pane)) return;
+        var viewport = pane.GetViewport();
+        if (viewport == null) return;
+        var vpSize = viewport.GetVisibleRect().Size;
+        var paneSize = pane.GetCombinedMinimumSize();
+        pane.AnchorLeft = 0f; pane.AnchorTop = 0f;
+        pane.AnchorRight = 0f; pane.AnchorBottom = 0f;
+        pane.GlobalPosition = new Vector2(
+            (vpSize.X - paneSize.X) * 0.5f,
+            (vpSize.Y - paneSize.Y) * 0.5f);
+    }
+
+    /// <summary>
+    /// PanelContainer subclass that auto-closes when the user clicks outside its
+    /// rect. Uses _UnhandledInput so clicks on cards/relics still go to the game's
+    /// own handlers (which already trigger HideAllPanes via the inspect/hover
+    /// patches); only clicks that would otherwise hit empty space close the pane.
+    /// </summary>
+    /// <summary>
+    /// Stepper control with the same look as a small spin box but extended with
+    /// "Lowest" / "Highest" sentinels at the edges of the 0–10 range. Stepping
+    /// down from 0 selects "Lowest" (= -∞, int.MinValue) and stepping up from
+    /// 10 selects "Highest" (= +∞, int.MaxValue). Sentinels are stored in the
+    /// underlying int field so saving/loading round-trips through the existing
+    /// SimpleModConfig serialiser.
+    /// </summary>
+    private partial class AscensionStepper : HBoxContainer
+    {
+        public const int LowestSentinel = int.MinValue;
+        public const int HighestSentinel = int.MaxValue;
+        public const int MinExplicit = 0;
+        public const int MaxExplicit = 10;
+
+        private int _value;
+        private Label _display = null!;
+        public event Action<int>? ValueChanged;
+
+        public int Value
+        {
+            get => _value;
+            set { _value = value; if (_display != null) _display.Text = Format(value); }
+        }
+
+        public Label DisplayLabel => _display;
+
+        public AscensionStepper(int initial)
+        {
+            AddThemeConstantOverride("separation", 2);
+
+            var down = MakeArrowButton("◀");
+            down.Pressed += () => Step(-1);
+            AddChild(down);
+
+            _display = new Label
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                CustomMinimumSize = new Vector2(58, 0),
+            };
+            _display.AddThemeColorOverride("font_color", Cream);
+            ApplyGameFont(_display, 16);
+            AddChild(_display);
+
+            var up = MakeArrowButton("▶");
+            up.Pressed += () => Step(+1);
+            AddChild(up);
+
+            Value = initial;
+        }
+
+        private void Step(int dir)
+        {
+            int next = _value;
+            if (dir > 0)
+            {
+                if (_value == LowestSentinel)        next = MinExplicit;
+                else if (_value == HighestSentinel)  next = HighestSentinel;
+                else if (_value >= MaxExplicit)      next = HighestSentinel;
+                else                                 next = _value + 1;
+            }
+            else
+            {
+                if (_value == HighestSentinel)       next = MaxExplicit;
+                else if (_value == LowestSentinel)   next = LowestSentinel;
+                else if (_value <= MinExplicit)      next = LowestSentinel;
+                else                                 next = _value - 1;
+            }
+            if (next != _value)
+            {
+                Value = next;
+                ValueChanged?.Invoke(next);
+            }
+        }
+
+        public static string Format(int value)
+        {
+            if (value == LowestSentinel)  return "Lowest";
+            if (value == HighestSentinel) return "Highest";
+            return $"A{value}";
+        }
+
+        private static Button MakeArrowButton(string glyph)
+        {
+            var btn = new Button { Text = glyph, CustomMinimumSize = new Vector2(20, 22) };
+            btn.AddThemeColorOverride("font_color", Cream);
+            btn.AddThemeColorOverride("font_hover_color", Gold);
+            btn.AddThemeColorOverride("font_pressed_color", Gold);
+            ApplyGameFont(btn, 12);
+            var normal = new StyleBoxFlat
+            {
+                BgColor = new Color(0.08f, 0.06f, 0.05f, 0.6f),
+                BorderColor = new Color(0.4f, 0.35f, 0.25f, 0.5f),
+            };
+            normal.SetBorderWidthAll(1);
+            normal.SetCornerRadiusAll(3);
+            normal.ContentMarginLeft = 4; normal.ContentMarginRight = 4;
+            normal.ContentMarginTop = 2;  normal.ContentMarginBottom = 2;
+            btn.AddThemeStyleboxOverride("normal", normal);
+            var hover = (StyleBoxFlat)normal.Duplicate();
+            hover.BgColor = new Color(0.12f, 0.09f, 0.07f, 0.7f);
+            hover.BorderColor = new Color(0.6f, 0.5f, 0.3f, 0.6f);
+            btn.AddThemeStyleboxOverride("hover", hover);
+            return btn;
+        }
+    }
+
+    private partial class FilterPanelContainer : PanelContainer
+    {
+        public override void _UnhandledInput(InputEvent ev)
+        {
+            if (!Visible) return;
+            if (ev is InputEventMouseButton mb && mb.Pressed)
+            {
+                var rect = GetGlobalRect();
+                if (!rect.HasPoint(mb.Position))
+                {
+                    Visible = false;
+                    GetViewport().SetInputAsHandled();
+                }
+            }
+        }
+    }
+
+    private static PanelContainer BuildFilterPane(Action? onClose = null)
+    {
+        var pane = new FilterPanelContainer();
         pane.Name = "SlayTheStatsFilterPane";
         pane.Visible = false;
         pane.ZIndex = 90;
@@ -419,12 +674,29 @@ public static class CompendiumFilterPatch
         vbox.AddThemeConstantOverride("separation", 6);
         margin.AddChild(vbox);
 
-        // ── Title ──
+        // ── Title (with optional close button) ──
+        var titleRow = new HBoxContainer();
+        titleRow.AddThemeConstantOverride("separation", 8);
+        vbox.AddChild(titleRow);
+
         var title = new Label();
         title.Text = "SlayTheStats Filters";
         title.AddThemeColorOverride("font_color", Gold);
+        title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         ApplyGameFont(title, 20);
-        vbox.AddChild(title);
+        titleRow.AddChild(title);
+
+        if (onClose != null)
+        {
+            var closeBtn = new Button();
+            closeBtn.Text = "✕";
+            closeBtn.CustomMinimumSize = new Vector2(28, 28);
+            closeBtn.AddThemeColorOverride("font_color", Cream);
+            closeBtn.AddThemeColorOverride("font_hover_color", Gold);
+            ApplyGameFont(closeBtn, 16);
+            closeBtn.Pressed += () => onClose();
+            titleRow.AddChild(closeBtn);
+        }
 
         AddSeparator(vbox);
 
@@ -477,40 +749,87 @@ public static class CompendiumFilterPatch
         };
 
         // ── Ascension range ──
+        // Stepper buttons (◀ ▶) instead of a SpinBox so we can extend the range
+        // beyond a fixed numeric span with "Lowest" / "Highest" sentinel values
+        // (-∞ / +∞). Stepping down from 0 selects "Lowest"; stepping up from 10
+        // selects "Highest". Sentinels make the filter robust against mods that
+        // add negative or 11+ ascensions.
         var ascRow = new HBoxContainer();
         ascRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(ascRow);
         ascRow.AddChild(MakeLabel("Ascension:", 100));
 
-        var ascMin = MakeSpinBox(0, 10, SlayTheStatsConfig.AscensionMin);
+        var ascMin = new AscensionStepper(SlayTheStatsConfig.AscensionMin);
         ascRow.AddChild(ascMin);
         ascRow.AddChild(MakeLabel("to"));
-        var ascMax = MakeSpinBox(0, 10, SlayTheStatsConfig.AscensionMax);
+        var ascMax = new AscensionStepper(SlayTheStatsConfig.AscensionMax);
         ascRow.AddChild(ascMax);
 
-        HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
-        HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+        HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+        HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
 
         ascMin.ValueChanged += (val) =>
         {
-            SlayTheStatsConfig.AscensionMin = (int)val;
-            if (ascMax.Value < val) ascMax.Value = val;
-            HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+            SlayTheStatsConfig.AscensionMin = val;
+            // Push max up if min crossed it (sentinel-aware: int comparison
+            // works since LowestSentinel = MinValue and HighestSentinel = MaxValue).
+            if (ascMax.Value < val && val != AscensionStepper.HighestSentinel)
+            {
+                ascMax.Value = val;
+                SlayTheStatsConfig.AscensionMax = val;
+                HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+            }
+            HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
         };
         ascMax.ValueChanged += (val) =>
         {
-            SlayTheStatsConfig.AscensionMax = (int)val;
-            if (ascMin.Value > val) ascMin.Value = val;
-            HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+            SlayTheStatsConfig.AscensionMax = val;
+            if (ascMin.Value > val && val != AscensionStepper.LowestSentinel)
+            {
+                ascMin.Value = val;
+                SlayTheStatsConfig.AscensionMin = val;
+                HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+            }
+            HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+        };
+
+        // ── Class filter dropdown ──
+        // Values aligned with item index: ["", "__class__", "CHARACTER.IRONCLAD", ...]
+        var classRow = new HBoxContainer();
+        classRow.AddThemeConstantOverride("separation", 6);
+        vbox.AddChild(classRow);
+        classRow.AddChild(MakeLabel("Class:", 100));
+
+        var classValues = new List<string> { "", SlayTheStatsConfig.ClassFilterClassSpecific };
+        var classLabels = new List<string> { "All", "Match class card" };
+        foreach (var ch in GetOrderedCharacters(MainFile.Db))
+        {
+            classValues.Add(ch);
+            classLabels.Add(FormatCharName(ch));
+        }
+        var classSelect = new OptionButton();
+        classSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        classSelect.AddThemeColorOverride("font_color", Cream);
+        classSelect.AddThemeColorOverride("font_hover_color", Gold);
+        classSelect.AddThemeColorOverride("font_focus_color", Gold);
+        ApplyGameFont(classSelect, 16);
+        for (int i = 0; i < classLabels.Count; i++)
+            classSelect.AddItem(classLabels[i], i);
+        SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
+        classRow.AddChild(classSelect);
+
+        HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
+
+        classSelect.ItemSelected += (idx) =>
+        {
+            var i = (int)idx;
+            SlayTheStatsConfig.ClassFilter = (i >= 0 && i < classValues.Count) ? classValues[i] : "";
+            HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
         };
 
         AddSeparator(vbox);
 
         // ── Toggles ──
-        var classSpecific = MakeCheckButton("Class-specific stats", SlayTheStatsConfig.ClassSpecificStats);
-        classSpecific.Toggled += (pressed) => SlayTheStatsConfig.ClassSpecificStats = pressed;
-        vbox.AddChild(classSpecific);
-
         var groupUpgrades = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
         groupUpgrades.Toggled += (pressed) => SlayTheStatsConfig.GroupCardUpgrades = pressed;
         vbox.AddChild(groupUpgrades);
@@ -556,12 +875,13 @@ public static class CompendiumFilterPatch
             SelectOptionByText(profSelect, SlayTheStatsConfig.FilterProfile);
             HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
 
-            ascMax.SetValueNoSignal(SlayTheStatsConfig.AscensionMax);
-            ascMin.SetValueNoSignal(SlayTheStatsConfig.AscensionMin);
-            HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
-            HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+            ascMin.Value = SlayTheStatsConfig.AscensionMin;
+            ascMax.Value = SlayTheStatsConfig.AscensionMax;
+            HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+            HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
 
-            classSpecific.SetPressedNoSignal(SlayTheStatsConfig.ClassSpecificStats);
+            SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
+            HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
             groupUpgrades.SetPressedNoSignal(SlayTheStatsConfig.GroupCardUpgrades);
         });
 
@@ -761,6 +1081,25 @@ public static class CompendiumFilterPatch
             optBtn.AddThemeColorOverride("font_hover_color", color);
             optBtn.AddThemeColorOverride("font_focus_color", color);
         }
+    }
+
+    private static void HighlightStepperIfNonDefault(AscensionStepper stepper, bool isNonDefault)
+    {
+        var color = isNonDefault ? ActiveFilterColor : Cream;
+        stepper.DisplayLabel.AddThemeColorOverride("font_color", color);
+    }
+
+    private static void SelectClassFilter(OptionButton button, List<string> values, string current)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], current, StringComparison.OrdinalIgnoreCase))
+            {
+                button.Selected = i;
+                return;
+            }
+        }
+        button.Selected = 0;
     }
 
     private static void SelectOptionByText(OptionButton button, string text)

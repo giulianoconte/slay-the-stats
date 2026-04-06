@@ -322,6 +322,25 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Collects all distinct ascension levels found across all card/relic context keys.
+    /// Returned sorted ascending. May include negative values from mods that add lower
+    /// ascensions, and values above 10 from mods that extend the cap.
+    /// </summary>
+    public static List<int> GetDistinctAscensions(StatsDb db)
+    {
+        var ascensions = new HashSet<int>();
+        foreach (var contextMap in db.Cards.Values)
+            foreach (var key in contextMap.Keys)
+                ascensions.Add(RunContext.Parse(key).Ascension);
+        foreach (var contextMap in db.Relics.Values)
+            foreach (var key in contextMap.Keys)
+                ascensions.Add(RunContext.Parse(key).Ascension);
+        var sorted = ascensions.ToList();
+        sorted.Sort();
+        return sorted;
+    }
+
+    /// <summary>
     /// Collects all distinct profile names found across all card/relic context keys.
     /// </summary>
     public static List<string> GetDistinctProfiles(StatsDb db)
