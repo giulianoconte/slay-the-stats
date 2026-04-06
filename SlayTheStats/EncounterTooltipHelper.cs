@@ -3,13 +3,89 @@ using System.Text;
 namespace SlayTheStats;
 
 /// <summary>
-/// Generates encounter stats tooltip text matching the card/relic tooltip pattern.
-/// Columns: Fought  Died  Turns  Pots  Dmg  Dmg%  Var  Var%
+/// Generates encounter stats text with rows per character.
+/// Columns: Deaths (died/fought)  Death%  Turns  Pots  Dmg  Dmg%  Var  Var%
 /// </summary>
 public static class EncounterTooltipHelper
 {
+    // Character display order — fixed list so rows are consistent
+    private static readonly (string id, string label)[] CharacterOrder =
+    {
+        ("CHARACTER.IRONCLAD", "Ironclad"),
+        ("CHARACTER.SILENT", "Silent"),
+        ("CHARACTER.REGENT", "Regent"),
+        ("CHARACTER.NECROBINDER", "Necrobinder"),
+        ("CHARACTER.DEFECT", "Defect"),
+    };
+
+    /// <summary>
+    /// Builds encounter stats text with one row per character + an "All" total row.
+    /// </summary>
     internal static string BuildEncounterStatsText(
-        Dictionary<int, EncounterEvent> actStats,
+        Dictionary<string, EncounterEvent> charStats,
+        double deathRateBaseline,
+        double dmgPctBaseline,
+        int? ascensionMin,
+        int? ascensionMax,
+        string categoryLabel)
+    {
+        var sb = new StringBuilder();
+
+        // Header
+        //           Label(11)  Deaths(7)  Dth%(5)  Turns(5)  Pots(4)  Dmg(4)  Dmg%(5)  Var(4)  Var%(5)
+        sb.Append("            Deaths Dth% Turns Pots  Dmg Dmg%  Var Var%\n");
+
+        var total = new EncounterEvent();
+
+        // Render known characters in canonical order
+        var rendered = new HashSet<string>();
+        foreach (var (charId, label) in CharacterOrder)
+        {
+            rendered.Add(charId);
+            if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
+            {
+                Accumulate(total, stat);
+                sb.Append(FormatRow($"{label,-11}", stat, deathRateBaseline, dmgPctBaseline));
+            }
+            else
+            {
+                sb.Append(FormatEmptyRow($"{label,-11}"));
+            }
+            sb.Append('\n');
+        }
+
+        // Append any unknown characters with stats (modded or new in-game characters)
+        // sorted alphabetically by ID for stable ordering
+        foreach (var (charId, stat) in charStats.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            if (rendered.Contains(charId)) continue;
+            if (stat.Fought == 0) continue;
+            Accumulate(total, stat);
+            var label = FormatUnknownCharLabel(charId);
+            sb.Append(FormatRow($"{label,-11}", stat, deathRateBaseline, dmgPctBaseline));
+            sb.Append('\n');
+        }
+
+        // All row — always shown
+        if (total.Fought > 0)
+            sb.Append(FormatRow($"{"All",-11}", total, deathRateBaseline, dmgPctBaseline));
+        else
+            sb.Append(FormatEmptyRow($"{"All",-11}"));
+
+        // Footer
+        var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
+        var baselineDmg = $"{Math.Round(dmgPctBaseline):F0}%";
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{categoryLabel} Avg Dmg%: {baselineDmg}[/color][/font_size][/font]");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds encounter stats text with a single row (no character breakdown).
+    /// Used by the in-combat tooltip where the current character is already known.
+    /// </summary>
+    internal static string BuildEncounterStatsTextSingleRow(
+        EncounterEvent stat,
         double deathRateBaseline,
         double dmgPctBaseline,
         string characterLabel,
@@ -19,36 +95,16 @@ public static class EncounterTooltipHelper
     {
         var sb = new StringBuilder();
 
-        // Header — compact column labels
-        sb.Append(" Act  Fght  Died Turns  Pots  Dmg Dmg%  Var Var%\n");
+        sb.Append("       Deaths Dth% Turns Pots  Dmg Dmg%  Var Var%\n");
 
-        // Accumulate totals for the "All" row
-        var total = new EncounterEvent();
+        if (stat.Fought > 0)
+            sb.Append(FormatRow($"{characterLabel,-7}", stat, deathRateBaseline, dmgPctBaseline));
+        else
+            sb.Append($"[color={TooltipHelper.NeutralShade}]No data[/color]");
 
-        for (int act = 1; act <= 3; act++)
-        {
-            if (actStats.TryGetValue(act, out var stat) && stat.Fought > 0)
-            {
-                Accumulate(total, stat);
-                sb.Append(FormatRow($"{act,4}", stat, deathRateBaseline, dmgPctBaseline));
-                sb.Append('\n');
-            }
-            else
-            {
-                sb.Append($"{act,4}  [color={TooltipHelper.NeutralShade}]{"-",4}  {"-",4} {"-",5}  {"-",4}  {"-",3} {"-",4}  {"-",3} {"-",4}[/color]\n");
-            }
-        }
-
-        // Total row
-        if (total.Fought > 0)
-        {
-            sb.Append(FormatRow(" All", total, deathRateBaseline, dmgPctBaseline));
-        }
-
-        // Footer
         var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
         var baselineDmg = $"{Math.Round(dmgPctBaseline):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} {categoryLabel} Avg Dmg%: {baselineDmg}[/color][/font_size][/font]");
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{categoryLabel} Avg Dmg%: {baselineDmg}[/color][/font_size][/font]");
 
         return sb.ToString();
     }
@@ -70,13 +126,19 @@ public static class EncounterTooltipHelper
         double avgDmg    = (double)stat.DamageTakenSum / n;
         double avgDmgPct = stat.DmgPctSum / n * 100.0;
 
-        // Variance: E[X^2] - E[X]^2
         double varDmg    = (double)stat.DamageTakenSqSum / n - avgDmg * avgDmg;
         double varDmgPct = (stat.DmgPctSqSum / n - (stat.DmgPctSum / n) * (stat.DmgPctSum / n)) * 100.0 * 100.0;
 
-        // Format values
-        var fFought  = $"{n}";
-        var fDied    = $"{stat.Died}";
+        // Deaths column: died/fought (e.g. "2/15")
+        var diedStr = $"{stat.Died}";
+        var foughtStr = $"{n}";
+        // Pad the combined string to 6 chars width
+        var deathsFrac = $"{diedStr}/{foughtStr}";
+        var cDeaths = $"{new string(' ', Math.Max(0, 6 - deathsFrac.Length))}"
+                    + $"{TooltipHelper.ColN(diedStr, n)}"
+                    + $"[color={TooltipHelper.NeutralShade}]/{foughtStr}[/color]";
+
+        var fDeathPct = $"{Math.Round(deathRate)}%";
         var fTurns   = $"{avgTurns:F1}";
         var fPots    = $"{avgPots:F1}";
         var fDmg     = $"{Math.Round(avgDmg)}";
@@ -84,30 +146,44 @@ public static class EncounterTooltipHelper
         var fVar     = $"{Math.Round(Math.Max(0, varDmg))}";
         var fVarPct  = $"{Math.Round(Math.Max(0, varDmgPct))}%";
 
-        // Color coding:
-        // - Fought: sample size coloring (ColN)
-        // - Died: higher = worse (inverted ColWR)
-        // - Dmg%: higher = worse (inverted)
-        // - Turns, Pots, Dmg, Var, Var%: neutral (no baseline comparison)
-        var cFought = TooltipHelper.ColN($"{fFought,4}", n);
-        var cDied   = ColBad($"{fDied,4}", deathRate, n, deathRateBaseline);
+        var cDeathPct = ColBad($"{fDeathPct,4}", deathRate, n, deathRateBaseline);
         var cTurns  = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
         var cPots   = $"[color={TooltipHelper.NeutralShade}]{fPots,4}[/color]";
-        var cDmg    = $"[color={TooltipHelper.NeutralShade}]{fDmg,3}[/color]";
+        var cDmg    = $"[color={TooltipHelper.NeutralShade}]{fDmg,4}[/color]";
         var cDmgPct = ColBad($"{fDmgPct,4}", avgDmgPct, n, dmgPctBaseline);
-        var cVar    = $"[color={TooltipHelper.NeutralShade}]{fVar,3}[/color]";
+        var cVar    = $"[color={TooltipHelper.NeutralShade}]{fVar,4}[/color]";
         var cVarPct = $"[color={TooltipHelper.NeutralShade}]{fVarPct,4}[/color]";
 
-        return $"{label}  {cFought}  {cDied} {cTurns}  {cPots}  {cDmg} {cDmgPct}  {cVar} {cVarPct}";
+        return $"{label} {cDeaths} {cDeathPct} {cTurns} {cPots} {cDmg} {cDmgPct} {cVar} {cVarPct}";
     }
 
     /// <summary>
-    /// Colors text where higher values are BAD (e.g. damage, death rate).
-    /// Inverts the direction relative to ColWR: above baseline = BadShades, below = GoodShades.
+    /// Formats a character ID we don't have a hardcoded label for.
+    /// "CHARACTER.MOD_ROGUE" -> "Mod Rogue", truncated to fit the column width.
     /// </summary>
+    private static string FormatUnknownCharLabel(string characterId)
+    {
+        var dotIdx = characterId.IndexOf('.');
+        var name = dotIdx >= 0 ? characterId[(dotIdx + 1)..] : characterId;
+        var words = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; i++)
+        {
+            if (words[i].Length > 0)
+                words[i] = char.ToUpper(words[i][0]) + words[i][1..].ToLower();
+        }
+        var label = string.Join(' ', words);
+        return label.Length > 11 ? label[..11] : label;
+    }
+
+    private static string FormatEmptyRow(string label)
+    {
+        var dash = $"[color={TooltipHelper.NeutralShade}]";
+        // Match the column widths used in FormatRow: Deaths(6) Dth%(4) Turns(5) Pots(4) Dmg(4) Dmg%(4) Var(4) Var%(4)
+        return $"{label} {dash}{"-",6}[/color] {dash}{"-",4}[/color] {dash}{"-",5}[/color] {dash}{"-",4}[/color] {dash}{"-",4}[/color] {dash}{"-",4}[/color] {dash}{"-",4}[/color] {dash}{"-",4}[/color]";
+    }
+
     private static string ColBad(string text, double pct, int n, double baseline)
     {
-        // Reuse ColWR with inverted baseline: swap pct/baseline so above-baseline goes red
         return TooltipHelper.ColWR(text, baseline + (baseline - pct), n, baseline);
     }
 

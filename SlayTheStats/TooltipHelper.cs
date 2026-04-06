@@ -40,6 +40,8 @@ internal static class TooltipHelper
     private static bool  _modFontsLoaded;
 
     internal static bool HasBoldFont => _monoBold != null;
+    internal static Font? GetMonoFont() => _monoRegular ?? ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
+    internal static Font? GetMonoBoldFont() => _monoBold;
 
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.

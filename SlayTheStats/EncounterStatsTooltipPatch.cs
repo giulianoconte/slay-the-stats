@@ -37,20 +37,37 @@ public static class CreatureFocusPatch
             var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
             var characterLabel = effectiveChar != null
                 ? FormatCharacterName(effectiveChar)
-                : "All chars";
+                : "All";
 
             double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
             double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category);
 
+            // Sum all acts into a single row for the current character
+            var combined = new EncounterEvent();
+            foreach (var stat in actStats.Values)
+            {
+                combined.Fought           += stat.Fought;
+                combined.Died             += stat.Died;
+                combined.WonRun           += stat.WonRun;
+                combined.TurnsTakenSum    += stat.TurnsTakenSum;
+                combined.DamageTakenSum   += stat.DamageTakenSum;
+                combined.DamageTakenSqSum += stat.DamageTakenSqSum;
+                combined.HpEnteringSum    += stat.HpEnteringSum;
+                combined.MaxHpSum         += stat.MaxHpSum;
+                combined.PotionsUsedSum   += stat.PotionsUsedSum;
+                combined.DmgPctSum        += stat.DmgPctSum;
+                combined.DmgPctSqSum      += stat.DmgPctSqSum;
+            }
+
             string statsText;
-            if (actStats.Count == 0)
+            if (combined.Fought == 0)
             {
                 statsText = EncounterTooltipHelper.NoDataText(characterLabel, filter.AscensionMin, filter.AscensionMax);
             }
             else
             {
-                statsText = EncounterTooltipHelper.BuildEncounterStatsText(
-                    actStats, deathRateBaseline, dmgPctBaseline,
+                statsText = EncounterTooltipHelper.BuildEncounterStatsTextSingleRow(
+                    combined, deathRateBaseline, dmgPctBaseline,
                     characterLabel, filter.AscensionMin, filter.AscensionMax, categoryLabel);
             }
 

@@ -308,6 +308,54 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Aggregates an encounter's per-context stats into per-character totals using the given filter.
+    /// Returns a dictionary keyed by character ID (e.g. "CHARACTER.IRONCLAD").
+    /// </summary>
+    public static Dictionary<string, EncounterEvent> AggregateEncountersByCharacter(
+        Dictionary<string, EncounterEvent> contextMap,
+        AggregationFilter filter)
+    {
+        // Use a filter copy with no character constraint so we get all characters
+        var openFilter = new AggregationFilter
+        {
+            GameMode = filter.GameMode,
+            AscensionMin = filter.AscensionMin,
+            AscensionMax = filter.AscensionMax,
+            VersionMin = filter.VersionMin,
+            VersionMax = filter.VersionMax,
+            Profile = filter.Profile,
+        };
+
+        var result = new Dictionary<string, EncounterEvent>();
+
+        foreach (var (key, stat) in contextMap)
+        {
+            var ctx = RunContext.Parse(key);
+            if (!openFilter.Matches(ctx)) continue;
+
+            if (!result.TryGetValue(ctx.Character, out var agg))
+            {
+                agg = new EncounterEvent();
+                result[ctx.Character] = agg;
+            }
+
+            agg.Fought           += stat.Fought;
+            agg.Died             += stat.Died;
+            agg.WonRun           += stat.WonRun;
+            agg.TurnsTakenSum    += stat.TurnsTakenSum;
+            agg.DamageTakenSum   += stat.DamageTakenSum;
+            agg.DamageTakenSqSum += stat.DamageTakenSqSum;
+            agg.HpEnteringSum    += stat.HpEnteringSum;
+            agg.MaxHpSum         += stat.MaxHpSum;
+            agg.PotionsUsedSum   += stat.PotionsUsedSum;
+            agg.DmgPctSum        += stat.DmgPctSum;
+            agg.DmgPctSqSum      += stat.DmgPctSqSum;
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Computes average Dmg% across all encounters matching the filter in a given category and act.
     /// Used as baseline for coloring encounter stats. Falls back to 20.0 if no data.
     /// </summary>
