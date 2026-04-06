@@ -16,8 +16,10 @@ internal class SlayTheStatsConfig
     public const int AscensionHighest = int.MaxValue;
     public static int AscensionMin { get; set; } = AscensionLowest;
     public static int AscensionMax { get; set; } = AscensionHighest;
-    public static string VersionMin { get; set; } = "";
-    public static string VersionMax { get; set; } = "";
+    public const string VersionLowest = "__lowest__";
+    public const string VersionHighest = "__highest__";
+    public static string VersionMin { get; set; } = VersionLowest;
+    public static string VersionMax { get; set; } = VersionHighest;
     public static string ClassFilter { get; set; } = "";
     public const string ClassFilterClassSpecific = "__class__";
     public static bool ClassSpecificStats
@@ -29,8 +31,8 @@ internal class SlayTheStatsConfig
 
     public static int DefaultAscensionMin { get; set; } = AscensionLowest;
     public static int DefaultAscensionMax { get; set; } = AscensionHighest;
-    public static string DefaultVersionMin { get; set; } = "";
-    public static string DefaultVersionMax { get; set; } = "";
+    public static string DefaultVersionMin { get; set; } = VersionLowest;
+    public static string DefaultVersionMax { get; set; } = VersionHighest;
     public static string DefaultClassFilter { get; set; } = "";
     public static string DefaultFilterProfile { get; set; } = "";
     public static bool DefaultGroupCardUpgrades { get; set; } = true;
@@ -52,7 +54,7 @@ internal class SlayTheStatsConfig
     internal static void ClearAllFilters()
     {
         AscensionMin = AscensionLowest; AscensionMax = AscensionHighest;
-        VersionMin = ""; VersionMax = "";
+        VersionMin = VersionLowest; VersionMax = VersionHighest;
         ClassFilter = ""; FilterProfile = ""; GroupCardUpgrades = true;
     }
     internal static bool IsNonDefault(string field) => field switch

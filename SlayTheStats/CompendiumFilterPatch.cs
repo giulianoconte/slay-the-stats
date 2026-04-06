@@ -29,10 +29,18 @@ public static partial class CompendiumFilterPatch
 
     // Track active pane instances so they can be hidden from external patches.
     private static readonly List<PanelContainer> _activePanes = new();
+    // Active sidebar/floating sort buttons we cloned, so action-button clicks
+    // (Clear / Reset / Save Defaults) can refresh their "(not default)" suffix
+    // immediately rather than waiting for pane VisibilityChanged.
+    private static readonly List<NCardViewSortButton> _activeSortButtons = new();
     // Callbacks to sync pane controls with current config values.
     private static readonly List<Action> _syncCallbacks = new();
     // Cached sort-button template so the relic page can reuse it.
     private static NCardViewSortButton? _sortButtonTemplate;
+    // Cached tickbox template (cloned from the card library's stat tickboxes
+    // — e.g. "Multiplayer Cards") so we can use the game's native tickbox style
+    // for our Group-Card-Upgrades checkbox.
+    private static NLibraryStatTickbox? _tickboxTemplate;
 
     /// <summary>
     /// Hides all filter panes. Called when a card/relic is hovered to avoid
@@ -74,6 +82,11 @@ public static partial class CompendiumFilterPatch
         var template = library.FindChild("CardTypeSorter", true, false) as NCardViewSortButton;
         if (template != null)
             _sortButtonTemplate = template; // cache for the relic page
+
+        // Cache one of the card library's stat tickboxes as a template for our
+        // group-upgrades checkbox so it gets the game's native styling.
+        if (multiplayerCards is NLibraryStatTickbox tickbox)
+            _tickboxTemplate = tickbox;
 
         var pane = BuildFilterPane();
         library.AddChild(pane);
@@ -218,23 +231,160 @@ public static partial class CompendiumFilterPatch
             // the template. Duplicate it so our hover animations don't bleed into
             // the original CardTypeSorter button.
             var buttonImage = clone.FindChild("ButtonImage", true, false);
+            ShaderMaterial? newMaterial = null;
             if (buttonImage is CanvasItem ci)
             {
                 if (ci.Material is ShaderMaterial sm)
-                    ci.Material = (ShaderMaterial)sm.Duplicate();
+                {
+                    newMaterial = (ShaderMaterial)sm.Duplicate();
+                    ci.Material = newMaterial;
+                }
                 // Tint the button blue so it visibly differs from vanilla sort buttons.
-                // SelfModulate stacks with the HSV shader's hover tween instead of
-                // fighting it; the tween still brightens/darkens correctly.
                 ci.SelfModulate = SlayTheStatsButtonTint;
+            }
+
+            // CRITICAL: NCardViewSortButton caches the material in a private `_hsv`
+            // field during its own _Ready (before this callback runs). That cache
+            // still points to the template's shared material, so the clone's own
+            // hover/press tweens would mutate the TEMPLATE's material — causing
+            // the wrong button (CardTypeSorter) to flash when the clone is
+            // hovered. Repoint `_hsv` to the clone's unique material via
+            // reflection so the clone animates itself instead.
+            if (newMaterial != null)
+            {
+                try
+                {
+                    var hsvField = HarmonyLib.AccessTools.Field(typeof(NCardViewSortButton), "_hsv");
+                    hsvField?.SetValue(clone, newMaterial);
+                }
+                catch (Exception e)
+                {
+                    MainFile.Logger.Warn($"[SlayTheStats] Failed to repoint _hsv: {e.Message}");
+                }
             }
 
             // Hide the sort arrow — our button opens a pane, not a sorter.
             var sortIcon = clone.FindChild("Image", true, false);
             if (sortIcon is CanvasItem icon)
                 icon.Visible = false;
+
+            // Attach a "(not default)" suffix label — a separate sibling Label
+            // overlaid at the bottom of the button. Uses a sibling (not a text
+            // concat on the main label) so: (a) "SlayTheStats" stays yellow and
+            // doesn't re-center when the suffix appears; (b) the suffix can have
+            // its own smaller font + green color.
+            AttachNotDefaultSuffix(clone);
         };
 
         return clone;
+    }
+
+    /// <summary>
+    /// Duplicates a cached NLibraryStatTickbox to get the game-native checkbox
+    /// style (image-based ticked/unticked sprites, hover tween, MegaLabel font).
+    /// Same _hsv reflection fix as CloneSortButton — the cloned tickbox's
+    /// private _hsv field still points at the template's shared material after
+    /// _Ready, which we have to repoint to a unique duplicate so hover tweens
+    /// don't bleed onto the template tickbox.
+    /// </summary>
+    private static NLibraryStatTickbox CloneTickbox(NLibraryStatTickbox template, string label, bool initialTicked)
+    {
+        var clone = (NLibraryStatTickbox)template.Duplicate(
+            (int)(Node.DuplicateFlags.Groups
+                | Node.DuplicateFlags.Scripts
+                | Node.DuplicateFlags.UseInstantiation));
+        clone.Name = "SlayTheStatsTickbox";
+        clone.RequestReady();
+
+        clone.Ready += () =>
+        {
+            clone.SetLabel(label);
+            clone.IsTicked = initialTicked;
+
+            // Duplicate the HSV ShaderMaterial so hover tweens don't bleed back
+            // into the template tickbox in the card library sidebar.
+            var buttonImage = clone.FindChild("ButtonImage", true, false);
+            ShaderMaterial? newMaterial = null;
+            if (buttonImage is CanvasItem ci && ci.Material is ShaderMaterial sm)
+            {
+                newMaterial = (ShaderMaterial)sm.Duplicate();
+                ci.Material = newMaterial;
+            }
+            if (newMaterial != null)
+            {
+                try
+                {
+                    var hsvField = HarmonyLib.AccessTools.Field(typeof(NTickbox), "_hsv");
+                    hsvField?.SetValue(clone, newMaterial);
+                }
+                catch (Exception e)
+                {
+                    MainFile.Logger.Warn($"[SlayTheStats] Failed to repoint tickbox _hsv: {e.Message}");
+                }
+            }
+        };
+
+        return clone;
+    }
+
+    /// <summary>
+    /// Adds a small "(not default)" label as a direct child of the cloned sort
+    /// button, dynamically positioned just to the right of the main "SlayTheStats"
+    /// MegaLabel using the label's actual rect. Hidden by default; shown by
+    /// UpdateSortButtonActiveState when HasActiveFilters() is true.
+    ///
+    /// Implementing this as a sibling positioned via the label's rect (instead of
+    /// a child of the label, or appending text to the label) means the main label
+    /// keeps its original yellow color and centered position — the suffix simply
+    /// extends past the right side of the button when active.
+    /// </summary>
+    private static void AttachNotDefaultSuffix(NCardViewSortButton clone)
+    {
+        var suffix = new Label
+        {
+            Name = "SlayTheStatsNotDefaultSuffix",
+            Text = "(non-default filters)",
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            ClipText = false,
+        };
+        suffix.AddThemeColorOverride("font_color", ActiveFilterColor);
+        ApplyGameFont(suffix, 11);
+        // Top-left anchors so we can drive the position with Position directly.
+        suffix.AnchorLeft = 0f; suffix.AnchorTop = 0f;
+        suffix.AnchorRight = 0f; suffix.AnchorBottom = 0f;
+        clone.AddChild(suffix);
+
+        // Recompute the suffix position from the main label's actual rect each
+        // time it (re)layouts. The Resized signal fires when the MegaLabel
+        // auto-sizes to fit "SlayTheStats" at the chosen font size.
+        var mainLabel = clone.FindChild("Label", true, false) as Control;
+        if (mainLabel == null) return;
+
+        Action reposition = () =>
+        {
+            if (!GodotObject.IsInstanceValid(mainLabel) || !GodotObject.IsInstanceValid(suffix)) return;
+            var labelPosInClone = mainLabel.GlobalPosition - clone.GlobalPosition;
+            var suffMin = suffix.GetCombinedMinimumSize();
+            // Vertically center on the main label, horizontally place 4px after
+            // the label's right edge.
+            suffix.Position = new Vector2(
+                labelPosInClone.X + mainLabel.Size.X + 4,
+                labelPosInClone.Y + (mainLabel.Size.Y - suffMin.Y) / 2);
+        };
+
+        mainLabel.Resized += () => reposition();
+        clone.Resized += () => reposition();
+
+        // Initial reposition after the layout has settled (the cloned button's
+        // rect/size isn't valid until the SceneTree has run a frame).
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredReposition;
+        void DeferredReposition()
+        {
+            tree.ProcessFrame -= DeferredReposition;
+            reposition();
+        }
     }
 
     /// <summary>
@@ -244,6 +394,9 @@ public static partial class CompendiumFilterPatch
     /// </summary>
     private static void WireSortButtonToPane(NCardViewSortButton button, PanelContainer pane)
     {
+        _activeSortButtons.RemoveAll(b => !GodotObject.IsInstanceValid(b));
+        _activeSortButtons.Add(button);
+
         ((NClickableControl)button).Released += (_) =>
         {
             if (GodotObject.IsInstanceValid(pane))
@@ -306,23 +459,17 @@ public static partial class CompendiumFilterPatch
     }
 
     /// <summary>
-    /// Updates the cloned sort button's label text + color to indicate that the
-    /// current filters differ from the user's saved defaults. The label text is
-    /// extended with " (not default)" and the whole label is tinted green.
-    ///
-    /// Ideally only the suffix would be green ("SlayTheStats" stays cream), but
-    /// the cloned button uses a plain Label-derived MegaLabel which doesn't
-    /// support inline color markup, and adding a sibling Label would fight the
-    /// existing scene's auto-sizing layout. The combined text + color treatment
-    /// still makes the state unambiguous.
+    /// Shows/hides the "(not default)" suffix label attached to the cloned sort
+    /// button. The main "SlayTheStats" label stays unchanged (same text, same
+    /// yellow color, same centered position) so the button's visual identity
+    /// doesn't shift when filters change.
     /// </summary>
     private static void UpdateSortButtonActiveState(NCardViewSortButton button)
     {
         bool active = HasActiveFilters();
-        button.SetLabel(active ? "SlayTheStats (not default)" : "SlayTheStats");
-        var label = button.FindChild("Label", true, false);
-        if (label is CanvasItem labelItem)
-            labelItem.SelfModulate = active ? ActiveFilterColor : Colors.White;
+        var suffix = button.FindChild("SlayTheStatsNotDefaultSuffix", false, false);
+        if (suffix is Control suffixControl)
+            suffixControl.Visible = active;
     }
 
     private static Button CreateFallbackSidebarButton()
@@ -404,6 +551,13 @@ public static partial class CompendiumFilterPatch
     private static void SyncAllControls()
     {
         foreach (var cb in _syncCallbacks) cb();
+    }
+
+    private static void RefreshAllSortButtonStates()
+    {
+        _activeSortButtons.RemoveAll(b => !GodotObject.IsInstanceValid(b));
+        foreach (var b in _activeSortButtons)
+            UpdateSortButtonActiveState(b);
     }
 
     private static void UpdateButtonActiveState(Button button)
@@ -550,25 +704,35 @@ public static partial class CompendiumFilterPatch
 
         public AscensionStepper(int initial)
         {
-            AddThemeConstantOverride("separation", 2);
+            AddThemeConstantOverride("separation", 4);
+            Alignment = AlignmentMode.Center;
 
-            var down = MakeArrowButton("◀");
-            down.Pressed += () => Step(-1);
-            AddChild(down);
-
+            // Label on the left, vertically-stacked ▲/▼ arrow buttons on the right.
+            // Widened so "Lowest" / "Highest" labels fit without clipping at the
+            // larger font size.
             _display = new Label
             {
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                CustomMinimumSize = new Vector2(58, 0),
+                CustomMinimumSize = new Vector2(96, 0),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             };
             _display.AddThemeColorOverride("font_color", Cream);
-            ApplyGameFont(_display, 16);
+            ApplyGameFont(_display, 19);
             AddChild(_display);
 
-            var up = MakeArrowButton("▶");
+            var arrows = new VBoxContainer();
+            arrows.AddThemeConstantOverride("separation", 0);
+            arrows.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            AddChild(arrows);
+
+            var up = MakeArrowButton("▲");
             up.Pressed += () => Step(+1);
-            AddChild(up);
+            arrows.AddChild(up);
+
+            var down = MakeArrowButton("▼");
+            down.Pressed += () => Step(-1);
+            arrows.AddChild(down);
 
             Value = initial;
         }
@@ -606,7 +770,7 @@ public static partial class CompendiumFilterPatch
 
         private static Button MakeArrowButton(string glyph)
         {
-            var btn = new Button { Text = glyph, CustomMinimumSize = new Vector2(20, 22) };
+            var btn = new Button { Text = glyph, CustomMinimumSize = new Vector2(26, 17) };
             btn.AddThemeColorOverride("font_color", Cream);
             btn.AddThemeColorOverride("font_hover_color", Gold);
             btn.AddThemeColorOverride("font_pressed_color", Gold);
@@ -664,14 +828,14 @@ public static partial class CompendiumFilterPatch
         pane.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f); // cooler steel-blue tint
 
         var margin = new MarginContainer();
-        margin.AddThemeConstantOverride("margin_left", 16);
-        margin.AddThemeConstantOverride("margin_right", 16);
-        margin.AddThemeConstantOverride("margin_top", 16);
+        margin.AddThemeConstantOverride("margin_left", 14);
+        margin.AddThemeConstantOverride("margin_right", 14);
+        margin.AddThemeConstantOverride("margin_top", 14);
         margin.AddThemeConstantOverride("margin_bottom", 14);
         pane.AddChild(margin);
 
         var vbox = new VBoxContainer();
-        vbox.AddThemeConstantOverride("separation", 6);
+        vbox.AddThemeConstantOverride("separation", 8);
         margin.AddChild(vbox);
 
         // ── Title (with optional close button) ──
@@ -683,7 +847,7 @@ public static partial class CompendiumFilterPatch
         title.Text = "SlayTheStats Filters";
         title.AddThemeColorOverride("font_color", Gold);
         title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        ApplyGameFont(title, 20);
+        ApplyGameFont(title, 24);
         titleRow.AddChild(title);
 
         if (onClose != null)
@@ -701,17 +865,25 @@ public static partial class CompendiumFilterPatch
         AddSeparator(vbox);
 
         // ── Version range ──
+        // Uses the same sentinel pattern as the ascension filter: Lowest /
+        // Highest are stored in the config as the special strings
+        // SlayTheStatsConfig.VersionLowest / VersionHighest so the filter
+        // auto-tracks new versions as they appear in the data.
         var verRow = new HBoxContainer();
         verRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(verRow);
-        verRow.AddChild(MakeLabel("Version:", 100));
+        verRow.AddChild(MakeLabel("Version:", 120));
 
         var versions = StatsAggregator.GetDistinctVersions(MainFile.Db);
+        var verValues = new List<string> { SlayTheStatsConfig.VersionLowest };
+        verValues.AddRange(versions);
+        verValues.Add(SlayTheStatsConfig.VersionHighest);
+        var verLabels = verValues.Select(FormatVersionValue).ToList();
 
-        var verMin = MakeDropdown(versions, SlayTheStatsConfig.VersionMin);
+        var verMin = MakeVersionDropdown(verLabels, verValues, SlayTheStatsConfig.VersionMin);
         verRow.AddChild(verMin);
         verRow.AddChild(MakeLabel("to"));
-        var verMax = MakeDropdown(versions, SlayTheStatsConfig.VersionMax);
+        var verMax = MakeVersionDropdown(verLabels, verValues, SlayTheStatsConfig.VersionMax);
         verRow.AddChild(verMax);
 
         HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
@@ -719,13 +891,31 @@ public static partial class CompendiumFilterPatch
 
         verMin.ItemSelected += (idx) =>
         {
-            SlayTheStatsConfig.VersionMin = idx == 0 ? "" : verMin.GetItemText((int)idx);
+            var v = verValues[(int)idx];
+            SlayTheStatsConfig.VersionMin = v;
+            // Mirror the ascension stepper cross-clamp behaviour: if min crossed
+            // max, drag max along with it. Sentinel-aware via CompareVersionValues.
+            if (CompareVersionValues(SlayTheStatsConfig.VersionMax, v) < 0)
+            {
+                SlayTheStatsConfig.VersionMax = v;
+                SelectVersionValue(verMax, verValues, v);
+                HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
+            }
             HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
+            RefreshAllSortButtonStates();
         };
         verMax.ItemSelected += (idx) =>
         {
-            SlayTheStatsConfig.VersionMax = idx == 0 ? "" : verMax.GetItemText((int)idx);
+            var v = verValues[(int)idx];
+            SlayTheStatsConfig.VersionMax = v;
+            if (CompareVersionValues(SlayTheStatsConfig.VersionMin, v) > 0)
+            {
+                SlayTheStatsConfig.VersionMin = v;
+                SelectVersionValue(verMin, verValues, v);
+                HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
+            }
             HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
+            RefreshAllSortButtonStates();
         };
 
         // ── Profile filter ──
@@ -734,7 +924,7 @@ public static partial class CompendiumFilterPatch
         var profRow = new HBoxContainer();
         profRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(profRow);
-        profRow.AddChild(MakeLabel("Profile:", 100));
+        profRow.AddChild(MakeLabel("Profile:", 120));
 
         var profSelect = MakeDropdown(profiles, SlayTheStatsConfig.FilterProfile);
         profSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
@@ -746,6 +936,7 @@ public static partial class CompendiumFilterPatch
         {
             SlayTheStatsConfig.FilterProfile = idx == 0 ? "" : profSelect.GetItemText((int)idx);
             HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
+            RefreshAllSortButtonStates();
         };
 
         // ── Ascension range ──
@@ -757,7 +948,7 @@ public static partial class CompendiumFilterPatch
         var ascRow = new HBoxContainer();
         ascRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(ascRow);
-        ascRow.AddChild(MakeLabel("Ascension:", 100));
+        ascRow.AddChild(MakeLabel("Ascension:", 120));
 
         var ascMin = new AscensionStepper(SlayTheStatsConfig.AscensionMin);
         ascRow.AddChild(ascMin);
@@ -771,26 +962,30 @@ public static partial class CompendiumFilterPatch
         ascMin.ValueChanged += (val) =>
         {
             SlayTheStatsConfig.AscensionMin = val;
-            // Push max up if min crossed it (sentinel-aware: int comparison
-            // works since LowestSentinel = MinValue and HighestSentinel = MaxValue).
-            if (ascMax.Value < val && val != AscensionStepper.HighestSentinel)
+            // Push max up if min crossed it. Int comparison is sentinel-aware
+            // because LowestSentinel = MinValue and HighestSentinel = MaxValue,
+            // so e.g. setting min = Highest correctly drags max to Highest too,
+            // and setting max = Lowest correctly drags min to Lowest.
+            if (ascMax.Value < val)
             {
                 ascMax.Value = val;
                 SlayTheStatsConfig.AscensionMax = val;
                 HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
             }
             HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+            RefreshAllSortButtonStates();
         };
         ascMax.ValueChanged += (val) =>
         {
             SlayTheStatsConfig.AscensionMax = val;
-            if (ascMin.Value > val && val != AscensionStepper.LowestSentinel)
+            if (ascMin.Value > val)
             {
                 ascMin.Value = val;
                 SlayTheStatsConfig.AscensionMin = val;
                 HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
             }
             HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+            RefreshAllSortButtonStates();
         };
 
         // ── Class filter dropdown ──
@@ -798,7 +993,7 @@ public static partial class CompendiumFilterPatch
         var classRow = new HBoxContainer();
         classRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(classRow);
-        classRow.AddChild(MakeLabel("Class:", 100));
+        classRow.AddChild(MakeLabel("Class:", 120));
 
         var classValues = new List<string> { "", SlayTheStatsConfig.ClassFilterClassSpecific };
         var classLabels = new List<string> { "All", "Match class card" };
@@ -825,14 +1020,69 @@ public static partial class CompendiumFilterPatch
             var i = (int)idx;
             SlayTheStatsConfig.ClassFilter = (i >= 0 && i < classValues.Count) ? classValues[i] : "";
             HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
+            RefreshAllSortButtonStates();
         };
 
         AddSeparator(vbox);
 
         // ── Toggles ──
-        var groupUpgrades = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
-        groupUpgrades.Toggled += (pressed) => SlayTheStatsConfig.GroupCardUpgrades = pressed;
-        vbox.AddChild(groupUpgrades);
+        // Prefer cloning the game's NLibraryStatTickbox (matches the compendium's
+        // own "Multiplayer Cards" / "View Upgrades" checkboxes). Falls back to
+        // a Godot CheckBox if the template hasn't been cached yet — happens if
+        // the relic page is opened before the card library has ever loaded.
+        Control groupUpgradesControl;
+        Action<bool> setGroupUpgrades;
+        Action highlightGroupUpgrades = () => { };
+        if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
+        {
+            var clonedTickbox = CloneTickbox(_tickboxTemplate, "Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+            clonedTickbox.Toggled += (box) =>
+            {
+                SlayTheStatsConfig.GroupCardUpgrades = box.IsTicked;
+                highlightGroupUpgrades();
+                RefreshAllSortButtonStates();
+            };
+            groupUpgradesControl = clonedTickbox;
+            setGroupUpgrades = v => clonedTickbox.IsTicked = v;
+            // Tint the tickbox's inner MegaLabel green when GroupCardUpgrades
+            // differs from the saved default — matches the highlight pattern
+            // used by the other filter rows.
+            highlightGroupUpgrades = () =>
+            {
+                if (!GodotObject.IsInstanceValid(clonedTickbox)) return;
+                var label = clonedTickbox.FindChild("Label", true, false);
+                if (label is Control labelControl)
+                    labelControl.AddThemeColorOverride(
+                        "font_color",
+                        SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Cream);
+            };
+        }
+        else
+        {
+            var fallback = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+            fallback.Toggled += (pressed) =>
+            {
+                SlayTheStatsConfig.GroupCardUpgrades = pressed;
+                highlightGroupUpgrades();
+                RefreshAllSortButtonStates();
+            };
+            groupUpgradesControl = fallback;
+            setGroupUpgrades = v => fallback.SetPressedNoSignal(v);
+            highlightGroupUpgrades = () =>
+                fallback.AddThemeColorOverride(
+                    "font_color",
+                    SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Cream);
+        }
+        vbox.AddChild(groupUpgradesControl);
+        // Initial highlight — deferred so the cloned tickbox's _Ready has run
+        // (and its MegaLabel reference is initialised) before we look it up.
+        var tickboxTree = (SceneTree)Engine.GetMainLoop();
+        tickboxTree.ProcessFrame += DeferredGroupUpgradesHighlight;
+        void DeferredGroupUpgradesHighlight()
+        {
+            tickboxTree.ProcessFrame -= DeferredGroupUpgradesHighlight;
+            highlightGroupUpgrades();
+        }
 
         AddSeparator(vbox);
 
@@ -845,11 +1095,13 @@ public static partial class CompendiumFilterPatch
         {
             SlayTheStatsConfig.ClearAllFilters();
             SyncAllControls();
+            RefreshAllSortButtonStates();
         }));
         row1.AddChild(MakeActionButton("Reset", () =>
         {
             SlayTheStatsConfig.RestoreDefaults();
             SyncAllControls();
+            RefreshAllSortButtonStates();
         }));
         row1.AddChild(MakeActionButton("Save Defaults", () =>
         {
@@ -860,6 +1112,7 @@ public static partial class CompendiumFilterPatch
                 MainFile.Logger.Warn($"[SlayTheStats] Failed to save config: {e.Message}");
             }
             SyncAllControls();
+            RefreshAllSortButtonStates();
         }));
 
         // ── Sync callback: refresh all controls from config when pane opens ──
@@ -867,8 +1120,8 @@ public static partial class CompendiumFilterPatch
         {
             if (!GodotObject.IsInstanceValid(pane)) return;
 
-            SelectOptionByText(verMin, SlayTheStatsConfig.VersionMin);
-            SelectOptionByText(verMax, SlayTheStatsConfig.VersionMax);
+            SelectVersionValue(verMin, verValues, SlayTheStatsConfig.VersionMin);
+            SelectVersionValue(verMax, verValues, SlayTheStatsConfig.VersionMax);
             HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
             HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
 
@@ -882,7 +1135,8 @@ public static partial class CompendiumFilterPatch
 
             SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
             HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
-            groupUpgrades.SetPressedNoSignal(SlayTheStatsConfig.GroupCardUpgrades);
+            setGroupUpgrades(SlayTheStatsConfig.GroupCardUpgrades);
+            highlightGroupUpgrades();
         });
 
         return pane;
@@ -905,9 +1159,11 @@ public static partial class CompendiumFilterPatch
             sb.TextureMarginRight  = 91f;
             sb.TextureMarginTop    = 43f;
             sb.TextureMarginBottom = 32f;
-            sb.ContentMarginLeft   = 22f;
+            // All four content margins equal so the pane's interior padding is
+            // symmetric (was asymmetric: left=22, top=16, right=16, bottom=12).
+            sb.ContentMarginLeft   = 16f;
             sb.ContentMarginRight  = 16f;
-            sb.ContentMarginTop    = 16f;
+            sb.ContentMarginTop    = 12f;
             sb.ContentMarginBottom = 12f;
             return sb;
         }
@@ -918,12 +1174,23 @@ public static partial class CompendiumFilterPatch
         return flat;
     }
 
+    private static readonly Color TextShadow = new(0f, 0f, 0f, 0.85f);
+
+    /// <summary>
+    /// Applies the mod's game font + size + a 1px black drop shadow. The
+    /// shadow matches the look of the cloned NLibraryStatTickbox / vanilla
+    /// compendium UI text — without it our pane labels look anemic on the
+    /// stone tooltip background.
+    /// </summary>
     private static void ApplyGameFont(Control control, int size = 18)
     {
         var font = TooltipHelper.Fonts.Bold ?? TooltipHelper.Fonts.Normal;
         if (font != null)
             control.AddThemeFontOverride("font", font);
         control.AddThemeFontSizeOverride("font_size", size);
+        control.AddThemeColorOverride("font_shadow_color", TextShadow);
+        control.AddThemeConstantOverride("shadow_offset_x", 1);
+        control.AddThemeConstantOverride("shadow_offset_y", 1);
     }
 
     private static Label MakeLabel(string text, float minWidth = 0)
@@ -931,21 +1198,80 @@ public static partial class CompendiumFilterPatch
         var label = new Label();
         label.Text = text;
         label.AddThemeColorOverride("font_color", Cream);
-        ApplyGameFont(label, 16);
+        ApplyGameFont(label, 19);
         if (minWidth > 0)
             label.CustomMinimumSize = new Vector2(minWidth, 0);
         return label;
     }
 
-    private static OptionButton MakeDropdown(List<string> items, string selected)
+    /// <summary>
+    /// Builds a version-range OptionButton with Lowest / Highest sentinel
+    /// entries at the ends. Indices map 1:1 with <paramref name="values"/>,
+    /// which stores the raw config strings (sentinel sentinels or version ids).
+    /// </summary>
+    private static OptionButton MakeVersionDropdown(List<string> labels, List<string> values, string selected)
     {
         var btn = new OptionButton();
-        btn.CustomMinimumSize = new Vector2(90, 0);
+        btn.CustomMinimumSize = new Vector2(150, 0);
         btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         btn.AddThemeColorOverride("font_color", Cream);
         btn.AddThemeColorOverride("font_hover_color", Gold);
         btn.AddThemeColorOverride("font_focus_color", Gold);
-        ApplyGameFont(btn, 16);
+        ApplyGameFont(btn, 19);
+        for (int i = 0; i < labels.Count; i++)
+            btn.AddItem(labels[i], i);
+        SelectVersionValue(btn, values, selected);
+        return btn;
+    }
+
+    /// <summary>
+    /// Sentinel-aware semantic version comparator. VersionLowest is below
+    /// every concrete version; VersionHighest is above every concrete version.
+    /// Mirrors the int comparison used by AscensionStepper sentinels so the
+    /// version cross-clamp behaviour matches.
+    /// </summary>
+    private static int CompareVersionValues(string a, string b)
+    {
+        if (a == b) return 0;
+        if (a == SlayTheStatsConfig.VersionLowest)  return -1;
+        if (b == SlayTheStatsConfig.VersionLowest)  return  1;
+        if (a == SlayTheStatsConfig.VersionHighest) return  1;
+        if (b == SlayTheStatsConfig.VersionHighest) return -1;
+        return AggregationFilter.CompareVersions(a, b);
+    }
+
+    private static string FormatVersionValue(string v)
+    {
+        if (v == SlayTheStatsConfig.VersionLowest)  return "Lowest";
+        if (v == SlayTheStatsConfig.VersionHighest) return "Highest";
+        return v;
+    }
+
+    private static void SelectVersionValue(OptionButton button, List<string> values, string current)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], current, StringComparison.OrdinalIgnoreCase))
+            {
+                button.Selected = i;
+                return;
+            }
+        }
+        // Saved value no longer in dropdown (e.g. version was removed from data):
+        // treat as Lowest for Min, Highest for Max — caller disambiguates via
+        // context since both ends are valid fallbacks. Just pick Lowest here.
+        button.Selected = 0;
+    }
+
+    private static OptionButton MakeDropdown(List<string> items, string selected)
+    {
+        var btn = new OptionButton();
+        btn.CustomMinimumSize = new Vector2(110, 0);
+        btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        btn.AddThemeColorOverride("font_color", Cream);
+        btn.AddThemeColorOverride("font_hover_color", Gold);
+        btn.AddThemeColorOverride("font_focus_color", Gold);
+        ApplyGameFont(btn, 19);
         btn.AddItem("Any", 0);
         for (int i = 0; i < items.Count; i++)
             btn.AddItem(items[i], i + 1);
@@ -964,9 +1290,14 @@ public static partial class CompendiumFilterPatch
         return sb;
     }
 
-    private static CheckButton MakeCheckButton(string text, bool initial)
+    /// <summary>
+    /// Square-style checkbox (Godot CheckBox) to match the card library's
+    /// rarity filters (NCardRarityTickbox). CheckBox draws a tickbox on the
+    /// left of the label, unlike CheckButton which draws a slider toggle.
+    /// </summary>
+    private static CheckBox MakeCheckButton(string text, bool initial)
     {
-        var cb = new CheckButton();
+        var cb = new CheckBox();
         cb.Text = text;
         cb.ButtonPressed = initial;
         cb.AddThemeColorOverride("font_color", Cream);
@@ -984,17 +1315,17 @@ public static partial class CompendiumFilterPatch
         btn.AddThemeColorOverride("font_color", Cream);
         btn.AddThemeColorOverride("font_hover_color", Gold);
         btn.AddThemeColorOverride("font_pressed_color", Gold);
-        ApplyGameFont(btn, 14);
+        ApplyGameFont(btn, 17);
 
         var normal = new StyleBoxFlat();
         normal.BgColor = new Color(0.08f, 0.06f, 0.05f, 0.6f);
         normal.SetBorderWidthAll(1);
         normal.BorderColor = new Color(0.4f, 0.35f, 0.25f, 0.5f);
         normal.SetCornerRadiusAll(3);
-        normal.ContentMarginLeft = 6;
-        normal.ContentMarginRight = 6;
-        normal.ContentMarginTop = 4;
-        normal.ContentMarginBottom = 4;
+        normal.ContentMarginLeft = 8;
+        normal.ContentMarginRight = 8;
+        normal.ContentMarginTop = 6;
+        normal.ContentMarginBottom = 6;
         btn.AddThemeStyleboxOverride("normal", normal);
 
         var hover = (StyleBoxFlat)normal.Duplicate();

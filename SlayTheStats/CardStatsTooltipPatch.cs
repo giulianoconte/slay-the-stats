@@ -212,6 +212,14 @@ public static class CardHoverShowPatch
     /// (derived from the card's pool) is used to filter by owning class.
     /// For non-class cards (colorless, curse, etc.) cardOwnerCharacter is null → all chars.
     /// </summary>
+    /// <summary>True iff the given version config value should map to a null lower bound on the filter.</summary>
+    private static bool IsVersionLowerBound(string v) =>
+        string.IsNullOrEmpty(v) || v == SlayTheStatsConfig.VersionLowest;
+
+    /// <summary>True iff the given version config value should map to a null upper bound on the filter.</summary>
+    private static bool IsVersionUpperBound(string v) =>
+        string.IsNullOrEmpty(v) || v == SlayTheStatsConfig.VersionHighest;
+
     internal static AggregationFilter BuildCompendiumFilter(string? runCharacter, string? cardOwnerCharacter = null)
     {
         var filter = new AggregationFilter
@@ -219,8 +227,8 @@ public static class CardHoverShowPatch
             GameMode = "standard",
             AscensionMin = SlayTheStatsConfig.AscensionMin == SlayTheStatsConfig.AscensionLowest  ? null : (int?)SlayTheStatsConfig.AscensionMin,
             AscensionMax = SlayTheStatsConfig.AscensionMax == SlayTheStatsConfig.AscensionHighest ? null : (int?)SlayTheStatsConfig.AscensionMax,
-            VersionMin = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
-            VersionMax = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
+            VersionMin = IsVersionLowerBound(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
+            VersionMax = IsVersionUpperBound(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
         };
 
@@ -267,8 +275,8 @@ public static class CardHoverShowPatch
             Character = runCharacter,
             AscensionMin = SlayTheStatsConfig.DefaultAscensionMin == SlayTheStatsConfig.AscensionLowest  ? null : (int?)SlayTheStatsConfig.DefaultAscensionMin,
             AscensionMax = SlayTheStatsConfig.DefaultAscensionMax == SlayTheStatsConfig.AscensionHighest ? null : (int?)SlayTheStatsConfig.DefaultAscensionMax,
-            VersionMin = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
-            VersionMax = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
+            VersionMin = IsVersionLowerBound(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
+            VersionMax = IsVersionUpperBound(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultFilterProfile) ? null : SlayTheStatsConfig.DefaultFilterProfile,
         };
 
@@ -358,7 +366,7 @@ public static class CardHoverShowPatch
     internal static string GetCharacterLabel(AggregationFilter filter)
     {
         var ch = GetEffectiveCharacter(filter);
-        return ch != null ? FormatCharacterName(ch) : "All chars";
+        return ch != null ? FormatCharacterName(ch) : "All characters";
     }
 
     /// <summary>
@@ -372,7 +380,7 @@ public static class CardHoverShowPatch
         // Always include the ascension range, even when unfiltered ("A0-10").
         parts.Add(FormatAscensionFooter(filter.AscensionMin, filter.AscensionMax));
 
-        // Always include the character label, even when "All chars".
+        // Always include the character label, even when "All characters".
         parts.Add(characterLabel);
 
         if (filter.VersionMin != null || filter.VersionMax != null)
@@ -431,7 +439,7 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All characters", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 

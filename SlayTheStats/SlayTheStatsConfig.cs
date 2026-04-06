@@ -77,11 +77,23 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// </summary>
     public static int AscensionMax { get; set; } = AscensionHighest;
 
-    /// <summary>Minimum game version to include (empty = no min). Compared semantically.</summary>
-    public static string VersionMin { get; set; } = "";
+    /// <summary>Sentinel "Lowest" for version filter — auto-tracks oldest version in data.</summary>
+    public const string VersionLowest = "__lowest__";
 
-    /// <summary>Maximum game version to include (empty = no max). Compared semantically.</summary>
-    public static string VersionMax { get; set; } = "";
+    /// <summary>Sentinel "Highest" for version filter — auto-tracks newest version in data.</summary>
+    public const string VersionHighest = "__highest__";
+
+    /// <summary>
+    /// Minimum game version to include. VersionLowest = -∞ (no lower bound);
+    /// any other value = explicit floor (compared semantically, e.g. 0.4.10 &gt; 0.4.9).
+    /// </summary>
+    public static string VersionMin { get; set; } = VersionLowest;
+
+    /// <summary>
+    /// Maximum game version to include. VersionHighest = +∞ (no upper bound);
+    /// any other value = explicit ceiling (compared semantically).
+    /// </summary>
+    public static string VersionMax { get; set; } = VersionHighest;
 
     /// <summary>
     /// Class filter selection. Values:
@@ -112,8 +124,8 @@ internal class SlayTheStatsConfig : SimpleModConfig
 
     public static int DefaultAscensionMin { get; set; } = AscensionLowest;
     public static int DefaultAscensionMax { get; set; } = AscensionHighest;
-    public static string DefaultVersionMin { get; set; } = "";
-    public static string DefaultVersionMax { get; set; } = "";
+    public static string DefaultVersionMin { get; set; } = VersionLowest;
+    public static string DefaultVersionMax { get; set; } = VersionHighest;
     public static string DefaultClassFilter { get; set; } = "";
     public static string DefaultFilterProfile { get; set; } = "";
     public static bool DefaultGroupCardUpgrades { get; set; } = true;
@@ -144,8 +156,8 @@ internal class SlayTheStatsConfig : SimpleModConfig
     {
         AscensionMin = AscensionLowest;
         AscensionMax = AscensionHighest;
-        VersionMin = "";
-        VersionMax = "";
+        VersionMin = VersionLowest;
+        VersionMax = VersionHighest;
         ClassFilter = "";
         FilterProfile = "";
         GroupCardUpgrades = true;

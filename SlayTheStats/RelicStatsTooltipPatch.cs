@@ -209,7 +209,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All characters", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 
