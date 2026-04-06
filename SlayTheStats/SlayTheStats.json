@@ -3,7 +3,7 @@
   "name": "SlayTheStats",
   "author": "Shoe",
   "description": "Tracks card and relic pick rates and win rates across your runs. Stats appear as tooltips when hovering over cards and relics, broken out by act acquired.",
-  "version": "v0.1.4",
+  "version": "v0.2.0",
   "has_pck": true,
   "has_dll": true,
   "dependencies": ["BaseLib"],

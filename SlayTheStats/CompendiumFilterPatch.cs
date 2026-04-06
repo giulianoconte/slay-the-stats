@@ -1,5 +1,7 @@
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardLibrary;
 using MegaCrit.Sts2.Core.Nodes.Screens.InspectScreens;
 using MegaCrit.Sts2.Core.Nodes.Screens.RelicCollection;
@@ -13,9 +15,9 @@ namespace SlayTheStats;
 [HarmonyPatch(typeof(NCardLibrary), "_Ready")]
 public static class CompendiumFilterPatch
 {
-    // ── Shared colours ──────────────────────────────────────────────────────
-    private static readonly Color GoldTitle   = new(0.918f, 0.745f, 0.318f, 1f);
-    private static readonly Color LightText   = new(1f, 0.9647f, 0.8863f, 1f);
+    // ── Shared colours (game palette from StsColors) ──────────────────────
+    private static readonly Color Cream       = new("FFF6E2");        // primary text
+    private static readonly Color Gold        = new("EFC851");        // titles, highlights
     private static readonly Color MutedButton = new(0.85f, 0.75f, 0.55f, 1f);
     private static readonly Color HoverButton = new(1f, 0.9f, 0.7f, 1f);
     private static readonly Color ActiveFilterColor = new(0.4f, 0.85f, 0.5f, 1f);
@@ -24,6 +26,8 @@ public static class CompendiumFilterPatch
     private static readonly List<PanelContainer> _activePanes = new();
     // Callbacks to sync pane controls with current config values.
     private static readonly List<Action> _syncCallbacks = new();
+    // Cached sort-button template so the relic page can reuse it.
+    private static NCardViewSortButton? _sortButtonTemplate;
 
     /// <summary>
     /// Hides all filter panes. Called when a card/relic is hovered to avoid
@@ -60,14 +64,29 @@ public static class CompendiumFilterPatch
         var sidebar = multiplayerCards.GetParent();
         if (sidebar == null) return;
 
-        var button = CreateSidebarButton();
-        sidebar.AddChild(button);
+        // Clone an existing NCardViewSortButton to get the exact game style
+        // (textures, fonts, HSV shader, tween animations, SFX).
+        var template = library.FindChild("CardTypeSorter", true, false) as NCardViewSortButton;
+        if (template != null)
+            _sortButtonTemplate = template; // cache for the relic page
 
         var pane = BuildFilterPane();
         library.AddChild(pane);
         RegisterPane(pane);
 
-        WireButtonToPane(button, pane);
+        if (template != null)
+        {
+            var button = CloneSortButton(template);
+            sidebar.AddChild(button);
+            WireSortButtonToPane(button, pane);
+        }
+        else
+        {
+            MainFile.Logger.Warn("[SlayTheStats] Could not find CardTypeSorter; using fallback button");
+            var button = CreateFallbackSidebarButton();
+            sidebar.AddChild(button);
+            WireButtonToPane(button, pane);
+        }
 
         if (SlayTheStatsConfig.DebugMode)
             MainFile.Logger.Info("[SlayTheStats] CompendiumFilterPatch: button injected into card library sidebar");
@@ -111,14 +130,46 @@ public static class CompendiumFilterPatch
 
     private static void InjectRelicCollectionButton(NRelicCollection collection)
     {
-        var button = CreateFloatingButton();
-        collection.AddChild(button);
-
         var pane = BuildFilterPane();
         collection.AddChild(pane);
         RegisterPane(pane);
 
-        WireButtonToPane(button, pane);
+        // Reuse the cached sort-button template from the card library for
+        // a consistent game-native look.
+        if (_sortButtonTemplate != null && GodotObject.IsInstanceValid(_sortButtonTemplate))
+        {
+            var button = CloneSortButton(_sortButtonTemplate);
+
+            // Match the card button's size: read it from the cached template,
+            // which has been laid out by the time the relic page opens.
+            var templateSize = _sortButtonTemplate.Size;
+            if (templateSize.X < 10) templateSize.X = _sortButtonTemplate.CustomMinimumSize.X;
+            if (templateSize.Y < 10) templateSize.Y = _sortButtonTemplate.CustomMinimumSize.Y;
+            if (templateSize.X < 10) templateSize.X = 180;
+            if (templateSize.Y < 10) templateSize.Y = 50;
+            button.CustomMinimumSize = templateSize;
+
+            // Anchor to bottom-left, sized to match the card button.
+            const float padX = 20f;
+            const float padY = 20f;
+            button.AnchorLeft = 0f;
+            button.AnchorRight = 0f;
+            button.AnchorTop = 1f;
+            button.AnchorBottom = 1f;
+            button.OffsetLeft = padX;
+            button.OffsetRight = padX + templateSize.X;
+            button.OffsetTop = -templateSize.Y - padY;
+            button.OffsetBottom = -padY;
+
+            collection.AddChild(button);
+            WireSortButtonToPane(button, pane);
+        }
+        else
+        {
+            var button = CreateFloatingButton();
+            collection.AddChild(button);
+            WireButtonToPane(button, pane);
+        }
 
         if (SlayTheStatsConfig.DebugMode)
             MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: button injected into relic collection");
@@ -133,13 +184,121 @@ public static class CompendiumFilterPatch
 
     // ── Shared UI builders ──────────────────────────────────────────────────
 
-    private static Button CreateSidebarButton()
+    /// <summary>
+    /// Duplicates an existing NCardViewSortButton to get the exact game style:
+    /// textures, game fonts (Kreon), HSV shader material, tween animations, and SFX.
+    /// </summary>
+    private static NCardViewSortButton CloneSortButton(NCardViewSortButton template)
+    {
+        // Duplicate nodes + scripts but NOT signal connections — ConnectSignals()
+        // in _Ready will wire them fresh on the clone.  Include UseInstantiation
+        // so the duplicate is re-created from the original PackedScene.
+        var clone = (NCardViewSortButton)template.Duplicate(
+            (int)(Node.DuplicateFlags.Groups
+                | Node.DuplicateFlags.Scripts
+                | Node.DuplicateFlags.UseInstantiation));
+        clone.Name = "SlayTheStatsFilterButton";
+
+        // Godot copies the "already readied" flag from the template.
+        // RequestReady() clears it so _Ready fires when the clone enters the tree,
+        // which initialises _label, _button, _hsv, and all signal connections.
+        clone.RequestReady();
+
+        // Set label, make shader unique, and hide sort icon after _Ready has run.
+        clone.Ready += () =>
+        {
+            clone.SetLabel("SlayTheStats");
+
+            // The HSV ShaderMaterial on %ButtonImage is shared by reference with
+            // the template. Duplicate it so our hover animations don't bleed into
+            // the original CardTypeSorter button.
+            var buttonImage = clone.FindChild("ButtonImage", true, false);
+            if (buttonImage is CanvasItem ci && ci.Material is ShaderMaterial sm)
+                ci.Material = (ShaderMaterial)sm.Duplicate();
+
+            // Hide the sort arrow — our button opens a pane, not a sorter.
+            var sortIcon = clone.FindChild("Image", true, false);
+            if (sortIcon is CanvasItem icon)
+                icon.Visible = false;
+        };
+
+        return clone;
+    }
+
+    /// <summary>
+    /// Wires a cloned NCardViewSortButton to toggle a filter pane.
+    /// Uses the game's Released signal (NClickableControl) which fires after
+    /// the built-in press/release animations and SFX.
+    /// </summary>
+    private static void WireSortButtonToPane(NCardViewSortButton button, PanelContainer pane)
+    {
+        ((NClickableControl)button).Released += (_) =>
+        {
+            if (GodotObject.IsInstanceValid(pane))
+            {
+                pane.Visible = !pane.Visible;
+                if (pane.Visible)
+                {
+                    RepositionPaneNextToButton(button, pane);
+                    SyncAllControls();
+                }
+            }
+        };
+
+        pane.VisibilityChanged += () =>
+        {
+            if (!GodotObject.IsInstanceValid(button)) return;
+            UpdateSortButtonActiveState(button);
+        };
+    }
+
+    /// <summary>
+    /// Positions the filter pane just to the right of the sidebar button at toggle time
+    /// using the button's actual global rect (not hard-coded offsets).  The pane's bottom
+    /// is aligned with the button's bottom so it grows upward and stays on-screen.
+    /// </summary>
+    private static void RepositionPaneNextToButton(Control button, PanelContainer pane)
+    {
+        if (!GodotObject.IsInstanceValid(button) || !GodotObject.IsInstanceValid(pane))
+            return;
+
+        const float padding = 24f;
+
+        // Use top-left anchors so GlobalPosition controls the placement directly
+        // and the pane is sized by its content (PanelContainer wraps its child).
+        pane.AnchorLeft = 0f;
+        pane.AnchorTop = 0f;
+        pane.AnchorRight = 0f;
+        pane.AnchorBottom = 0f;
+
+        // Compute the pane's natural height from its content so we can align its
+        // bottom with the button's bottom (the pane grows upward, not downward).
+        var paneHeight = pane.GetCombinedMinimumSize().Y;
+        var btnRight = button.GlobalPosition.X + button.Size.X;
+        var btnBottom = button.GlobalPosition.Y + button.Size.Y;
+
+        pane.GlobalPosition = new Vector2(btnRight + padding, btnBottom - paneHeight);
+    }
+
+    /// <summary>
+    /// Updates the cloned sort button's label color to indicate active filters.
+    /// Uses SelfModulate on the MegaLabel child to tint without fighting the HSV shader.
+    /// </summary>
+    private static void UpdateSortButtonActiveState(NCardViewSortButton button)
+    {
+        bool active = HasActiveFilters();
+        var label = button.FindChild("Label", true, false);
+        if (label is CanvasItem labelItem)
+            labelItem.SelfModulate = active ? ActiveFilterColor : Colors.White;
+    }
+
+    private static Button CreateFallbackSidebarButton()
     {
         var button = new Button();
         button.Text = "SlayTheStats";
         button.Name = "SlayTheStatsFilterButton";
         button.CustomMinimumSize = new Vector2(0, 32);
-        ApplyButtonStyle(button);
+        ApplyPlainButtonStyle(button);
         return button;
     }
 
@@ -149,7 +308,7 @@ public static class CompendiumFilterPatch
         button.Text = "SlayTheStats";
         button.Name = "SlayTheStatsFilterButton";
         button.CustomMinimumSize = new Vector2(160, 36);
-        ApplyButtonStyle(button);
+        ApplyPlainButtonStyle(button);
         // Bottom-left corner positioning.
         button.AnchorLeft = 0f;
         button.AnchorTop = 1f;
@@ -162,7 +321,7 @@ public static class CompendiumFilterPatch
         return button;
     }
 
-    private static void ApplyButtonStyle(Button button)
+    private static void ApplyPlainButtonStyle(Button button)
     {
         button.AddThemeColorOverride("font_color", MutedButton);
         button.AddThemeColorOverride("font_hover_color", HoverButton);
@@ -189,6 +348,7 @@ public static class CompendiumFilterPatch
         button.AddThemeStyleboxOverride("pressed", pressed);
     }
 
+    /// <summary>Wires a plain Godot Button to toggle a filter pane (fallback / relic collection).</summary>
     private static void WireButtonToPane(Button button, PanelContainer pane)
     {
         button.Pressed += () =>
@@ -229,7 +389,7 @@ public static class CompendiumFilterPatch
             || !string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile);
     }
 
-    // ── Filter pane builder ─────────────────────────────────────────────────
+    // ── Filter pane builder ─────────────────────────────────────────────��───
 
     private static PanelContainer BuildFilterPane()
     {
@@ -238,93 +398,48 @@ public static class CompendiumFilterPatch
         pane.Visible = false;
         pane.ZIndex = 90;
 
-        // Position: centered, sized for controls.
-        pane.AnchorLeft = 0.5f;
-        pane.AnchorTop = 0.5f;
-        pane.AnchorRight = 0.5f;
-        pane.AnchorBottom = 0.5f;
-        pane.OffsetLeft = -220;
-        pane.OffsetTop = -200;
-        pane.OffsetRight = 220;
-        pane.OffsetBottom = 200;
+        // Position is set dynamically by RepositionPaneNextToButton when the
+        // pane is shown, based on the sidebar button's actual global rect.
+        pane.GrowHorizontal = Control.GrowDirection.End;
+        pane.GrowVertical = Control.GrowDirection.End;
 
-        // Solid dark background.
-        var bg = new StyleBoxFlat();
-        bg.BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
-        bg.BorderColor = new Color(0.35f, 0.40f, 0.55f, 1f);
-        bg.BorderWidthBottom = 2;
-        bg.BorderWidthTop = 2;
-        bg.BorderWidthLeft = 2;
-        bg.BorderWidthRight = 2;
-        bg.CornerRadiusBottomLeft = 6;
-        bg.CornerRadiusBottomRight = 6;
-        bg.CornerRadiusTopLeft = 6;
-        bg.CornerRadiusTopRight = 6;
-        pane.AddThemeStyleboxOverride("panel", bg);
+        // Use the game's tooltip stone texture for the panel background
+        // (same asset the tooltips use — matches the game aesthetic).
+        pane.AddThemeStyleboxOverride("panel", BuildPanelStyle());
+        pane.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f); // cooler steel-blue tint
 
         var margin = new MarginContainer();
         margin.AddThemeConstantOverride("margin_left", 16);
         margin.AddThemeConstantOverride("margin_right", 16);
-        margin.AddThemeConstantOverride("margin_top", 12);
-        margin.AddThemeConstantOverride("margin_bottom", 12);
+        margin.AddThemeConstantOverride("margin_top", 16);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
         pane.AddChild(margin);
 
         var vbox = new VBoxContainer();
-        vbox.AddThemeConstantOverride("separation", 8);
+        vbox.AddThemeConstantOverride("separation", 6);
         margin.AddChild(vbox);
 
-        // ── Header row ──
-        var headerRow = new HBoxContainer();
-        vbox.AddChild(headerRow);
-
+        // ── Title ──
         var title = new Label();
-        title.Text = "SlayTheStats";
-        title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        title.AddThemeColorOverride("font_color", GoldTitle);
-        title.AddThemeFontSizeOverride("font_size", 22);
-        headerRow.AddChild(title);
+        title.Text = "SlayTheStats Filters";
+        title.AddThemeColorOverride("font_color", Gold);
+        ApplyGameFont(title, 20);
+        vbox.AddChild(title);
 
-        var closeButton = new Button();
-        closeButton.Text = "X";
-        closeButton.CustomMinimumSize = new Vector2(32, 32);
-        closeButton.Pressed += () =>
-        {
-            if (GodotObject.IsInstanceValid(pane))
-                pane.Visible = false;
-        };
-        headerRow.AddChild(closeButton);
-
-        vbox.AddChild(new HSeparator());
+        AddSeparator(vbox);
 
         // ── Version range ──
         var verRow = new HBoxContainer();
-        verRow.AddThemeConstantOverride("separation", 8);
+        verRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(verRow);
-
-        var verLabel = MakeLabel("Version:");
-        verLabel.CustomMinimumSize = new Vector2(110, 0);
-        verRow.AddChild(verLabel);
+        verRow.AddChild(MakeLabel("Version:", 100));
 
         var versions = StatsAggregator.GetDistinctVersions(MainFile.Db);
 
-        var verMin = new OptionButton();
-        verMin.CustomMinimumSize = new Vector2(100, 0);
-        verMin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        verMin.AddItem("Any", 0);
-        for (int i = 0; i < versions.Count; i++)
-            verMin.AddItem(versions[i], i + 1);
-        SelectOptionByText(verMin, SlayTheStatsConfig.VersionMin);
+        var verMin = MakeDropdown(versions, SlayTheStatsConfig.VersionMin);
         verRow.AddChild(verMin);
-
-        verRow.AddChild(MakeLabel("—"));
-
-        var verMax = new OptionButton();
-        verMax.CustomMinimumSize = new Vector2(100, 0);
-        verMax.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        verMax.AddItem("Any", 0);
-        for (int i = 0; i < versions.Count; i++)
-            verMax.AddItem(versions[i], i + 1);
-        SelectOptionByText(verMax, SlayTheStatsConfig.VersionMax);
+        verRow.AddChild(MakeLabel("to"));
+        var verMax = MakeDropdown(versions, SlayTheStatsConfig.VersionMax);
         verRow.AddChild(verMax);
 
         HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
@@ -345,20 +460,12 @@ public static class CompendiumFilterPatch
         var profiles = StatsAggregator.GetDistinctProfiles(MainFile.Db);
 
         var profRow = new HBoxContainer();
-        profRow.AddThemeConstantOverride("separation", 8);
+        profRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(profRow);
+        profRow.AddChild(MakeLabel("Profile:", 100));
 
-        var profLabel = MakeLabel("Profile:");
-        profLabel.CustomMinimumSize = new Vector2(110, 0);
-        profRow.AddChild(profLabel);
-
-        var profSelect = new OptionButton();
-        profSelect.CustomMinimumSize = new Vector2(180, 0);
+        var profSelect = MakeDropdown(profiles, SlayTheStatsConfig.FilterProfile);
         profSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        profSelect.AddItem("All", 0);
-        for (int i = 0; i < profiles.Count; i++)
-            profSelect.AddItem(profiles[i], i + 1);
-        SelectOptionByText(profSelect, SlayTheStatsConfig.FilterProfile);
         profRow.AddChild(profSelect);
 
         HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
@@ -371,29 +478,14 @@ public static class CompendiumFilterPatch
 
         // ── Ascension range ──
         var ascRow = new HBoxContainer();
-        ascRow.AddThemeConstantOverride("separation", 8);
+        ascRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(ascRow);
+        ascRow.AddChild(MakeLabel("Ascension:", 100));
 
-        var ascLabel = MakeLabel("Ascension:");
-        ascLabel.CustomMinimumSize = new Vector2(110, 0);
-        ascRow.AddChild(ascLabel);
-
-        var ascMin = new SpinBox();
-        ascMin.MinValue = 0;
-        ascMin.MaxValue = 10;
-        ascMin.Value = SlayTheStatsConfig.AscensionMin;
-        ascMin.CustomMinimumSize = new Vector2(70, 0);
-        ascMin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        var ascMin = MakeSpinBox(0, 10, SlayTheStatsConfig.AscensionMin);
         ascRow.AddChild(ascMin);
-
-        ascRow.AddChild(MakeLabel("—"));
-
-        var ascMax = new SpinBox();
-        ascMax.MinValue = 0;
-        ascMax.MaxValue = 10;
-        ascMax.Value = SlayTheStatsConfig.AscensionMax;
-        ascMax.CustomMinimumSize = new Vector2(70, 0);
-        ascMax.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        ascRow.AddChild(MakeLabel("to"));
+        var ascMax = MakeSpinBox(0, 10, SlayTheStatsConfig.AscensionMax);
         ascRow.AddChild(ascMax);
 
         HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
@@ -412,62 +504,44 @@ public static class CompendiumFilterPatch
             HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
         };
 
-        // ── Character filter ──
+        AddSeparator(vbox);
+
+        // ── Toggles ──
         var classSpecific = MakeCheckButton("Class-specific stats", SlayTheStatsConfig.ClassSpecificStats);
         classSpecific.Toggled += (pressed) => SlayTheStatsConfig.ClassSpecificStats = pressed;
         vbox.AddChild(classSpecific);
 
-        vbox.AddChild(new HSeparator());
-
-        // ── Toggles ──
-        var groupUpgrades = MakeCheckButton("Group Card Upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+        var groupUpgrades = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
         groupUpgrades.Toggled += (pressed) => SlayTheStatsConfig.GroupCardUpgrades = pressed;
         vbox.AddChild(groupUpgrades);
 
-        vbox.AddChild(new HSeparator());
+        AddSeparator(vbox);
 
         // ── Action buttons ──
         var row1 = new HBoxContainer();
         row1.AddThemeConstantOverride("separation", 8);
         vbox.AddChild(row1);
 
-        var clearBtn = new Button();
-        clearBtn.Text = "Clear All Filters";
-        clearBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        clearBtn.Pressed += () =>
+        row1.AddChild(MakeActionButton("Clear Filters", () =>
         {
             SlayTheStatsConfig.ClearAllFilters();
             SyncAllControls();
-        };
-        row1.AddChild(clearBtn);
-
-        var resetBtn = new Button();
-        resetBtn.Text = "Reset to Defaults";
-        resetBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        resetBtn.Pressed += () =>
+        }));
+        row1.AddChild(MakeActionButton("Reset", () =>
         {
             SlayTheStatsConfig.RestoreDefaults();
             SyncAllControls();
-        };
-        row1.AddChild(resetBtn);
-
-        var saveBtn = new Button();
-        saveBtn.Text = "Save as Defaults";
-        saveBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        saveBtn.Pressed += () =>
+        }));
+        row1.AddChild(MakeActionButton("Save Defaults", () =>
         {
             SlayTheStatsConfig.SaveDefaults();
-            try
-            {
-                BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>();
-            }
+            try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
             catch (System.Exception e)
             {
                 MainFile.Logger.Warn($"[SlayTheStats] Failed to save config: {e.Message}");
             }
-            SyncAllControls(); // refresh highlights against new defaults
-        };
-        row1.AddChild(saveBtn);
+            SyncAllControls();
+        }));
 
         // ── Sync callback: refresh all controls from config when pane opens ──
         _syncCallbacks.Add(() =>
@@ -482,7 +556,6 @@ public static class CompendiumFilterPatch
             SelectOptionByText(profSelect, SlayTheStatsConfig.FilterProfile);
             HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
 
-            // Set max before min to avoid clamping issues.
             ascMax.SetValueNoSignal(SlayTheStatsConfig.AscensionMax);
             ascMin.SetValueNoSignal(SlayTheStatsConfig.AscensionMin);
             HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
@@ -497,12 +570,78 @@ public static class CompendiumFilterPatch
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private static Label MakeLabel(string text)
+    /// <summary>
+    /// Builds the panel background using the game's stone tooltip texture.
+    /// Falls back to a dark flat style if the texture can't be loaded.
+    /// </summary>
+    private static StyleBox BuildPanelStyle()
+    {
+        var tex = ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
+        if (tex != null)
+        {
+            var sb = new StyleBoxTexture();
+            sb.Texture             = tex;
+            sb.TextureMarginLeft   = 55f;
+            sb.TextureMarginRight  = 91f;
+            sb.TextureMarginTop    = 43f;
+            sb.TextureMarginBottom = 32f;
+            sb.ContentMarginLeft   = 22f;
+            sb.ContentMarginRight  = 16f;
+            sb.ContentMarginTop    = 16f;
+            sb.ContentMarginBottom = 12f;
+            return sb;
+        }
+        var flat = new StyleBoxFlat();
+        flat.BgColor = new Color(0.11f, 0.07f, 0.06f, 0.94f);
+        flat.SetContentMarginAll(12);
+        flat.SetCornerRadiusAll(3);
+        return flat;
+    }
+
+    private static void ApplyGameFont(Control control, int size = 18)
+    {
+        var font = TooltipHelper.Fonts.Bold ?? TooltipHelper.Fonts.Normal;
+        if (font != null)
+            control.AddThemeFontOverride("font", font);
+        control.AddThemeFontSizeOverride("font_size", size);
+    }
+
+    private static Label MakeLabel(string text, float minWidth = 0)
     {
         var label = new Label();
         label.Text = text;
-        label.AddThemeColorOverride("font_color", LightText);
+        label.AddThemeColorOverride("font_color", Cream);
+        ApplyGameFont(label, 16);
+        if (minWidth > 0)
+            label.CustomMinimumSize = new Vector2(minWidth, 0);
         return label;
+    }
+
+    private static OptionButton MakeDropdown(List<string> items, string selected)
+    {
+        var btn = new OptionButton();
+        btn.CustomMinimumSize = new Vector2(90, 0);
+        btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        btn.AddThemeColorOverride("font_color", Cream);
+        btn.AddThemeColorOverride("font_hover_color", Gold);
+        btn.AddThemeColorOverride("font_focus_color", Gold);
+        ApplyGameFont(btn, 16);
+        btn.AddItem("Any", 0);
+        for (int i = 0; i < items.Count; i++)
+            btn.AddItem(items[i], i + 1);
+        SelectOptionByText(btn, selected);
+        return btn;
+    }
+
+    private static SpinBox MakeSpinBox(int min, int max, int value)
+    {
+        var sb = new SpinBox();
+        sb.MinValue = min;
+        sb.MaxValue = max;
+        sb.Value = value;
+        sb.CustomMinimumSize = new Vector2(65, 0);
+        sb.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        return sb;
     }
 
     private static CheckButton MakeCheckButton(string text, bool initial)
@@ -510,8 +649,57 @@ public static class CompendiumFilterPatch
         var cb = new CheckButton();
         cb.Text = text;
         cb.ButtonPressed = initial;
-        cb.AddThemeColorOverride("font_color", LightText);
+        cb.AddThemeColorOverride("font_color", Cream);
+        cb.AddThemeColorOverride("font_hover_color", Gold);
+        cb.AddThemeColorOverride("font_pressed_color", Gold);
+        ApplyGameFont(cb, 16);
         return cb;
+    }
+
+    private static Button MakeActionButton(string text, Action action)
+    {
+        var btn = new Button();
+        btn.Text = text;
+        btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        btn.AddThemeColorOverride("font_color", Cream);
+        btn.AddThemeColorOverride("font_hover_color", Gold);
+        btn.AddThemeColorOverride("font_pressed_color", Gold);
+        ApplyGameFont(btn, 14);
+
+        var normal = new StyleBoxFlat();
+        normal.BgColor = new Color(0.08f, 0.06f, 0.05f, 0.6f);
+        normal.SetBorderWidthAll(1);
+        normal.BorderColor = new Color(0.4f, 0.35f, 0.25f, 0.5f);
+        normal.SetCornerRadiusAll(3);
+        normal.ContentMarginLeft = 6;
+        normal.ContentMarginRight = 6;
+        normal.ContentMarginTop = 4;
+        normal.ContentMarginBottom = 4;
+        btn.AddThemeStyleboxOverride("normal", normal);
+
+        var hover = (StyleBoxFlat)normal.Duplicate();
+        hover.BgColor = new Color(0.12f, 0.09f, 0.07f, 0.7f);
+        hover.BorderColor = new Color(0.6f, 0.5f, 0.3f, 0.6f);
+        btn.AddThemeStyleboxOverride("hover", hover);
+
+        var pressed = (StyleBoxFlat)normal.Duplicate();
+        pressed.BgColor = new Color(0.05f, 0.04f, 0.03f, 0.8f);
+        btn.AddThemeStyleboxOverride("pressed", pressed);
+
+        btn.Pressed += action;
+        return btn;
+    }
+
+    private static void AddSeparator(VBoxContainer vbox)
+    {
+        var sep = new HSeparator();
+        sep.AddThemeConstantOverride("separation", 4);
+        sep.AddThemeStyleboxOverride("separator", new StyleBoxLine
+        {
+            Color = new Color(0.5f, 0.45f, 0.35f, 0.3f),
+            Thickness = 1,
+        });
+        vbox.AddChild(sep);
     }
 
     // Canonical character order matching the character select screen (from ModelDb.AllCharacters).
@@ -561,7 +749,7 @@ public static class CompendiumFilterPatch
     /// </summary>
     private static void HighlightIfNonDefault(Control control, bool isNonDefault)
     {
-        var color = isNonDefault ? ActiveFilterColor : LightText;
+        var color = isNonDefault ? ActiveFilterColor : Cream;
 
         if (control is SpinBox spinBox)
         {
