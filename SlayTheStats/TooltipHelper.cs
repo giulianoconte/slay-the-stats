@@ -44,6 +44,7 @@ internal static class TooltipHelper
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
     internal const float TooltipWidth  = 348f;
+    internal const float EncounterTooltipWidth = 640f;
     internal const float ShadowOffset  = 8f;
 
     internal static bool FontStealConnected;
@@ -130,11 +131,16 @@ internal static class TooltipHelper
     /// Increments ShowGen (cancels any pending hide timers), sets panel text, attaches to root,
     /// injects the position follower on first call, and makes the panel visible.
     /// </summary>
-    internal static void ShowPanel(string tableText, Control? holder = null)
+    internal static float ActiveWidth = TooltipWidth;
+    /// <summary>When set, the position follower places the tooltip at this fixed position instead of following a holder.</summary>
+    internal static Vector2? FixedPosition;
+
+    internal static void ShowPanel(string tableText, Control? holder = null, float? widthOverride = null)
     {
         MainFile.Logger.Info($"[SlayTheStats] ShowPanel gen={ShowGen}→{ShowGen + 1} activeHover={HasActiveHover}");
         ShowGen++;
         HasActiveHover = true;
+        ActiveWidth = widthOverride ?? TooltipWidth;
         if (holder != null) LastShowHolder = holder;
 
         var panel = GetPanelPublic();
@@ -537,7 +543,7 @@ internal static class TooltipHelper
 
     internal static void UpdatePanelPosition(Control p, Container textContainer)
     {
-        p.CustomMinimumSize = new Vector2(TooltipWidth, 0);
+        p.CustomMinimumSize = new Vector2(ActiveWidth, 0);
 
         int sep = textContainer.GetThemeConstant("separation");
         float x = textContainer.GlobalPosition.X;
@@ -546,8 +552,8 @@ internal static class TooltipHelper
         // textHoverTipContainer may sit at a position that would push our panel off-screen.
         // Clamp to the viewport so our panel never overflows the right (or left) edge.
         var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-        if (x + TooltipWidth > viewportSize.X)
-            x = viewportSize.X - TooltipWidth;
+        if (x + ActiveWidth > viewportSize.X)
+            x = viewportSize.X - ActiveWidth;
         if (x < 0) x = 0;
 
         p.Position = new Vector2(x, textContainer.GlobalPosition.Y + textContainer.Size.Y + sep);
@@ -591,6 +597,20 @@ public partial class SlayTheStatsPositionFollower : Node
         // hovering the upgrade button or any card keyword).
         if (!TooltipHelper.HasActiveHover && !TooltipHelper.InspectActive) return;
 
+        // Fixed position mode — used by the bestiary panel to place tooltip at a known location
+        if (TooltipHelper.FixedPosition.HasValue)
+        {
+            p.CustomMinimumSize = new Vector2(TooltipHelper.ActiveWidth, 0);
+            p.Position = TooltipHelper.FixedPosition.Value;
+            var fixedShadow = TooltipHelper.GetShadowPublic();
+            if (fixedShadow != null && GodotObject.IsInstanceValid(fixedShadow))
+            {
+                fixedShadow.Position = p.Position + new Vector2(TooltipHelper.ShadowOffset, TooltipHelper.ShadowOffset);
+                fixedShadow.Size = p.Size;
+            }
+            return;
+        }
+
         var root          = (Engine.GetMainLoop() as SceneTree)?.Root;
         var tipSet        = TooltipHelper.FindTipSet(root);
         var textContainer = tipSet?.GetNodeOrNull<Container>("textHoverTipContainer");
@@ -609,9 +629,8 @@ public partial class SlayTheStatsPositionFollower : Node
             var holder = CardHoverShowPatch.ActiveHolderControl ?? RelicHoverHelper.ActiveHolderControl ?? TooltipHelper.LastShowHolder;
             if (holder == null || !GodotObject.IsInstanceValid(holder)) return;
 
-            p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
+            p.CustomMinimumSize = new Vector2(TooltipHelper.ActiveWidth, 0);
             var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-
             // NCardHolder and NCard report Size=(0,0) — GlobalPosition is the visual center.
             // Use half the card's visual width (~140px at default scale) to find the right edge.
             float holderW = holder.Size.X;
@@ -630,9 +649,9 @@ public partial class SlayTheStatsPositionFollower : Node
                 holderLeft  = holder.GlobalPosition.X - halfCard;
             }
 
-            bool flipToLeft = holderRight + TooltipHelper.TooltipWidth > viewportSize.X;
-            float x         = flipToLeft ? holderLeft - TooltipHelper.TooltipWidth : holderRight;
-            x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
+            bool flipToLeft = holderRight + TooltipHelper.ActiveWidth > viewportSize.X;
+            float x         = flipToLeft ? holderLeft - TooltipHelper.ActiveWidth : holderRight;
+            x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.ActiveWidth);
             p.Position = new Vector2(x, holder.GlobalPosition.Y);
 
             var shadowFallback = TooltipHelper.GetShadowPublic();
@@ -657,7 +676,7 @@ public partial class SlayTheStatsPositionFollower : Node
             // No native tooltips. Use textContainer.GlobalPosition as the anchor — the game's
             // SetFollowOwner reliably places textContainer at the card's right edge each frame,
             // making tcX/tcY the most accurate position reference available.
-            p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
+            p.CustomMinimumSize = new Vector2(TooltipHelper.ActiveWidth, 0);
             int   sep          = textContainer.GetThemeConstant("separation");
             var   viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
             float tcX          = textContainer.GlobalPosition.X;
@@ -672,8 +691,8 @@ public partial class SlayTheStatsPositionFollower : Node
             if (ancientBtn != null && GodotObject.IsInstanceValid(ancientBtn))
             {
                 // Ancient event options use HoverTipAlignment.Left — panel goes to the LEFT.
-                x = ancientBtn.GlobalPosition.X - TooltipHelper.TooltipWidth;
-                x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
+                x = ancientBtn.GlobalPosition.X - TooltipHelper.ActiveWidth;
+                x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.ActiveWidth);
                 p.Position = new Vector2(x, ancientBtn.GlobalPosition.Y);
             }
             else if (cardHolder != null && GodotObject.IsInstanceValid(cardHolder))
@@ -686,22 +705,22 @@ public partial class SlayTheStatsPositionFollower : Node
                 if (gameFlippedLeft)
                 {
                     // tcX is the card's left edge; place our panel to the left of it.
-                    x = tcX - TooltipHelper.TooltipWidth;
+                    x = tcX - TooltipHelper.ActiveWidth;
                 }
                 else
                 {
                     // tcX is the card's right edge; place our panel there.
                     x = tcX;
                 }
-                x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
+                x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.ActiveWidth);
                 p.Position = new Vector2(x, tcY + sep);
                 if (logOnce)
                     MainFile.Logger.Info($"[SlayTheStats] _Process no-tip card: holder.GlobalPos={cardHolder.GlobalPosition} tcX={tcX} gameFlippedLeft={gameFlippedLeft} x={x}");
             }
             else
             {
-                bool flipToLeft = tcX + TooltipHelper.TooltipWidth > viewportSize.X;
-                x = flipToLeft ? tcX - TooltipHelper.TooltipWidth : tcX;
+                bool flipToLeft = tcX + TooltipHelper.ActiveWidth > viewportSize.X;
+                x = flipToLeft ? tcX - TooltipHelper.ActiveWidth : tcX;
                 x = Math.Max(0, x);
                 p.Position = new Vector2(x, tcY + sep);
             }

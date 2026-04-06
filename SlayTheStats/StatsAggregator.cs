@@ -272,6 +272,97 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Aggregates an encounter's per-context stats into per-act totals using the given filter.
+    /// </summary>
+    public static Dictionary<int, EncounterEvent> AggregateEncountersByAct(
+        Dictionary<string, EncounterEvent> contextMap,
+        AggregationFilter filter)
+    {
+        var result = new Dictionary<int, EncounterEvent>();
+
+        foreach (var (key, stat) in contextMap)
+        {
+            var ctx = RunContext.Parse(key);
+            if (!filter.Matches(ctx)) continue;
+
+            if (!result.TryGetValue(ctx.Act, out var agg))
+            {
+                agg = new EncounterEvent();
+                result[ctx.Act] = agg;
+            }
+
+            agg.Fought           += stat.Fought;
+            agg.Died             += stat.Died;
+            agg.WonRun           += stat.WonRun;
+            agg.TurnsTakenSum    += stat.TurnsTakenSum;
+            agg.DamageTakenSum   += stat.DamageTakenSum;
+            agg.DamageTakenSqSum += stat.DamageTakenSqSum;
+            agg.HpEnteringSum    += stat.HpEnteringSum;
+            agg.MaxHpSum         += stat.MaxHpSum;
+            agg.PotionsUsedSum   += stat.PotionsUsedSum;
+            agg.DmgPctSum        += stat.DmgPctSum;
+            agg.DmgPctSqSum      += stat.DmgPctSqSum;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Computes average Dmg% across all encounters matching the filter in a given category and act.
+    /// Used as baseline for coloring encounter stats. Falls back to 20.0 if no data.
+    /// </summary>
+    public static double GetEncounterDmgPctBaseline(StatsDb db, AggregationFilter filter, string? category = null, int? act = null)
+    {
+        double totalDmgPct = 0;
+        int totalFought = 0;
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+                if (act != null && ctx.Act != act) continue;
+
+                totalFought += stat.Fought;
+                totalDmgPct += stat.DmgPctSum;
+            }
+        }
+
+        return totalFought == 0 ? 20.0 : totalDmgPct / totalFought * 100.0;
+    }
+
+    /// <summary>
+    /// Computes average death rate across all encounters matching the filter in a given category and act.
+    /// Falls back to 10.0 if no data.
+    /// </summary>
+    public static double GetEncounterDeathRateBaseline(StatsDb db, AggregationFilter filter, string? category = null, int? act = null)
+    {
+        int totalFought = 0, totalDied = 0;
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+                if (act != null && ctx.Act != act) continue;
+
+                totalFought += stat.Fought;
+                totalDied += stat.Died;
+            }
+        }
+
+        return totalFought == 0 ? 10.0 : 100.0 * totalDied / totalFought;
+    }
+
+    /// <summary>
     /// Returns the overall shop buy rate as a percentage (0–100): total shop purchases / total shop
     /// appearances across all cards and relics. Falls back to 20.0 if no shop data exists yet.
     /// </summary>

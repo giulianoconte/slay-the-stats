@@ -77,7 +77,7 @@ public class CharacterStat
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.2.0";
+    public const string CurrentModVersion = "v0.3.0";
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();
@@ -91,6 +91,8 @@ public class StatsDb
     /// Used by the OnlyHighestWonAscension config option to filter stats.
     /// </summary>
     [JsonPropertyName("highest_won_ascensions")] public Dictionary<string, int> HighestWonAscensions { get; set; } = new();
+    [JsonPropertyName("encounters")]      public Dictionary<string, Dictionary<string, EncounterEvent>> Encounters     { get; set; } = new();
+    [JsonPropertyName("encounter_meta")]  public Dictionary<string, EncounterMeta>                      EncounterMeta  { get; set; } = new();
     public static StatsDb Load(string path, Action<string>? warn = null)
     {
         try
@@ -139,6 +141,8 @@ public class StatsDb
         TotalRewardScreens = 0;
         TotalSkips         = 0;
         HighestWonAscensions.Clear();
+        Encounters.Clear();
+        EncounterMeta.Clear();
     }
 
     public CharacterStat GetOrCreateCharacter(string character, string gameMode)
@@ -164,6 +168,23 @@ public class StatsDb
         if (!contextMap.TryGetValue(key, out var stat))
         {
             stat = new RelicStat();
+            contextMap[key] = stat;
+        }
+        return stat;
+    }
+
+    public EncounterEvent GetOrCreateEncounter(string encounterId, RunContext context)
+    {
+        if (!Encounters.TryGetValue(encounterId, out var contextMap))
+        {
+            contextMap = new Dictionary<string, EncounterEvent>();
+            Encounters[encounterId] = contextMap;
+        }
+
+        var key = context.ToKey();
+        if (!contextMap.TryGetValue(key, out var stat))
+        {
+            stat = new EncounterEvent();
             contextMap[key] = stat;
         }
         return stat;

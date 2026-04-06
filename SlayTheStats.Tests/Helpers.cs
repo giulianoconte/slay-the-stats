@@ -87,6 +87,106 @@ public static class RunFixture
         """;
     }
 
+    /// <summary>
+    /// Represents a combat encounter on a floor for test fixture building.
+    /// </summary>
+    public record EncounterFloor(
+        string ModelId,
+        List<string> MonsterIds,
+        int TurnsTaken,
+        int DamageTaken,
+        int CurrentHp,
+        int MaxHp,
+        int HpHealed = 0,
+        List<string>? PotionsUsed = null,
+        string MapPointType = "monster");
+
+    /// <summary>
+    /// Builds a .run JSON with encounter data for testing encounter parsing.
+    /// Each act is a list of floors; each floor may be an EncounterFloor (combat) or null (non-combat with hp tracking).
+    /// </summary>
+    public static string BuildWithEncounters(
+        bool won = false,
+        bool abandoned = false,
+        int ascension = 0,
+        string character = "CHARACTER.IRONCLAD",
+        string buildVersion = "UNKNOWN",
+        string gameMode = "UNKNOWN",
+        string killedByEncounter = "NONE.NONE",
+        List<string>? actsArray = null,
+        List<List<EncounterFloor>>? encounterActs = null)
+    {
+        actsArray ??= ["ACT.OVERGROWTH", "ACT.HIVE", "ACT.GLORY"];
+        encounterActs ??= [];
+
+        var actsJsonParts = new List<string>();
+        for (int actIdx = 0; actIdx < encounterActs.Count; actIdx++)
+        {
+            var floorJsons = new List<string>();
+            foreach (var enc in encounterActs[actIdx])
+            {
+                var monsterIdsJson = string.Join(",", enc.MonsterIds.Select(m => $@"""{m}"""));
+                var potionUsedField = enc.PotionsUsed is { Count: > 0 }
+                    ? $@", ""potion_used"": [{string.Join(",", enc.PotionsUsed.Select(p => $@"""{p}"""))}]"
+                    : "";
+                floorJsons.Add($$"""
+                {
+                    "map_point_type": "{{enc.MapPointType}}",
+                    "rooms": [{ "model_id": "{{enc.ModelId}}", "monster_ids": [{{monsterIdsJson}}], "room_type": "monster", "turns_taken": {{enc.TurnsTaken}} }],
+                    "player_stats": [{ "damage_taken": {{enc.DamageTaken}}, "current_hp": {{enc.CurrentHp}}, "max_hp": {{enc.MaxHp}}, "hp_healed": {{enc.HpHealed}}{{potionUsedField}} }]
+                }
+                """);
+            }
+            actsJsonParts.Add($"[{string.Join(",", floorJsons)}]");
+        }
+
+        // Pad remaining acts from actsArray with empty floors
+        for (int i = actsJsonParts.Count; i < actsArray.Count; i++)
+            actsJsonParts.Add("[]");
+
+        var actsArrayJson = string.Join(",", actsArray.Select(a => $@"""{a}"""));
+        var buildIdField = buildVersion != "UNKNOWN" ? $@"""build_id"": ""{buildVersion}"", " : "";
+        var gameModeField = gameMode != "UNKNOWN" ? $@"""game_mode"": ""{gameMode}"", " : "";
+
+        return $$"""
+        {
+            "was_abandoned": {{abandoned.ToString().ToLower()}},
+            "win": {{won.ToString().ToLower()}},
+            "ascension": {{ascension}},
+            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}" }],
+            "killed_by_encounter": "{{killedByEncounter}}",
+            "acts": [{{actsArrayJson}}],
+            "map_point_history": [{{string.Join(",", actsJsonParts)}}]
+        }
+        """;
+    }
+
+    /// <summary>
+    /// Builds a .run JSON for an event encounter (2 rooms: event room + combat room).
+    /// </summary>
+    public static string BuildEventEncounterFloorJson(
+        string eventModelId,
+        string encounterModelId,
+        List<string> monsterIds,
+        int turnsTaken,
+        int damageTaken,
+        int currentHp,
+        int maxHp,
+        int hpHealed = 0)
+    {
+        var monsterIdsJson = string.Join(",", monsterIds.Select(m => $@"""{m}"""));
+        return $$"""
+        {
+            "map_point_type": "unknown",
+            "rooms": [
+                { "model_id": "{{eventModelId}}", "room_type": "event", "turns_taken": 0 },
+                { "model_id": "{{encounterModelId}}", "monster_ids": [{{monsterIdsJson}}], "room_type": "monster", "turns_taken": {{turnsTaken}} }
+            ],
+            "player_stats": [{ "damage_taken": {{damageTaken}}, "current_hp": {{currentHp}}, "max_hp": {{maxHp}}, "hp_healed": {{hpHealed}} }]
+        }
+        """;
+    }
+
     public static string WriteTempFile(string json)
     {
         var path = Path.GetTempFileName();

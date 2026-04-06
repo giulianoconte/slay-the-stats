@@ -86,6 +86,17 @@ public static class RunParser
             warn?.Invoke($"Run {runId}: missing game_mode — game format may have changed.");
         gameMode ??= "UNKNOWN";
 
+        // Read acts array for biome mapping (e.g. ["ACT.OVERGROWTH", "ACT.HIVE", "ACT.GLORY"])
+        var actsNode = root["acts"]?.AsArray();
+        var biomeByAct = new List<string>();
+        if (actsNode != null)
+        {
+            foreach (var actNode in actsNode)
+                biomeByAct.Add(actNode?.GetValue<string>() ?? "");
+        }
+
+        var killedByEncounter = root["killed_by_encounter"]?.GetValue<string>();
+
         // Walk all map points across all acts and collect card choices and relic acquisitions with context
         var allChoices = new List<(string cardId, bool wasPicked, bool wasUpgraded, RunContext context)>();
         var relicsAcquired = new List<(string relicId, RunContext context)>();
@@ -102,6 +113,12 @@ public static class RunParser
         // Verbose upgrade tracking
         var campfireUpgradesThisRun    = new List<(string cardId, RunContext context)>();
         var eventRelicUpgradesThisRun  = new List<(string cardId, RunContext context)>();
+
+        // Encounter tracking
+        var encountersThisRun = new HashSet<(string encounterId, string contextKey)>();
+        string? lastEncounterId = null;
+        string? lastEncounterContextKey = null;
+        int previousHp = -1;
 
         var actArray = root["map_point_history"]?.AsArray();
         if (actArray == null)
@@ -274,6 +291,87 @@ public static class RunParser
                         }
                     }
                 }
+
+                // --- Encounter extraction ---
+                var rooms = floor?["rooms"]?.AsArray();
+                if (rooms != null)
+                {
+                    // Find the combat room (may be rooms[0] for normal fights, rooms[1] for event encounters)
+                    foreach (var room in rooms)
+                    {
+                        var modelId = room?["model_id"]?.GetValue<string>();
+                        if (modelId == null || !modelId.StartsWith("ENCOUNTER.")) continue;
+
+                        var turnsTaken = room?["turns_taken"]?.GetValue<int>() ?? 0;
+                        if (turnsTaken <= 0) continue;
+
+                        // Read player stats for this floor (first player)
+                        var ps = floor?["player_stats"]?[0];
+                        int damageTaken = ps?["damage_taken"]?.GetValue<int>() ?? 0;
+                        int currentHp   = ps?["current_hp"]?.GetValue<int>() ?? 0;
+                        int maxHp       = ps?["max_hp"]?.GetValue<int>() ?? 1;
+                        int hpHealed    = ps?["hp_healed"]?.GetValue<int>() ?? 0;
+                        var potionUsed  = ps?["potion_used"]?.AsArray();
+                        int potionCount = potionUsed?.Count ?? 0;
+
+                        int hpEntering = previousHp > 0
+                            ? previousHp
+                            : currentHp + damageTaken - hpHealed;
+
+                        double dmgPct = maxHp > 0 ? (double)damageTaken / maxHp : 0.0;
+
+                        var enc = db.GetOrCreateEncounter(modelId, context);
+                        enc.Fought++;
+                        enc.TurnsTakenSum    += turnsTaken;
+                        enc.DamageTakenSum   += damageTaken;
+                        enc.DamageTakenSqSum += damageTaken * damageTaken;
+                        enc.HpEnteringSum    += hpEntering;
+                        enc.MaxHpSum         += maxHp;
+                        enc.PotionsUsedSum   += potionCount;
+                        enc.DmgPctSum        += dmgPct;
+                        enc.DmgPctSqSum      += dmgPct * dmgPct;
+
+                        encountersThisRun.Add((modelId, context.ToKey()));
+                        lastEncounterId = modelId;
+                        lastEncounterContextKey = context.ToKey();
+
+                        // Populate EncounterMeta on first occurrence
+                        if (!db.EncounterMeta.ContainsKey(modelId))
+                        {
+                            var monsterIds = new List<string>();
+                            var monsterIdsNode = room?["monster_ids"]?.AsArray();
+                            if (monsterIdsNode != null)
+                            {
+                                foreach (var mid in monsterIdsNode)
+                                {
+                                    var mId = mid?.GetValue<string>();
+                                    if (mId != null) monsterIds.Add(mId);
+                                }
+                            }
+
+                            string biome = (actIndex < biomeByAct.Count) ? biomeByAct[actIndex] : "";
+
+                            db.EncounterMeta[modelId] = new EncounterMeta
+                            {
+                                MonsterIds = monsterIds,
+                                Category = EncounterCategory.Derive(modelId),
+                                Biome = biome,
+                                Act = actIndex + 1,
+                            };
+                        }
+
+                        break; // only process the first combat room per floor
+                    }
+                }
+
+                // Track previous HP for hp_entering computation
+                var psForHp = floor?["player_stats"]?[0];
+                if (psForHp != null)
+                {
+                    var floorHp = psForHp["current_hp"]?.GetValue<int>();
+                    if (floorHp.HasValue)
+                        previousHp = floorHp.Value;
+                }
             }
         }
 
@@ -288,6 +386,20 @@ public static class RunParser
                 if (relicId != null && !relicsSeenInFloors.Contains(relicId))
                     relicsAcquired.Add((relicId, starterContext));
             }
+        }
+
+        // Encounter: death detection via killed_by_encounter
+        if (!string.IsNullOrEmpty(killedByEncounter) && killedByEncounter != "NONE.NONE"
+            && lastEncounterId == killedByEncounter && lastEncounterContextKey != null)
+        {
+            db.GetOrCreateEncounter(killedByEncounter, RunContext.Parse(lastEncounterContextKey)).Died++;
+        }
+
+        // Encounter: win tracking — increment WonRun for all encounters fought in this run
+        if (won)
+        {
+            foreach (var (encId, ctxKey) in encountersThisRun)
+                db.GetOrCreateEncounter(encId, RunContext.Parse(ctxKey)).WonRun++;
         }
 
         // Aggregate into stats db
