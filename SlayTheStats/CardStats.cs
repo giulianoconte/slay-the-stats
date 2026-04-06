@@ -109,6 +109,12 @@ public class StatsDb
                     return new StatsDb();
                 }
 
+                // Re-apply category derivation against the current EncounterCategory rules so
+                // that data stored under older classifications (e.g. OVERGROWTH_CRAWLERS as
+                // "unknown") picks up new overrides without requiring a full reparse.
+                foreach (var (encId, meta) in db.EncounterMeta)
+                    meta.Category = EncounterCategory.Derive(encId);
+
                 return db;
             }
         }

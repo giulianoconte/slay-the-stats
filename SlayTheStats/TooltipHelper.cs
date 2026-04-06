@@ -498,7 +498,7 @@ internal static class TooltipHelper
         return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{inner}[/color]";
     }
 
-    private static StyleBox BuildPanelStyle()
+    internal static StyleBox BuildPanelStyle()
     {
         var tex = ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
         if (tex != null)

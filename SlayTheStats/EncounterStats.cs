@@ -44,12 +44,22 @@ public static class EncounterCategory
         ("_WEAK", "weak"),
     };
 
+    // Encounter ids that don't follow the suffix convention but we know belong to a specific
+    // category. Treat these as game-data inconsistencies.
+    private static readonly Dictionary<string, string> CategoryOverrides = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ENCOUNTER.OVERGROWTH_CRAWLERS"] = "normal",
+    };
+
     /// <summary>
     /// Derives encounter category from the model_id suffix.
     /// Checks longest suffixes first to avoid partial matches.
     /// </summary>
     public static string Derive(string modelId)
     {
+        if (CategoryOverrides.TryGetValue(modelId, out var overrideCat))
+            return overrideCat;
+
         var name = modelId.StartsWith("ENCOUNTER.") ? modelId["ENCOUNTER.".Length..] : modelId;
         foreach (var (suffix, category) in Suffixes)
         {

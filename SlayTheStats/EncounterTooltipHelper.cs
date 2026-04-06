@@ -18,6 +18,9 @@ public static class EncounterTooltipHelper
         ("CHARACTER.DEFECT", "Defect"),
     };
 
+    /// <summary>Public read-only view of the canonical character roster.</summary>
+    public static IReadOnlyList<(string id, string label)> CanonicalCharacters => CharacterOrder;
+
     /// <summary>
     /// Builds encounter stats text with one row per character + an "All" total row.
     /// </summary>
