@@ -119,7 +119,7 @@ internal static class RelicHoverHelper
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar)
                     : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline);
+                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -209,7 +209,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 
@@ -250,10 +250,10 @@ internal static class RelicHoverHelper
         var cTotBuys   = CardHoverShowPatch.FormatBuysCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline);
         sb.Append($"All {cTotRuns}  {cTotBuys}  {cTotWr}");
 
-        var filterCtx   = CardHoverShowPatch.BuildFilterContext(characterLabel, ascensionMin, ascensionMax);
+        var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";
         var wrStr       = $"{Math.Round(wrBaseline):F0}%";
         var buysBaseStr = $"{Math.Round(shopBuyRateBaseline):F0}%";
-        sb.Append($"\n\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
         if (filterCtx.Length > 0)
             sb.Append($"\n{filterCtx}");
         sb.Append("[/color][/font_size][/font]");

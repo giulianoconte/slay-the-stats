@@ -60,7 +60,7 @@ public static class CardHoverShowPatch
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline);
+                statsText = actStats.Count == 0 ? NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -252,10 +252,16 @@ public static class CardHoverShowPatch
     /// </summary>
     internal static AggregationFilter BuildInRunFilter(string? runCharacter)
     {
+        // In-run tooltips always use the user's saved defaults, not the live pane values.
         var filter = new AggregationFilter
         {
             GameMode = "standard",
             Character = runCharacter,
+            AscensionMin = SlayTheStatsConfig.DefaultAscensionMin > 0 ? SlayTheStatsConfig.DefaultAscensionMin : null,
+            AscensionMax = SlayTheStatsConfig.DefaultAscensionMax < 10 ? SlayTheStatsConfig.DefaultAscensionMax : null,
+            VersionMin = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
+            VersionMax = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
+            Profile = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultFilterProfile) ? null : SlayTheStatsConfig.DefaultFilterProfile,
         };
 
         if (SlayTheStatsConfig.OnlyHighestWonAscension)
@@ -351,19 +357,19 @@ public static class CardHoverShowPatch
     /// Builds a comma-separated filter context string for the footer.
     /// e.g. "A4-6, Defect, v0.100.0-v0.100.6, profile2"
     /// </summary>
-    internal static string BuildFilterContext(string characterLabel, int? ascMin, int? ascMax)
+    internal static string BuildFilterContext(string characterLabel, AggregationFilter filter)
     {
         var parts = new List<string>();
 
-        var asc = FormatAscensionPrefix(ascMin, ascMax).TrimEnd();
+        var asc = FormatAscensionPrefix(filter.AscensionMin, filter.AscensionMax).TrimEnd();
         if (asc.Length > 0) parts.Add(asc);
 
         if (characterLabel != "All chars") parts.Add(characterLabel);
 
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) || !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax))
+        if (filter.VersionMin != null || filter.VersionMax != null)
         {
-            var vMin = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) ? "" : SlayTheStatsConfig.VersionMin;
-            var vMax = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax) ? "" : SlayTheStatsConfig.VersionMax;
+            var vMin = filter.VersionMin ?? "";
+            var vMax = filter.VersionMax ?? "";
             if (vMin.Length > 0 && vMax.Length > 0)
                 parts.Add(vMin == vMax ? vMin : $"{vMin}-{vMax}");
             else if (vMin.Length > 0)
@@ -372,8 +378,8 @@ public static class CardHoverShowPatch
                 parts.Add($"≤{vMax}");
         }
 
-        if (!string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile))
-            parts.Add(SlayTheStatsConfig.FilterProfile);
+        if (filter.Profile != null)
+            parts.Add(filter.Profile);
 
         return parts.Count > 0 ? string.Join(", ", parts) : "";
     }
@@ -390,12 +396,12 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All chars", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 
         if (showBuysLayout)
-            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline);
+            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter);
 
         // Class card columns: Act(3)  Runs(7)  Pick%(5)  Win%(4)
         // Runs shows RunsPresent/RunsOffered, e.g. "12/30"
@@ -451,10 +457,10 @@ public static class CardHoverShowPatch
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
 
-        var filterCtx = BuildFilterContext(characterLabel, ascensionMin, ascensionMax);
+        var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         var prBaseStr = $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = $"{Math.Round(characterWR):F0}%";
-        sb.Append($"\n\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Pick% {prBaseStr}, Win% {wrStr}");
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Pick% {prBaseStr}, Win% {wrStr}");
         if (filterCtx.Length > 0)
             sb.Append($"\n{filterCtx}");
         sb.Append("[/color][/font_size][/font]");
@@ -468,7 +474,7 @@ public static class CardHoverShowPatch
     /// Buys shows RunsShopBought/RunsShopSeen (purchases / shop appearances).
     /// Win% is placed last, consistent across all stat tables.
     /// </summary>
-    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline)
+    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
         // Columns: Act(3)  Runs(5)  Buys(7)  Win%(4)
@@ -511,10 +517,10 @@ public static class CardHoverShowPatch
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All {cTotPicks}  {cTotBuys}  {cTotWr}");
 
-        var filterCtx    = BuildFilterContext(characterLabel, ascensionMin, ascensionMax);
+        var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         var wrStr        = $"{Math.Round(characterWR):F0}%";
         var buysBaseStr  = $"{Math.Round(shopBuyRateBaseline):F0}%";
-        sb.Append($"\n\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
         if (filterCtx.Length > 0)
             sb.Append($"\n{filterCtx}");
         sb.Append("[/color][/font_size][/font]");
@@ -668,7 +674,7 @@ public static class InspectCardDisplayPatch
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(effectiveChar, inspFilter.AscensionMin, inspFilter.AscensionMax)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline);
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline, inspFilter);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -764,7 +770,7 @@ public static class MerchantCardCreateHoverTipPatch
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline);
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline, filter);
             }
 
             TooltipHelper.TrySceneTheftOnce();
