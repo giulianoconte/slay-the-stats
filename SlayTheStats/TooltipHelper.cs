@@ -88,7 +88,7 @@ internal static class TooltipHelper
         table.Name                = "StatsLabel";
         table.BbcodeEnabled       = true;
         table.FitContent          = true;
-        table.AutowrapMode        = TextServer.AutowrapMode.Off;
+        table.AutowrapMode        = TextServer.AutowrapMode.WordSmart;
         table.ScrollActive        = false;
         table.SelectionEnabled    = false;
         table.ShortcutKeysEnabled = false;
@@ -611,9 +611,27 @@ public partial class SlayTheStatsPositionFollower : Node
 
             p.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
             var viewportSize = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-            float holderRight = holder.GlobalPosition.X + holder.Size.X;
-            bool flipToLeft   = holderRight + TooltipHelper.TooltipWidth > viewportSize.X;
-            float x           = flipToLeft ? holder.GlobalPosition.X - TooltipHelper.TooltipWidth : holderRight;
+
+            // NCardHolder and NCard report Size=(0,0) — GlobalPosition is the visual center.
+            // Use half the card's visual width (~140px at default scale) to find the right edge.
+            float holderW = holder.Size.X;
+            float holderRight;
+            float holderLeft;
+            if (holderW > 1f)
+            {
+                holderRight = holder.GlobalPosition.X + holderW;
+                holderLeft  = holder.GlobalPosition.X;
+            }
+            else
+            {
+                // Zero-size node: GlobalPosition is center. Estimate card half-width.
+                float halfCard = 140f * (holder.Scale.X > 0 ? holder.Scale.X : 1f);
+                holderRight = holder.GlobalPosition.X + halfCard;
+                holderLeft  = holder.GlobalPosition.X - halfCard;
+            }
+
+            bool flipToLeft = holderRight + TooltipHelper.TooltipWidth > viewportSize.X;
+            float x         = flipToLeft ? holderLeft - TooltipHelper.TooltipWidth : holderRight;
             x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.TooltipWidth);
             p.Position = new Vector2(x, holder.GlobalPosition.Y);
 

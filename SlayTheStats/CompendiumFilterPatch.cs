@@ -22,6 +22,8 @@ public static class CompendiumFilterPatch
 
     // Track active pane instances so they can be hidden from external patches.
     private static readonly List<PanelContainer> _activePanes = new();
+    // Callbacks to sync pane controls with current config values.
+    private static readonly List<Action> _syncCallbacks = new();
 
     /// <summary>
     /// Hides all filter panes. Called when a card/relic is hovered to avoid
@@ -192,7 +194,10 @@ public static class CompendiumFilterPatch
         button.Pressed += () =>
         {
             if (GodotObject.IsInstanceValid(pane))
+            {
                 pane.Visible = !pane.Visible;
+                if (pane.Visible) SyncAllControls();
+            }
         };
 
         // Update button color when filters are active.
@@ -201,6 +206,11 @@ public static class CompendiumFilterPatch
             if (!GodotObject.IsInstanceValid(button)) return;
             UpdateButtonActiveState(button);
         };
+    }
+
+    private static void SyncAllControls()
+    {
+        foreach (var cb in _syncCallbacks) cb();
     }
 
     private static void UpdateButtonActiveState(Button button)
@@ -215,7 +225,7 @@ public static class CompendiumFilterPatch
             || SlayTheStatsConfig.AscensionMax < 10
             || !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin)
             || !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax)
-            || !string.IsNullOrEmpty(SlayTheStatsConfig.FilterCharacters)
+            || SlayTheStatsConfig.ClassSpecificStats
             || !string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile);
     }
 
@@ -240,7 +250,7 @@ public static class CompendiumFilterPatch
 
         // Solid dark background.
         var bg = new StyleBoxFlat();
-        bg.BgColor = new Color(0.12f, 0.13f, 0.18f, 0.95f);
+        bg.BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         bg.BorderColor = new Color(0.35f, 0.40f, 0.55f, 1f);
         bg.BorderWidthBottom = 2;
         bg.BorderWidthTop = 2;
@@ -286,47 +296,6 @@ public static class CompendiumFilterPatch
 
         vbox.AddChild(new HSeparator());
 
-        // ── Ascension range ──
-        var ascRow = new HBoxContainer();
-        ascRow.AddThemeConstantOverride("separation", 8);
-        vbox.AddChild(ascRow);
-
-        var ascLabel = MakeLabel("Ascension:");
-        ascLabel.CustomMinimumSize = new Vector2(110, 0);
-        ascRow.AddChild(ascLabel);
-
-        var ascMin = new SpinBox();
-        ascMin.MinValue = 0;
-        ascMin.MaxValue = 10;
-        ascMin.Value = SlayTheStatsConfig.AscensionMin;
-        ascMin.CustomMinimumSize = new Vector2(70, 0);
-        ascMin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        ascRow.AddChild(ascMin);
-
-        ascRow.AddChild(MakeLabel("—"));
-
-        var ascMax = new SpinBox();
-        ascMax.MinValue = 0;
-        ascMax.MaxValue = 10;
-        ascMax.Value = SlayTheStatsConfig.AscensionMax;
-        ascMax.CustomMinimumSize = new Vector2(70, 0);
-        ascMax.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        ascRow.AddChild(ascMax);
-
-        HighlightIfNonDefault(ascMin, SlayTheStatsConfig.AscensionMin != 0);
-        HighlightIfNonDefault(ascMax, SlayTheStatsConfig.AscensionMax != 10);
-
-        ascMin.ValueChanged += (val) =>
-        {
-            SlayTheStatsConfig.AscensionMin = (int)val;
-            HighlightIfNonDefault(ascMin, (int)val != 0);
-        };
-        ascMax.ValueChanged += (val) =>
-        {
-            SlayTheStatsConfig.AscensionMax = (int)val;
-            HighlightIfNonDefault(ascMax, (int)val != 10);
-        };
-
         // ── Version range ──
         var verRow = new HBoxContainer();
         verRow.AddThemeConstantOverride("separation", 8);
@@ -358,53 +327,18 @@ public static class CompendiumFilterPatch
         SelectOptionByText(verMax, SlayTheStatsConfig.VersionMax);
         verRow.AddChild(verMax);
 
-        HighlightIfNonDefault(verMin, !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin));
-        HighlightIfNonDefault(verMax, !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax));
+        HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
+        HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
 
         verMin.ItemSelected += (idx) =>
         {
             SlayTheStatsConfig.VersionMin = idx == 0 ? "" : verMin.GetItemText((int)idx);
-            HighlightIfNonDefault(verMin, idx != 0);
+            HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
         };
         verMax.ItemSelected += (idx) =>
         {
             SlayTheStatsConfig.VersionMax = idx == 0 ? "" : verMax.GetItemText((int)idx);
-            HighlightIfNonDefault(verMax, idx != 0);
-        };
-
-        // ── Character filter ──
-        var charRow = new HBoxContainer();
-        charRow.AddThemeConstantOverride("separation", 8);
-        vbox.AddChild(charRow);
-
-        var charLabel = MakeLabel("Character:");
-        charLabel.CustomMinimumSize = new Vector2(110, 0);
-        charRow.AddChild(charLabel);
-
-        var characters = GetOrderedCharacters(MainFile.Db);
-
-        var charSelect = new OptionButton();
-        charSelect.CustomMinimumSize = new Vector2(180, 0);
-        charSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        charSelect.AddItem("All", 0);
-        for (int i = 0; i < characters.Count; i++)
-            charSelect.AddItem(FormatCharName(characters[i]), i + 1);
-        SelectOptionByText(charSelect, FormatCharName(SlayTheStatsConfig.FilterCharacters));
-        charRow.AddChild(charSelect);
-
-        HighlightIfNonDefault(charSelect, !string.IsNullOrEmpty(SlayTheStatsConfig.FilterCharacters));
-
-        charSelect.ItemSelected += (idx) =>
-        {
-            if (idx == 0)
-                SlayTheStatsConfig.FilterCharacters = "";
-            else
-            {
-                var selectedLabel = charSelect.GetItemText((int)idx);
-                var rawId = characters.FirstOrDefault(c => FormatCharName(c) == selectedLabel) ?? "";
-                SlayTheStatsConfig.FilterCharacters = rawId;
-            }
-            HighlightIfNonDefault(charSelect, idx != 0);
+            HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
         };
 
         // ── Profile filter ──
@@ -427,13 +361,61 @@ public static class CompendiumFilterPatch
         SelectOptionByText(profSelect, SlayTheStatsConfig.FilterProfile);
         profRow.AddChild(profSelect);
 
-        HighlightIfNonDefault(profSelect, !string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile));
+        HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
 
         profSelect.ItemSelected += (idx) =>
         {
             SlayTheStatsConfig.FilterProfile = idx == 0 ? "" : profSelect.GetItemText((int)idx);
-            HighlightIfNonDefault(profSelect, idx != 0);
+            HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
         };
+
+        // ── Ascension range ──
+        var ascRow = new HBoxContainer();
+        ascRow.AddThemeConstantOverride("separation", 8);
+        vbox.AddChild(ascRow);
+
+        var ascLabel = MakeLabel("Ascension:");
+        ascLabel.CustomMinimumSize = new Vector2(110, 0);
+        ascRow.AddChild(ascLabel);
+
+        var ascMin = new SpinBox();
+        ascMin.MinValue = 0;
+        ascMin.MaxValue = 10;
+        ascMin.Value = SlayTheStatsConfig.AscensionMin;
+        ascMin.CustomMinimumSize = new Vector2(70, 0);
+        ascMin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        ascRow.AddChild(ascMin);
+
+        ascRow.AddChild(MakeLabel("—"));
+
+        var ascMax = new SpinBox();
+        ascMax.MinValue = 0;
+        ascMax.MaxValue = 10;
+        ascMax.Value = SlayTheStatsConfig.AscensionMax;
+        ascMax.CustomMinimumSize = new Vector2(70, 0);
+        ascMax.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        ascRow.AddChild(ascMax);
+
+        HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+        HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+
+        ascMin.ValueChanged += (val) =>
+        {
+            SlayTheStatsConfig.AscensionMin = (int)val;
+            if (ascMax.Value < val) ascMax.Value = val;
+            HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+        };
+        ascMax.ValueChanged += (val) =>
+        {
+            SlayTheStatsConfig.AscensionMax = (int)val;
+            if (ascMin.Value > val) ascMin.Value = val;
+            HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+        };
+
+        // ── Character filter ──
+        var classSpecific = MakeCheckButton("Class-specific stats", SlayTheStatsConfig.ClassSpecificStats);
+        classSpecific.Toggled += (pressed) => SlayTheStatsConfig.ClassSpecificStats = pressed;
+        vbox.AddChild(classSpecific);
 
         vbox.AddChild(new HSeparator());
 
@@ -441,6 +423,74 @@ public static class CompendiumFilterPatch
         var groupUpgrades = MakeCheckButton("Group Card Upgrades", SlayTheStatsConfig.GroupCardUpgrades);
         groupUpgrades.Toggled += (pressed) => SlayTheStatsConfig.GroupCardUpgrades = pressed;
         vbox.AddChild(groupUpgrades);
+
+        vbox.AddChild(new HSeparator());
+
+        // ── Action buttons ──
+        var row1 = new HBoxContainer();
+        row1.AddThemeConstantOverride("separation", 8);
+        vbox.AddChild(row1);
+
+        var clearBtn = new Button();
+        clearBtn.Text = "Clear All Filters";
+        clearBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        clearBtn.Pressed += () =>
+        {
+            SlayTheStatsConfig.ClearAllFilters();
+            SyncAllControls();
+        };
+        row1.AddChild(clearBtn);
+
+        var resetBtn = new Button();
+        resetBtn.Text = "Reset to Defaults";
+        resetBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        resetBtn.Pressed += () =>
+        {
+            SlayTheStatsConfig.RestoreDefaults();
+            SyncAllControls();
+        };
+        row1.AddChild(resetBtn);
+
+        var saveBtn = new Button();
+        saveBtn.Text = "Save as Defaults";
+        saveBtn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        saveBtn.Pressed += () =>
+        {
+            SlayTheStatsConfig.SaveDefaults();
+            try
+            {
+                BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }
+            catch (System.Exception e)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] Failed to save config: {e.Message}");
+            }
+            SyncAllControls(); // refresh highlights against new defaults
+        };
+        row1.AddChild(saveBtn);
+
+        // ── Sync callback: refresh all controls from config when pane opens ──
+        _syncCallbacks.Add(() =>
+        {
+            if (!GodotObject.IsInstanceValid(pane)) return;
+
+            SelectOptionByText(verMin, SlayTheStatsConfig.VersionMin);
+            SelectOptionByText(verMax, SlayTheStatsConfig.VersionMax);
+            HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
+            HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
+
+            SelectOptionByText(profSelect, SlayTheStatsConfig.FilterProfile);
+            HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
+
+            // Set max before min to avoid clamping issues.
+            ascMax.SetValueNoSignal(SlayTheStatsConfig.AscensionMax);
+            ascMin.SetValueNoSignal(SlayTheStatsConfig.AscensionMin);
+            HighlightIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
+            HighlightIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
+
+            classSpecific.SetPressedNoSignal(SlayTheStatsConfig.ClassSpecificStats);
+            groupUpgrades.SetPressedNoSignal(SlayTheStatsConfig.GroupCardUpgrades);
+        });
 
         return pane;
     }

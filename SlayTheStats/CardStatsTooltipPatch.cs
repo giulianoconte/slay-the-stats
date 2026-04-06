@@ -38,9 +38,12 @@ public static class CardHoverShowPatch
             if (rawId == null) return;
 
             var upgradeLevel = GetUpgradeLevel(__instance);
-            var lookupId = FindCardLookupId(rawId, upgradeLevel);
+            var isCompendium = IsInsideCardLibrary(__instance);
+            var groupUpgrades = isCompendium ? SlayTheStatsConfig.GroupCardUpgrades : SlayTheStatsConfig.DefaultGroupCardUpgrades;
+            var lookupId = FindCardLookupId(rawId, upgradeLevel, groupUpgrades);
 
-            var filter = BuildFilter(RunCharacter);
+            var cardOwner = GetOwningCharacter(__instance.CardModel);
+            var filter = isCompendium ? BuildCompendiumFilter(RunCharacter, cardOwner) : BuildInRunFilter(RunCharacter);
             var effectiveChar = GetEffectiveCharacter(filter);
             var characterLabel = GetCharacterLabel(filter);
 
@@ -52,7 +55,7 @@ public static class CardHoverShowPatch
             else
             {
                 var showBuysLayout      = IsColorlessCard(__instance.CardModel);
-                var contextMap          = GetContextMap(lookupId);
+                var contextMap          = GetContextMap(lookupId, groupUpgrades);
                 var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
@@ -101,26 +104,26 @@ public static class CardHoverShowPatch
     /// When GroupCardUpgrades is enabled and only the upgraded variant exists (e.g. a card
     /// always acquired pre-upgraded), falls back to the + entry so it can be merged.
     /// </summary>
-    internal static string? FindCardLookupId(string rawId, int upgradeLevel)
+    internal static string? FindCardLookupId(string rawId, int upgradeLevel, bool groupUpgrades)
     {
         var suffix = upgradeLevel > 0 ? "+" : "";
         return MainFile.Db.Cards.ContainsKey("CARD." + rawId + suffix) ? "CARD." + rawId + suffix
              : MainFile.Db.Cards.ContainsKey("CARD." + rawId)          ? "CARD." + rawId
              : MainFile.Db.Cards.ContainsKey(rawId + suffix)           ? rawId + suffix
              : MainFile.Db.Cards.ContainsKey(rawId)                    ? rawId
-             : SlayTheStatsConfig.GroupCardUpgrades && upgradeLevel == 0 && MainFile.Db.Cards.ContainsKey("CARD." + rawId + "+") ? "CARD." + rawId + "+"
-             : SlayTheStatsConfig.GroupCardUpgrades && upgradeLevel == 0 && MainFile.Db.Cards.ContainsKey(rawId + "+")           ? rawId + "+"
+             : groupUpgrades && upgradeLevel == 0 && MainFile.Db.Cards.ContainsKey("CARD." + rawId + "+") ? "CARD." + rawId + "+"
+             : groupUpgrades && upgradeLevel == 0 && MainFile.Db.Cards.ContainsKey(rawId + "+")           ? rawId + "+"
              : null;
     }
 
     /// <summary>
-    /// Returns the context map for a card. When GroupCardUpgrades is enabled, merges the base
+    /// Returns the context map for a card. When groupUpgrades is true, merges the base
     /// and upgraded versions (e.g. CARD.STRIKE_R and CARD.STRIKE_R+) into a single map by
     /// summing their per-context counters.
     /// </summary>
-    internal static Dictionary<string, CardStat> GetContextMap(string lookupId)
+    internal static Dictionary<string, CardStat> GetContextMap(string lookupId, bool groupUpgrades)
     {
-        if (!SlayTheStatsConfig.GroupCardUpgrades)
+        if (!groupUpgrades)
             return MainFile.Db.Cards[lookupId];
 
         var pairedId = lookupId.EndsWith("+") ? lookupId[..^1] : lookupId + "+";
@@ -151,6 +154,26 @@ public static class CardHoverShowPatch
 
     /// <summary>
     /// Returns true if this card should use the colorless layout (Buys column instead of Pick%).
+    /// <summary>
+    /// Derives the owning character ID from a card's pool type.
+    /// Returns null for colorless, curse, event, ancient, and misc cards.
+    /// </summary>
+    internal static string? GetOwningCharacter(CardModel? model)
+    {
+        if (model?.Pool == null) return null;
+        if (model.Pool.IsColorless) return null;
+        var poolName = model.Pool.GetType().Name;
+        return poolName switch
+        {
+            "IroncladCardPool"    => "CHARACTER.IRONCLAD",
+            "SilentCardPool"      => "CHARACTER.SILENT",
+            "DefectCardPool"      => "CHARACTER.DEFECT",
+            "RegentCardPool"      => "CHARACTER.REGENT",
+            "NecrobinderCardPool" => "CHARACTER.NECROBINDER",
+            _ => null,
+        };
+    }
+
     /// Uses the game's own CardModel.Pool.IsColorless — authoritative and covers ColorlessCardPool,
     /// EventCardPool, TokenCardPool, and DeprecatedCardPool.
     /// </summary>
@@ -181,11 +204,15 @@ public static class CardHoverShowPatch
     }
 
     /// <summary>
-    /// Builds an AggregationFilter from config, applying the OnlyHighestWonAscension
-    /// logic when enabled (overrides the filter's ascension range with the exact highest won).
-    /// In-run character overrides the pane's character filter.
+    /// Builds an AggregationFilter for compendium tooltips — reads all pane filter settings.
+    /// Used by compendium card/relic hovers and inspect screens.
     /// </summary>
-    internal static AggregationFilter BuildFilter(string? runCharacter)
+    /// <summary>
+    /// Builds a compendium filter. When ClassSpecificStats is on, cardOwnerCharacter
+    /// (derived from the card's pool) is used to filter by owning class.
+    /// For non-class cards (colorless, curse, etc.) cardOwnerCharacter is null → all chars.
+    /// </summary>
+    internal static AggregationFilter BuildCompendiumFilter(string? runCharacter, string? cardOwnerCharacter = null)
     {
         var filter = new AggregationFilter
         {
@@ -197,18 +224,40 @@ public static class CardHoverShowPatch
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
         };
 
-        // In-run character takes priority over the pane's character filter.
-        if (runCharacter != null)
+        // Character: only set when ClassSpecificStats is on AND the card has an owning class.
+        // Otherwise all characters — the compendium never falls back to RunCharacter.
+        if (SlayTheStatsConfig.ClassSpecificStats && cardOwnerCharacter != null)
         {
-            filter.Character = runCharacter;
-        }
-        else if (!string.IsNullOrEmpty(SlayTheStatsConfig.FilterCharacters))
-        {
-            filter.Characters = new HashSet<string>(
-                SlayTheStatsConfig.FilterCharacters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            filter.Character = cardOwnerCharacter;
         }
 
-        // OnlyHighestWonAscension overrides the ascension range with a single exact value.
+        var effectiveChar = GetEffectiveCharacter(filter);
+        if (SlayTheStatsConfig.OnlyHighestWonAscension)
+        {
+            var highest = StatsAggregator.GetHighestWonAscension(MainFile.Db, effectiveChar);
+            if (highest != null)
+            {
+                filter.AscensionMin = highest;
+                filter.AscensionMax = highest;
+            }
+        }
+
+        return filter;
+    }
+
+    /// <summary>
+    /// Builds a minimal AggregationFilter for in-run tooltips (rewards, shop, relic bar).
+    /// Only applies the current run's character and the OnlyHighestWonAscension setting.
+    /// Ignores all compendium pane filter settings.
+    /// </summary>
+    internal static AggregationFilter BuildInRunFilter(string? runCharacter)
+    {
+        var filter = new AggregationFilter
+        {
+            GameMode = "standard",
+            Character = runCharacter,
+        };
+
         if (SlayTheStatsConfig.OnlyHighestWonAscension)
         {
             var highest = StatsAggregator.GetHighestWonAscension(MainFile.Db, runCharacter);
@@ -298,6 +347,37 @@ public static class CardHoverShowPatch
         return ch != null ? FormatCharacterName(ch) : "All chars";
     }
 
+    /// <summary>
+    /// Builds a comma-separated filter context string for the footer.
+    /// e.g. "A4-6, Defect, v0.100.0-v0.100.6, profile2"
+    /// </summary>
+    internal static string BuildFilterContext(string characterLabel, int? ascMin, int? ascMax)
+    {
+        var parts = new List<string>();
+
+        var asc = FormatAscensionPrefix(ascMin, ascMax).TrimEnd();
+        if (asc.Length > 0) parts.Add(asc);
+
+        if (characterLabel != "All chars") parts.Add(characterLabel);
+
+        if (!string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) || !string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax))
+        {
+            var vMin = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMin) ? "" : SlayTheStatsConfig.VersionMin;
+            var vMax = string.IsNullOrEmpty(SlayTheStatsConfig.VersionMax) ? "" : SlayTheStatsConfig.VersionMax;
+            if (vMin.Length > 0 && vMax.Length > 0)
+                parts.Add(vMin == vMax ? vMin : $"{vMin}-{vMax}");
+            else if (vMin.Length > 0)
+                parts.Add($"{vMin}+");
+            else
+                parts.Add($"≤{vMax}");
+        }
+
+        if (!string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile))
+            parts.Add(SlayTheStatsConfig.FilterProfile);
+
+        return parts.Count > 0 ? string.Join(", ", parts) : "";
+    }
+
     internal static string FormatAscensionPrefix(int? ascMin, int? ascMax)
     {
         if (ascMin == null && ascMax == null) return "";
@@ -371,10 +451,13 @@ public static class CardHoverShowPatch
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
 
-        var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
+        var filterCtx = BuildFilterContext(characterLabel, ascensionMin, ascensionMax);
         var prBaseStr = $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = $"{Math.Round(characterWR):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Pick%: {prBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
+        sb.Append($"\n\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Pick% {prBaseStr}, Win% {wrStr}");
+        if (filterCtx.Length > 0)
+            sb.Append($"\n{filterCtx}");
+        sb.Append("[/color][/font_size][/font]");
 
         return sb.ToString();
     }
@@ -428,10 +511,13 @@ public static class CardHoverShowPatch
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
         sb.Append($"All {cTotPicks}  {cTotBuys}  {cTotWr}");
 
-        var ascPrefix    = FormatAscensionPrefix(ascensionMin, ascensionMax);
+        var filterCtx    = BuildFilterContext(characterLabel, ascensionMin, ascensionMax);
         var wrStr        = $"{Math.Round(characterWR):F0}%";
         var buysBaseStr  = $"{Math.Round(shopBuyRateBaseline):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel} Buys: {buysBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
+        sb.Append($"\n\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
+        if (filterCtx.Length > 0)
+            sb.Append($"\n{filterCtx}");
+        sb.Append("[/color][/font_size][/font]");
 
         return sb.ToString();
     }
@@ -558,33 +644,36 @@ public static class InspectCardDisplayPatch
             var upgradeLevel = AccessTools.Property(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
                             ?? AccessTools.Field(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
                             ?? 0;
-            var lookupId = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel);
+            // Inspect screen is always compendium context.
+            var groupUpgrades  = SlayTheStatsConfig.GroupCardUpgrades;
+            var lookupId       = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel, groupUpgrades);
 
-            var filter         = CardHoverShowPatch.BuildFilter(CardHoverShowPatch.RunCharacter);
-            var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
-            var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
+            var cardOwner      = CardHoverShowPatch.GetOwningCharacter(model as CardModel);
+            var inspFilter     = CardHoverShowPatch.BuildCompendiumFilter(CardHoverShowPatch.RunCharacter, cardOwner);
+            var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(inspFilter);
+            var characterLabel = CardHoverShowPatch.GetCharacterLabel(inspFilter);
 
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
+                statsText = CardHoverShowPatch.NoDataText(effectiveChar, inspFilter.AscensionMin, inspFilter.AscensionMax);
             }
             else
             {
                 var showBuysLayout      = CardHoverShowPatch.IsColorlessCard(model as CardModel);
-                var contextMap          = CardHoverShowPatch.GetContextMap(lookupId);
-                var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
+                var contextMap          = CardHoverShowPatch.GetContextMap(lookupId, groupUpgrades);
+                var actStats            = StatsAggregator.AggregateByAct(contextMap, inspFilter);
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline);
+                    ? CardHoverShowPatch.NoDataText(effectiveChar, inspFilter.AscensionMin, inspFilter.AscensionMax)
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline);
             }
 
             TooltipHelper.TrySceneTheftOnce();
             TooltipHelper.InspectActive = true;
-            TooltipHelper.ShowPanel(statsText);
+            TooltipHelper.ShowPanel(statsText, card as Control);
         }
         catch (Exception e)
         {
@@ -653,9 +742,11 @@ public static class MerchantCardCreateHoverTipPatch
             var upgradeLevel = AccessTools.Property(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
                             ?? AccessTools.Field(model.GetType(), "CurrentUpgradeLevel")?.GetValue(model) as int?
                             ?? 0;
-            var lookupId = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel);
+            // Shop is always in-run context — use saved defaults for group upgrades.
+            var groupUpgrades  = SlayTheStatsConfig.DefaultGroupCardUpgrades;
+            var lookupId       = CardHoverShowPatch.FindCardLookupId(rawId, upgradeLevel, groupUpgrades);
 
-            var filter         = CardHoverShowPatch.BuildFilter(CardHoverShowPatch.RunCharacter);
+            var filter         = CardHoverShowPatch.BuildInRunFilter(CardHoverShowPatch.RunCharacter);
             var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
             var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
 
@@ -667,7 +758,7 @@ public static class MerchantCardCreateHoverTipPatch
             else
             {
                 // In the shop, always use the Runs/Buys layout regardless of card class
-                var contextMap          = CardHoverShowPatch.GetContextMap(lookupId);
+                var contextMap          = CardHoverShowPatch.GetContextMap(lookupId, groupUpgrades);
                 var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);

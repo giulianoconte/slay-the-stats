@@ -39,7 +39,7 @@ internal static class RelicHoverHelper
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
         MainFile.Logger.Info($"[SlayTheStats] RelicHover.Show: type={holder.GetType().Name} activeHolder={((object?)_activeHolder == null ? "null" : _activeHolder.GetType().Name)} hasActiveHover={TooltipHelper.HasActiveHover}");
-        ShowCore(holder, GetRelicId(holder));
+        ShowCore(holder, GetRelicId(holder), isCompendium: false);
         ShouldPushCardContainer = _activeHolder == holder;
         HideIfNotActive(holder);
     }
@@ -48,14 +48,14 @@ internal static class RelicHoverHelper
     {
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
-        ShowCore(holder, GetRelicIdFromMerchant(holder));
+        ShowCore(holder, GetRelicIdFromMerchant(holder), isCompendium: false);
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
     }
 
     internal static void ShowCollection(object holder)
     {
-        ShowCore(holder, GetRelicIdFromCollection(holder));
+        ShowCore(holder, GetRelicIdFromCollection(holder), isCompendium: true);
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
     }
@@ -63,13 +63,12 @@ internal static class RelicHoverHelper
     /// <summary>
     /// Shows stats for a relic option on an ancient event choice screen (NEventOptionButton).
     /// Only fires when the option carries a relic (Option.Relic != null).
-    /// Only fires when the option carries a relic (Option.Relic != null).
     /// </summary>
     internal static void ShowAncientOption(object holder)
     {
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
-        ShowCore(holder, GetRelicIdFromEventOption(holder));
+        ShowCore(holder, GetRelicIdFromEventOption(holder), isCompendium: false);
         ShouldPushCardContainer = false;
         HideIfNotActive(holder);
     }
@@ -87,7 +86,7 @@ internal static class RelicHoverHelper
         }
     }
 
-    private static void ShowCore(object holder, string? rawId)
+    private static void ShowCore(object holder, string? rawId, bool isCompendium)
     {
         try
         {
@@ -101,7 +100,9 @@ internal static class RelicHoverHelper
                          : MainFile.Db.Relics.ContainsKey(rawId)             ? rawId
                          : null;
 
-            var filter         = CardHoverShowPatch.BuildFilter(CardHoverShowPatch.RunCharacter);
+            var filter         = isCompendium
+                ? CardHoverShowPatch.BuildCompendiumFilter(CardHoverShowPatch.RunCharacter)
+                : CardHoverShowPatch.BuildInRunFilter(CardHoverShowPatch.RunCharacter);
             var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
             var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
 
@@ -249,10 +250,13 @@ internal static class RelicHoverHelper
         var cTotBuys   = CardHoverShowPatch.FormatBuysCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline);
         sb.Append($"All {cTotRuns}  {cTotBuys}  {cTotWr}");
 
-        var ascPrefix   = CardHoverShowPatch.FormatAscensionPrefix(ascensionMin, ascensionMax);
+        var filterCtx   = CardHoverShowPatch.BuildFilterContext(characterLabel, ascensionMin, ascensionMax);
         var wrStr       = $"{Math.Round(wrBaseline):F0}%";
         var buysBaseStr = $"{Math.Round(shopBuyRateBaseline):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{characterLabel}  Buys: {buysBaseStr}  Win%: {wrStr}[/color][/font_size][/font]");
+        sb.Append($"\n\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
+        if (filterCtx.Length > 0)
+            sb.Append($"\n{filterCtx}");
+        sb.Append("[/color][/font_size][/font]");
 
         return sb.ToString();
     }
