@@ -342,7 +342,9 @@ public class EncounterCategoryTests
     [InlineData("ENCOUNTER.KNIGHTS_ELITE", "elite")]
     [InlineData("ENCOUNTER.LAGAVULIN_MATRIARCH_BOSS", "boss")]
     [InlineData("ENCOUNTER.MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER", "event")]
-    [InlineData("ENCOUNTER.OVERGROWTH_CRAWLERS", "unknown")]
+    // OVERGROWTH_CRAWLERS lacks a recognised suffix in the run files; reclassified as
+    // "normal" via EncounterCategory.CategoryOverrides (game data inconsistency).
+    [InlineData("ENCOUNTER.OVERGROWTH_CRAWLERS", "normal")]
     public void DeriveCategory(string modelId, string expected)
     {
         Assert.Equal(expected, EncounterCategory.Derive(modelId));
