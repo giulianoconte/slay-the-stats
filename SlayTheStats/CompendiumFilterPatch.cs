@@ -397,6 +397,9 @@ public static partial class CompendiumFilterPatch
         _activeSortButtons.RemoveAll(b => !GodotObject.IsInstanceValid(b));
         _activeSortButtons.Add(button);
 
+        if (pane is FilterPanelContainer fpc)
+            fpc.AssociatedButton = button;
+
         ((NClickableControl)button).Released += (_) =>
         {
             if (GodotObject.IsInstanceValid(pane))
@@ -531,6 +534,9 @@ public static partial class CompendiumFilterPatch
     /// <summary>Wires a plain Godot Button to toggle a filter pane (fallback / relic collection).</summary>
     private static void WireButtonToPane(Button button, PanelContainer pane)
     {
+        if (pane is FilterPanelContainer fpc)
+            fpc.AssociatedButton = button;
+
         button.Pressed += () =>
         {
             if (GodotObject.IsInstanceValid(pane))
@@ -670,12 +676,6 @@ public static partial class CompendiumFilterPatch
     }
 
     /// <summary>
-    /// PanelContainer subclass that auto-closes when the user clicks outside its
-    /// rect. Uses _UnhandledInput so clicks on cards/relics still go to the game's
-    /// own handlers (which already trigger HideAllPanes via the inspect/hover
-    /// patches); only clicks that would otherwise hit empty space close the pane.
-    /// </summary>
-    /// <summary>
     /// Stepper control with the same look as a small spin box but extended with
     /// "Lowest" / "Highest" sentinels at the edges of the 0–10 range. Stepping
     /// down from 0 selects "Lowest" (= -∞, int.MinValue) and stepping up from
@@ -790,23 +790,6 @@ public static partial class CompendiumFilterPatch
             hover.BorderColor = new Color(0.6f, 0.5f, 0.3f, 0.6f);
             btn.AddThemeStyleboxOverride("hover", hover);
             return btn;
-        }
-    }
-
-    private partial class FilterPanelContainer : PanelContainer
-    {
-        public override void _UnhandledInput(InputEvent ev)
-        {
-            if (!Visible) return;
-            if (ev is InputEventMouseButton mb && mb.Pressed)
-            {
-                var rect = GetGlobalRect();
-                if (!rect.HasPoint(mb.Position))
-                {
-                    Visible = false;
-                    GetViewport().SetInputAsHandled();
-                }
-            }
         }
     }
 
@@ -1050,11 +1033,29 @@ public static partial class CompendiumFilterPatch
             highlightGroupUpgrades = () =>
             {
                 if (!GodotObject.IsInstanceValid(clonedTickbox)) return;
-                var label = clonedTickbox.FindChild("Label", true, false);
-                if (label is Control labelControl)
-                    labelControl.AddThemeColorOverride(
-                        "font_color",
-                        SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Cream);
+                // NLibraryStatTickbox stores its label at the direct child path
+                // "Label" — match how the game's own _Ready looks it up. Falls
+                // back to a recursive search if the layout differs unexpectedly.
+                var label = (clonedTickbox.GetNodeOrNull<Control>("Label")
+                            ?? clonedTickbox.FindChild("Label", true, false)) as Control;
+                if (label == null)
+                {
+                    if (SlayTheStatsConfig.DebugMode)
+                        MainFile.Logger.Warn("[SlayTheStats] highlightGroupUpgrades: tickbox Label not found");
+                    return;
+                }
+
+                bool nonDefault = SlayTheStatsConfig.IsNonDefault("GroupUpgrades");
+                var color = nonDefault ? ActiveFilterColor : Colors.White;
+
+                // Set font_color via theme override only. Don't also set Modulate
+                // to the same color — Modulate multiplies into the rendered color,
+                // so white * white * (font green) = pure green; but green * white *
+                // (font green) = green² which is much darker than the green used
+                // in the other filter rows. Force Modulate back to white in case
+                // an earlier render-pass had set it.
+                label.AddThemeColorOverride("font_color", color);
+                label.Modulate = Colors.White;
             };
         }
         else
@@ -1071,7 +1072,7 @@ public static partial class CompendiumFilterPatch
             highlightGroupUpgrades = () =>
                 fallback.AddThemeColorOverride(
                     "font_color",
-                    SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Cream);
+                    SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Colors.White);
         }
         vbox.AddChild(groupUpgradesControl);
         // Initial highlight — deferred so the cloned tickbox's _Ready has run
