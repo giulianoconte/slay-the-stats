@@ -164,11 +164,18 @@ public static partial class CompendiumFilterPatch
 
     private static void InjectRelicCollectionButton(NRelicCollection collection)
     {
+        // Warm BOTH the sort-button and tickbox template caches BEFORE building
+        // the pane — otherwise BuildFilterPane sees a cold _tickboxTemplate and
+        // falls back to the unstyled CheckBox even though we'd populate the
+        // template moments later. ResolveSortButtonTemplate's strategy 2
+        // (WarmTemplatesFromColdCardLibrary) populates both caches in one
+        // Create() pass, so this single call warms everything we need.
+        var template = ResolveSortButtonTemplate(collection);
+
         var pane = BuildFilterPane();
         collection.AddChild(pane);
         RegisterPane(pane);
 
-        var template = ResolveSortButtonTemplate(collection);
         if (template != null)
         {
             CreateAndAttachStyledRelicButton(collection, pane, template);
@@ -295,9 +302,9 @@ public static partial class CompendiumFilterPatch
     ///      instantiated this session), call NCardLibrary.Create() to
     ///      force-instantiate a temporary, cold NCardLibrary scene. The
     ///      temporary is never added to the live tree, so its _Ready never
-    ///      fires (and our Harmony postfix doesn't double-inject). We Duplicate
-    ///      the CardTypeSorter out of it to get a parentless template node,
-    ///      then QueueFree the temporary.
+    ///      fires (and our Harmony postfix doesn't double-inject). We extract
+    ///      both the sort-button and tickbox templates in a single Create()
+    ///      pass and cache them, then QueueFree the temporary.
     ///
     ///   3. Return null on total failure — caller falls back to the unstyled
     ///      Button.
@@ -324,8 +331,9 @@ public static partial class CompendiumFilterPatch
                 }
             }
 
-            // Strategy 2: force-instantiate NCardLibrary off-tree.
-            return ExtractTemplateFromColdCardLibrary();
+            // Strategy 2: warm both templates from a cold NCardLibrary instance.
+            WarmTemplatesFromColdCardLibrary();
+            return _sortButtonTemplate;
         }
         catch (Exception e)
         {
@@ -335,45 +343,67 @@ public static partial class CompendiumFilterPatch
     }
 
     /// <summary>
-    /// Calls NCardLibrary.Create() to get a fresh, cold NCardLibrary scene
-    /// instance (never added to the live tree, so _Ready never fires on it),
-    /// finds the CardTypeSorter inside it, Duplicates the sort button to
-    /// produce a parentless template, then QueueFrees the temporary instance.
-    /// The duplicate is independent of the original instance — Godot's
-    /// Duplicate creates a deep copy of the node graph (Resources are shared
-    /// by reference, but that's fine for a clone-template).
+    /// Calls NCardLibrary.Create() once to get a fresh, cold NCardLibrary scene
+    /// instance (never added to the live tree, so _Ready never fires on it and
+    /// our Harmony postfix on NCardLibrary._Ready stays silent). Extracts both
+    /// templates we need from it in a single pass and caches them as parentless
+    /// duplicates, then QueueFrees the temporary instance. Idempotent — early-
+    /// returns if both caches are already warm. The duplicates are independent
+    /// of the source instance (Godot's Duplicate creates a deep copy of the
+    /// node graph; Resources are shared by reference but that's fine for a
+    /// clone-template).
     /// </summary>
-    private static NCardViewSortButton? ExtractTemplateFromColdCardLibrary()
+    private static void WarmTemplatesFromColdCardLibrary()
     {
+        bool needSortButton = _sortButtonTemplate == null || !GodotObject.IsInstanceValid(_sortButtonTemplate);
+        bool needTickbox    = _tickboxTemplate    == null || !GodotObject.IsInstanceValid(_tickboxTemplate);
+        if (!needSortButton && !needTickbox) return;
+
         NCardLibrary? temp = null;
         try
         {
             temp = NCardLibrary.Create();
             if (temp == null)
             {
-                MainFile.Logger.Warn("[SlayTheStats] ExtractTemplateFromColdCardLibrary: NCardLibrary.Create() returned null");
-                return null;
+                MainFile.Logger.Warn("[SlayTheStats] WarmTemplatesFromColdCardLibrary: NCardLibrary.Create() returned null");
+                return;
             }
 
-            var sortButton = temp.FindChild("CardTypeSorter", true, false) as NCardViewSortButton;
-            if (sortButton == null)
+            if (needSortButton)
             {
-                MainFile.Logger.Warn("[SlayTheStats] ExtractTemplateFromColdCardLibrary: CardTypeSorter not found in cold NCardLibrary instance");
-                return null;
+                if (temp.FindChild("CardTypeSorter", true, false) is NCardViewSortButton sortButton)
+                {
+                    _sortButtonTemplate = (NCardViewSortButton)sortButton.Duplicate(
+                        (int)(Node.DuplicateFlags.Groups
+                            | Node.DuplicateFlags.Scripts
+                            | Node.DuplicateFlags.UseInstantiation));
+                    MainFile.Logger.Info("[SlayTheStats] WarmTemplatesFromColdCardLibrary: extracted sort-button template");
+                }
+                else
+                {
+                    MainFile.Logger.Warn("[SlayTheStats] WarmTemplatesFromColdCardLibrary: CardTypeSorter not found in cold instance");
+                }
             }
 
-            var duplicate = (NCardViewSortButton)sortButton.Duplicate(
-                (int)(Node.DuplicateFlags.Groups
-                    | Node.DuplicateFlags.Scripts
-                    | Node.DuplicateFlags.UseInstantiation));
-
-            MainFile.Logger.Info("[SlayTheStats] ExtractTemplateFromColdCardLibrary: extracted template from cold NCardLibrary");
-            return duplicate;
+            if (needTickbox)
+            {
+                if (temp.FindChild("MultiplayerCards", true, false) is NLibraryStatTickbox tickbox)
+                {
+                    _tickboxTemplate = (NLibraryStatTickbox)tickbox.Duplicate(
+                        (int)(Node.DuplicateFlags.Groups
+                            | Node.DuplicateFlags.Scripts
+                            | Node.DuplicateFlags.UseInstantiation));
+                    MainFile.Logger.Info("[SlayTheStats] WarmTemplatesFromColdCardLibrary: extracted tickbox template");
+                }
+                else
+                {
+                    MainFile.Logger.Warn("[SlayTheStats] WarmTemplatesFromColdCardLibrary: MultiplayerCards not found in cold instance");
+                }
+            }
         }
         catch (Exception e)
         {
-            MainFile.Logger.Warn($"[SlayTheStats] ExtractTemplateFromColdCardLibrary failed: {e.Message}");
-            return null;
+            MainFile.Logger.Warn($"[SlayTheStats] WarmTemplatesFromColdCardLibrary failed: {e.Message}");
         }
         finally
         {

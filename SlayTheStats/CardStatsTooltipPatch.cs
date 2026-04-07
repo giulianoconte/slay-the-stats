@@ -222,11 +222,12 @@ public static class CardHoverShowPatch
 
     internal static AggregationFilter BuildCompendiumFilter(string? runCharacter, string? cardOwnerCharacter = null)
     {
+        var (ascMin, ascMax) = ResolveAscensionBounds(SlayTheStatsConfig.AscensionMin, SlayTheStatsConfig.AscensionMax);
         var filter = new AggregationFilter
         {
             GameMode = "standard",
-            AscensionMin = SlayTheStatsConfig.AscensionMin == SlayTheStatsConfig.AscensionLowest  ? null : (int?)SlayTheStatsConfig.AscensionMin,
-            AscensionMax = SlayTheStatsConfig.AscensionMax == SlayTheStatsConfig.AscensionHighest ? null : (int?)SlayTheStatsConfig.AscensionMax,
+            AscensionMin = ascMin,
+            AscensionMax = ascMax,
             VersionMin = IsVersionLowerBound(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
             VersionMax = IsVersionUpperBound(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
@@ -269,12 +270,13 @@ public static class CardHoverShowPatch
     internal static AggregationFilter BuildInRunFilter(string? runCharacter)
     {
         // In-run tooltips always use the user's saved defaults, not the live pane values.
+        var (ascMin, ascMax) = ResolveAscensionBounds(SlayTheStatsConfig.DefaultAscensionMin, SlayTheStatsConfig.DefaultAscensionMax);
         var filter = new AggregationFilter
         {
             GameMode = "standard",
             Character = runCharacter,
-            AscensionMin = SlayTheStatsConfig.DefaultAscensionMin == SlayTheStatsConfig.AscensionLowest  ? null : (int?)SlayTheStatsConfig.DefaultAscensionMin,
-            AscensionMax = SlayTheStatsConfig.DefaultAscensionMax == SlayTheStatsConfig.AscensionHighest ? null : (int?)SlayTheStatsConfig.DefaultAscensionMax,
+            AscensionMin = ascMin,
+            AscensionMax = ascMax,
             VersionMin = IsVersionLowerBound(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
             VersionMax = IsVersionUpperBound(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultFilterProfile) ? null : SlayTheStatsConfig.DefaultFilterProfile,
@@ -432,6 +434,60 @@ public static class CardHoverShowPatch
             parts.Add(filter.Profile);
 
         return parts.Count > 0 ? string.Join(", ", parts) : "";
+    }
+
+    /// <summary>
+    /// Converts raw cfg ascension bounds (which use AscensionLowest = int.MinValue
+    /// and AscensionHighest = int.MaxValue as sentinels for "lowest in data" /
+    /// "highest in data") into the typed nullable bounds the AggregationFilter
+    /// expects. Handles all sentinel combinations:
+    ///
+    ///   (Lowest,  Highest) → (null, null)        — full range, no constraint
+    ///   (Lowest,  N)       → (null, N)           — bounded above only
+    ///   (M,       Highest) → (M, null)           — bounded below only
+    ///   (M,       N)       → (M, N)              — explicit range
+    ///   (Lowest,  Lowest)  → (dataMin, dataMin)  — single concrete: lowest in data
+    ///   (Highest, Highest) → (dataMax, dataMax)  — single concrete: highest in data
+    ///   (Highest, N)       → (null, N)           — defensive: invalid combo treated as "no lower bound"
+    ///   (M,       Lowest)  → (M, null)           — defensive: invalid combo treated as "no upper bound"
+    ///
+    /// The (Lowest, Lowest) and (Highest, Highest) resolutions are critical for
+    /// two reasons: (a) leaving the raw int.MinValue/int.MaxValue in the filter
+    /// breaks the data filter (every ascension is &gt; int.MinValue, so all
+    /// records get rejected), and (b) the footer formatter would otherwise
+    /// print the literal sentinel as "A-2147483648" or "A2147483647".
+    /// </summary>
+    internal static (int? min, int? max) ResolveAscensionBounds(int rawMin, int rawMax)
+    {
+        bool minIsLowest  = rawMin == SlayTheStatsConfig.AscensionLowest;
+        bool minIsHighest = rawMin == SlayTheStatsConfig.AscensionHighest;
+        bool maxIsLowest  = rawMax == SlayTheStatsConfig.AscensionLowest;
+        bool maxIsHighest = rawMax == SlayTheStatsConfig.AscensionHighest;
+
+        // (Lowest, Lowest) → resolve to "the lowest ascension actually in your data"
+        if (minIsLowest && maxIsLowest)
+        {
+            var data = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+            int dataMin = data.Count > 0 ? data[0] : 0;
+            return (dataMin, dataMin);
+        }
+
+        // (Highest, Highest) → resolve to "the highest ascension actually in your data"
+        if (minIsHighest && maxIsHighest)
+        {
+            var data = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+            int dataMax = data.Count > 0 ? data[^1] : 10;
+            return (dataMax, dataMax);
+        }
+
+        // Mixed sentinels and explicit values: convert each side independently.
+        // Defensive: "min set to Highest" or "max set to Lowest" are nonsense
+        // combos that the cross-clamp logic in the filter pane should prevent,
+        // but if anything sneaks them through (corrupt cfg, etc.), treat them
+        // as "no constraint on that side" rather than producing an empty range.
+        int? min = (minIsLowest || minIsHighest) ? null : (int?)rawMin;
+        int? max = (maxIsLowest || maxIsHighest) ? null : (int?)rawMax;
+        return (min, max);
     }
 
     /// <summary>
