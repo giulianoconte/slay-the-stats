@@ -110,3 +110,13 @@ TROUBLESHOOTING
 Check the Godot log for [SlayTheStats] entries (close the game first):
 - Windows: %APPDATA%\Godot\app_userdata\Slay the Spire 2\logs\godot.log
 - Linux: ~/.local/share/godot/app_userdata/Slay the Spire 2/logs/godot.log
+
+------------------------------------------------------------------------
+COMING SOON
+------------------------------------------------------------------------
+
+A custom bestiary:
+
+- Per-encounter stats: average damage taken, turns per fight, deaths, potions used, etc.
+- A new compendium "Bestiary" page with detailed encounter stats. 
+- In-combat enemy tooltips: hover a monster during combat to see your stats against that encounter.
