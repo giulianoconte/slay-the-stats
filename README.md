@@ -33,6 +33,21 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 2. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.1 or later) into your mods folder if you haven't already
 3. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll`, `SlayTheStats.json`, `SlayTheStats.pck`, and a `fonts/` subfolder
 
+### Uninstalling
+
+To fully remove the mod (or wipe its state for a clean reinstall), delete these things:
+
+1. The `SlayTheStats/` folder inside your STS2 `mods/` directory
+2. `SlayTheStats.cfg` in the `mod_configs/` folder next to your STS2 save data — stores mod settings and filter defaults
+3. `slay-the-stats.json` in your STS2 save data folder — stores the parsed run stats database
+4. *(only if you have the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) mod installed)* `SlayTheStats.json` in the `ModConfig/` folder next to `mod_configs/` — ModConfig keeps its own parallel copy of the same settings, so leaving it behind would resurrect old values on the next launch
+
+Paths for items 2–4:
+- **Windows:** `%APPDATA%\Slay the Spire 2\`  (contains `mod_configs\SlayTheStats.cfg`, `slay-the-stats.json`, and `ModConfig\SlayTheStats.json`)
+- **Linux:** `~/.local/share/Slay the Spire 2/`  (contains `mod_configs/SlayTheStats.cfg`, `slay-the-stats.json`, and `ModConfig/SlayTheStats.json`)
+
+If you only want to reset stats but keep your settings, delete just `slay-the-stats.json` — it will be rebuilt from your run history on next launch.
+
 ### Understanding the Stats
 
 **Pick%** is sourced only from fight reward screens — the 3-card choice after defeating an enemy. Shop purchases, event cards, ancient (Neow) rewards, and other acquisition sources are not counted. Some relics modify reward screens (e.g. adding an extra card or replacing choices); those modified screens are also excluded since the pool is no longer a standard 3-card offer.

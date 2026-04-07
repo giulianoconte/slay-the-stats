@@ -23,6 +23,11 @@ internal static class ModConfigBridge
     private static Type? _entryType;
     private static Type? _configTypeEnum;
 
+    // Reflection handles for the one-way sync from our static fields → ModConfig-STS2's
+    // internal value store + live-binding refresh. See SyncFromConfig().
+    private static FieldInfo? _managerValuesField;        // ModConfigManager._values (Dict<string, Dict<string, object>>)
+    private static MethodInfo? _injectorNotifyMethod;     // SettingsTabInjector.NotifyValueChanged(modId, key, value)
+
     internal static bool IsAvailable => _available;
 
     // Call from Initialize(). ModConfig may load after us (alphabetical), so defer one frame.
@@ -52,6 +57,11 @@ internal static class ModConfigBridge
             _entryType      = allTypes.FirstOrDefault(t => t.FullName == "ModConfig.ConfigEntry");
             _configTypeEnum = allTypes.FirstOrDefault(t => t.FullName == "ModConfig.ConfigType");
             _available      = _apiType != null && _entryType != null && _configTypeEnum != null;
+
+            var managerType  = allTypes.FirstOrDefault(t => t.FullName == "ModConfig.ModConfigManager");
+            var injectorType = allTypes.FirstOrDefault(t => t.FullName == "ModConfig.SettingsTabInjector");
+            _managerValuesField    = managerType?.GetField("_values", BindingFlags.NonPublic | BindingFlags.Static);
+            _injectorNotifyMethod  = injectorType?.GetMethod("NotifyValueChanged", BindingFlags.NonPublic | BindingFlags.Static);
         }
         catch { _available = false; }
     }
@@ -60,6 +70,25 @@ internal static class ModConfigBridge
     {
         if (_registered) return;
         _registered = true;
+
+        // One-way sync: BaseLib's auto-generated settings page mutates our static
+        // fields directly, but ModConfig-STS2 keeps its own internal value cache
+        // that only updates from its own UI. Without this poll, toggling something
+        // in BaseLib's page leaves the ModConfig page showing stale values until
+        // the user clicks the row twice (once to "catch up", once to actually
+        // change). Cheap: 6 dict reads + Equals checks per frame.
+        if (_managerValuesField != null)
+        {
+            try
+            {
+                var tree = (SceneTree)Engine.GetMainLoop();
+                tree.ProcessFrame += SyncFromConfig;
+            }
+            catch (Exception e)
+            {
+                MainFile.Logger.Warn($"SlayTheStats: ModConfig sync hookup failed — {e.Message}");
+            }
+        }
 
         try
         {
@@ -185,6 +214,47 @@ internal static class ModConfigBridge
         for (int i = 0; i < list.Count; i++)
             result.SetValue(list[i], i);
         return result;
+    }
+
+    // ── One-way sync: SlayTheStatsConfig static fields → ModConfig-STS2 _values ──
+    //
+    // Pushes the live static-field values into ModConfig-STS2's internal value
+    // dictionary on every frame so its settings page never shows stale values
+    // when the user changes a setting via BaseLib's settings page (or via the
+    // filter pane, in the case of GroupCardUpgrades). Reflection-bypasses
+    // OnChanged so we don't loop back into our own callback or schedule
+    // redundant BaseLib saves; calls SettingsTabInjector.NotifyValueChanged
+    // directly so any open ModConfig settings UI live-binding refreshes too.
+    private static void SyncFromConfig()
+    {
+        try
+        {
+            var allValues = _managerValuesField?.GetValue(null) as System.Collections.IDictionary;
+            if (allValues == null || !allValues.Contains(MainFile.ModId)) return;
+            var modValues = allValues[MainFile.ModId] as Dictionary<string, object>;
+            if (modValues == null) return;
+
+            SyncOne(modValues, "color_blind_mode",          SlayTheStatsConfig.ColorBlindMode);
+            SyncOne(modValues, "show_in_run_stats",         SlayTheStatsConfig.ShowInRunStats);
+            SyncOne(modValues, "disable_tooltips_entirely", SlayTheStatsConfig.DisableTooltipsEntirely);
+            SyncOne(modValues, "tutorial_seen",             SlayTheStatsConfig.TutorialSeen);
+            SyncOne(modValues, "data_directory",            SlayTheStatsConfig.DataDirectory);
+            SyncOne(modValues, "debug_mode",                SlayTheStatsConfig.DebugMode);
+        }
+        catch (Exception e)
+        {
+            // Don't spam — log once and unsubscribe to avoid hammering the log on every frame.
+            MainFile.Logger.Warn($"SlayTheStats: ModConfig sync error, disabling — {e.Message}");
+            try { ((SceneTree)Engine.GetMainLoop()).ProcessFrame -= SyncFromConfig; } catch { }
+        }
+    }
+
+    private static void SyncOne(Dictionary<string, object> modValues, string key, object current)
+    {
+        if (modValues.TryGetValue(key, out var stored) && Equals(stored, current)) return;
+        modValues[key] = current;
+        try { _injectorNotifyMethod?.Invoke(null, new object[] { MainFile.ModId, key, current }); }
+        catch { /* live-binding refresh is best-effort; underlying _values is the source of truth */ }
     }
 
     // ── Reflection helpers ────────────────────────────────────────────────────

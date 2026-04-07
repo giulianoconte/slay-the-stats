@@ -143,6 +143,14 @@ public static partial class CompendiumFilterPatch
         static void Postfix(NRelicCollection __instance)
         {
             HideAllPanes();
+            // If the relic page was opened first (before the card library) at
+            // session start, the button got injected as the unstyled fallback
+            // because no NCardViewSortButton template was reachable yet. Now
+            // that the user is interacting with the compendium, the card
+            // library may have been instantiated — try once more to find a
+            // template and upgrade the fallback to the styled clone.
+            try { TryUpgradeRelicButton(__instance); }
+            catch (Exception e) { MainFile.Logger.Warn($"[SlayTheStats] TryUpgradeRelicButton failed: {e.Message}"); }
             MaybeShowTutorialFor(__instance);
         }
     }
@@ -160,45 +168,232 @@ public static partial class CompendiumFilterPatch
         collection.AddChild(pane);
         RegisterPane(pane);
 
-        // Reuse the cached sort-button template from the card library for
-        // a consistent game-native look.
-        if (_sortButtonTemplate != null && GodotObject.IsInstanceValid(_sortButtonTemplate))
+        var template = ResolveSortButtonTemplate(collection);
+        if (template != null)
         {
-            var button = CloneSortButton(_sortButtonTemplate);
-
-            // Match the card button's size: read it from the cached template,
-            // which has been laid out by the time the relic page opens.
-            var templateSize = _sortButtonTemplate.Size;
-            if (templateSize.X < 10) templateSize.X = _sortButtonTemplate.CustomMinimumSize.X;
-            if (templateSize.Y < 10) templateSize.Y = _sortButtonTemplate.CustomMinimumSize.Y;
-            if (templateSize.X < 10) templateSize.X = 180;
-            if (templateSize.Y < 10) templateSize.Y = 50;
-            button.CustomMinimumSize = templateSize;
-
-            // Anchor to bottom-left, sized to match the card button.
-            const float padX = 20f;
-            const float padY = 20f;
-            button.AnchorLeft = 0f;
-            button.AnchorRight = 0f;
-            button.AnchorTop = 1f;
-            button.AnchorBottom = 1f;
-            button.OffsetLeft = padX;
-            button.OffsetRight = padX + templateSize.X;
-            button.OffsetTop = -templateSize.Y - padY;
-            button.OffsetBottom = -padY;
-
-            collection.AddChild(button);
-            WireSortButtonToPane(button, pane);
+            CreateAndAttachStyledRelicButton(collection, pane, template);
+            // Unconditional (not gated on DebugMode) so we can verify the relic
+            // patch fired even when the user enables debug mode mid-session.
+            MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: styled button injected on _Ready");
         }
         else
         {
             var button = CreateFloatingButton();
             collection.AddChild(button);
             WireButtonToPane(button, pane);
+            MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: fallback button injected on _Ready (no template available yet — will retry on OnSubmenuOpened)");
+        }
+    }
+
+    /// <summary>
+    /// Looks up an NCardViewSortButton template — first via the cached field
+    /// (warmed by the card library injector), then via a scene-tree walk in
+    /// case the card library was instantiated but its _Ready hasn't run yet.
+    /// Returns null when the card library hasn't been instantiated at all
+    /// (typical when the user opens the Relic Collection page first).
+    /// </summary>
+    private static NCardViewSortButton? ResolveSortButtonTemplate(Node fromNode)
+    {
+        if (_sortButtonTemplate != null && GodotObject.IsInstanceValid(_sortButtonTemplate))
+            return _sortButtonTemplate;
+
+        var found = FindSortButtonTemplateInTree(fromNode);
+        if (found != null) _sortButtonTemplate = found;
+        return found;
+    }
+
+    /// <summary>
+    /// Builds a styled NCardViewSortButton clone, parents it to the relic
+    /// collection at the bottom-left position, and wires it to the given pane.
+    /// Caller has already verified <paramref name="template"/> is valid.
+    /// </summary>
+    private static void CreateAndAttachStyledRelicButton(NRelicCollection collection, PanelContainer pane, NCardViewSortButton template)
+    {
+        var button = CloneSortButton(template);
+
+        // Match the card button's size: read from the template, falling
+        // through to defaults if the template's _Ready hasn't fired yet.
+        var templateSize = template.Size;
+        if (templateSize.X < 10) templateSize.X = template.CustomMinimumSize.X;
+        if (templateSize.Y < 10) templateSize.Y = template.CustomMinimumSize.Y;
+        if (templateSize.X < 10) templateSize.X = 180;
+        if (templateSize.Y < 10) templateSize.Y = 50;
+        button.CustomMinimumSize = templateSize;
+
+        // Anchor to bottom-left, sized to match the card button.
+        const float padX = 20f;
+        const float padY = 20f;
+        button.AnchorLeft = 0f;
+        button.AnchorRight = 0f;
+        button.AnchorTop = 1f;
+        button.AnchorBottom = 1f;
+        button.OffsetLeft = padX;
+        button.OffsetRight = padX + templateSize.X;
+        button.OffsetTop = -templateSize.Y - padY;
+        button.OffsetBottom = -padY;
+
+        collection.AddChild(button);
+        WireSortButtonToPane(button, pane);
+    }
+
+    /// <summary>
+    /// Called from the relic collection's OnSubmenuOpened postfix. If the
+    /// existing filter button is the unstyled fallback (a plain Godot Button
+    /// rather than a NCardViewSortButton clone), and a template is now
+    /// available, free the fallback and replace it with the styled clone
+    /// wired to the same existing pane. No-op when the button is already
+    /// styled or no template can be found.
+    /// </summary>
+    private static void TryUpgradeRelicButton(NRelicCollection collection)
+    {
+        var existing = collection.FindChild("SlayTheStatsFilterButton", false, false);
+        if (existing == null) return;
+        if (existing is NCardViewSortButton) return; // already styled, nothing to do
+
+        var template = ResolveSortButtonTemplate(collection);
+        if (template == null) return; // still no template — leave fallback in place
+
+        // Find the existing filter pane on the same collection so we can
+        // re-bind it to the new button.
+        FilterPanelContainer? pane = null;
+        foreach (var child in collection.GetChildren())
+        {
+            if (child is FilterPanelContainer fpc)
+            {
+                pane = fpc;
+                break;
+            }
+        }
+        if (pane == null)
+        {
+            MainFile.Logger.Warn("[SlayTheStats] TryUpgradeRelicButton: no existing pane found, skipping upgrade");
+            return;
         }
 
-        if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: button injected into relic collection");
+        // Make sure the pane is hidden during the swap so a stale toggle
+        // handler can't briefly show it at the wrong position.
+        pane.Visible = false;
+
+        // Free the fallback button.
+        if (existing is Node existingNode)
+        {
+            existingNode.QueueFree();
+        }
+
+        CreateAndAttachStyledRelicButton(collection, pane, template);
+        MainFile.Logger.Info("[SlayTheStats] TryUpgradeRelicButton: replaced fallback button with styled clone");
+    }
+
+    /// <summary>
+    /// Locates an NCardViewSortButton template via three escalating strategies:
+    ///
+    ///   1. Walk the live scene tree from the SceneTree root for any existing
+    ///      NCardViewSortButton (typically CardTypeSorter inside NCardLibrary).
+    ///      Cheap and works once the user has opened the card library.
+    ///
+    ///   2. If the live tree has none (because NCardLibrary was never
+    ///      instantiated this session), call NCardLibrary.Create() to
+    ///      force-instantiate a temporary, cold NCardLibrary scene. The
+    ///      temporary is never added to the live tree, so its _Ready never
+    ///      fires (and our Harmony postfix doesn't double-inject). We Duplicate
+    ///      the CardTypeSorter out of it to get a parentless template node,
+    ///      then QueueFree the temporary.
+    ///
+    ///   3. Return null on total failure — caller falls back to the unstyled
+    ///      Button.
+    /// </summary>
+    private static NCardViewSortButton? FindSortButtonTemplateInTree(Node from)
+    {
+        try
+        {
+            // Strategy 1: live scene tree walk.
+            var root = from.GetTree()?.Root;
+            if (root != null)
+            {
+                if (root.FindChild("CardTypeSorter", true, false) is NCardViewSortButton named)
+                {
+                    MainFile.Logger.Info("[SlayTheStats] FindSortButtonTemplateInTree: found CardTypeSorter in live tree");
+                    return named;
+                }
+
+                var walked = FindFirstDescendantOfType<NCardViewSortButton>(root);
+                if (walked != null)
+                {
+                    MainFile.Logger.Info("[SlayTheStats] FindSortButtonTemplateInTree: found NCardViewSortButton via type walk");
+                    return walked;
+                }
+            }
+
+            // Strategy 2: force-instantiate NCardLibrary off-tree.
+            return ExtractTemplateFromColdCardLibrary();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] FindSortButtonTemplateInTree failed: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Calls NCardLibrary.Create() to get a fresh, cold NCardLibrary scene
+    /// instance (never added to the live tree, so _Ready never fires on it),
+    /// finds the CardTypeSorter inside it, Duplicates the sort button to
+    /// produce a parentless template, then QueueFrees the temporary instance.
+    /// The duplicate is independent of the original instance — Godot's
+    /// Duplicate creates a deep copy of the node graph (Resources are shared
+    /// by reference, but that's fine for a clone-template).
+    /// </summary>
+    private static NCardViewSortButton? ExtractTemplateFromColdCardLibrary()
+    {
+        NCardLibrary? temp = null;
+        try
+        {
+            temp = NCardLibrary.Create();
+            if (temp == null)
+            {
+                MainFile.Logger.Warn("[SlayTheStats] ExtractTemplateFromColdCardLibrary: NCardLibrary.Create() returned null");
+                return null;
+            }
+
+            var sortButton = temp.FindChild("CardTypeSorter", true, false) as NCardViewSortButton;
+            if (sortButton == null)
+            {
+                MainFile.Logger.Warn("[SlayTheStats] ExtractTemplateFromColdCardLibrary: CardTypeSorter not found in cold NCardLibrary instance");
+                return null;
+            }
+
+            var duplicate = (NCardViewSortButton)sortButton.Duplicate(
+                (int)(Node.DuplicateFlags.Groups
+                    | Node.DuplicateFlags.Scripts
+                    | Node.DuplicateFlags.UseInstantiation));
+
+            MainFile.Logger.Info("[SlayTheStats] ExtractTemplateFromColdCardLibrary: extracted template from cold NCardLibrary");
+            return duplicate;
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] ExtractTemplateFromColdCardLibrary failed: {e.Message}");
+            return null;
+        }
+        finally
+        {
+            if (temp != null && GodotObject.IsInstanceValid(temp))
+                temp.QueueFree();
+        }
+    }
+
+    private static T? FindFirstDescendantOfType<T>(Node node) where T : class
+    {
+        if (node is T match) return match;
+        foreach (var child in node.GetChildren())
+        {
+            if (child is Node childNode)
+            {
+                var found = FindFirstDescendantOfType<T>(childNode);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static void RegisterPane(PanelContainer pane)
@@ -550,7 +745,13 @@ public static partial class CompendiumFilterPatch
             if (GodotObject.IsInstanceValid(pane))
             {
                 pane.Visible = !pane.Visible;
-                if (pane.Visible) SyncAllControls();
+                if (pane.Visible)
+                {
+                    // Same positioning as the styled-clone path so the fallback
+                    // button doesn't leave the pane stranded at top-left.
+                    RepositionPaneNextToButton(button, pane);
+                    SyncAllControls();
+                }
             }
         };
 

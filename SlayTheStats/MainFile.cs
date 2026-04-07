@@ -32,6 +32,16 @@ public partial class MainFile : Node
         ModConfigRegistry.Register(ModId, config);
         ModConfigBridge.DeferredRegister();
 
+        // On every boot, discard any unsaved filter tweaks from the previous session
+        // and snap the live filter values back to the user's saved defaults. Filter
+        // changes only persist across restarts if the user clicked "Save Defaults".
+        SlayTheStatsConfig.RestoreDefaults();
+        Logger.Info($"Boot: reverted live filters to saved defaults " +
+            $"(asc {SlayTheStatsConfig.AscensionMin}..{SlayTheStatsConfig.AscensionMax}, " +
+            $"ver {SlayTheStatsConfig.VersionMin}..{SlayTheStatsConfig.VersionMax}, " +
+            $"class '{SlayTheStatsConfig.ClassFilter}', profile '{SlayTheStatsConfig.FilterProfile}', " +
+            $"groupUpgrades {SlayTheStatsConfig.GroupCardUpgrades})");
+
         TooltipHelper.TryLoadModFonts();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
