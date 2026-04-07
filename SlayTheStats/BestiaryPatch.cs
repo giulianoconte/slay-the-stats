@@ -246,7 +246,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         public required Control Wrapper;
         public required TextureRect Icon;
-        public required Control Highlight;
+        /// <summary>The silhouette glow drawn behind the icon. May be null for handles that
+        /// only want the scale animation without a halo (e.g. boss row icons).</summary>
+        public Control? Highlight;
     }
 
     private const float ContentWidth = 1012f;
@@ -386,8 +388,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         };
 
         // Slimmer than the BaseLib mod-config scroll (48px) — encounter list cells are short
-        // and we want most of the horizontal space for the names + stat column.
-        const float ScrollbarWidth = 18f;
+        // and we want most of the horizontal space for the names + stat column. Track is a
+        // bit wider than before; the grabber Handle inside it is shrunk via Scale to make it
+        // smaller than the track.
+        const float ScrollbarWidth = 26f;
         const float ScrollbarGap   = 4f;
 
         // Instantiate the game's scrollbar scene so we get the same texture/animation chrome
@@ -403,10 +407,32 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         bestiaryScrollbar.OffsetRight  = 0;
         bestiaryScrollbar.OffsetTop    = 0;
         bestiaryScrollbar.OffsetBottom = 0;
-        // Shrink the scrollbar visuals (track + grabber + arrows) to ~70% of native size so the
-        // chrome reads as a thin column rather than the chunky mod-config scrollbar.
-        bestiaryScrollbar.Scale = new Vector2(0.7f, 0.85f);
+        // No outer Scale on the whole scrollbar — that would also shrink the track. Instead
+        // we shrink the %Handle child after the scene's _Ready runs (deferred via callable).
         bestiaryScroll.AddChild(bestiaryScrollbar);
+
+        var capturedScrollbar = bestiaryScrollbar;
+        Callable.From(() =>
+        {
+            if (!GodotObject.IsInstanceValid(capturedScrollbar)) return;
+            var handle = ((Node)capturedScrollbar).GetNodeOrNull<Control>("%Handle");
+            if (handle == null) return;
+
+            // Disable mouse events on the handle itself. The game's native scrollbar wires
+            // a hover animation on the handle that expands it back to full size on hover,
+            // overriding our Scale. Setting MouseFilter.Ignore prevents that animation from
+            // firing; the parent NScrollbar handles drag/click input on its own whole rect
+            // via _GuiInput, so the scrollbar still works without the handle absorbing
+            // events directly. Also recurse into any children (the handle is often a
+            // composite of TextureRect + overlay nodes, each of which may have its own
+            // MouseEntered wiring).
+            DisableMouseRecursive(handle);
+
+            // Shrink the grabber so it sits smaller than the track. Pivot at center so the
+            // shrink happens symmetrically inside the track column.
+            handle.PivotOffset = handle.Size / 2f;
+            handle.Scale = new Vector2(0.55f, 0.85f);
+        }).CallDeferred();
 
         _bestiaryScrollContainer = bestiaryScroll;
 
@@ -594,7 +620,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             catWrap.MouseFilter = MouseFilterEnum.Stop;
 
             var catRow = new HBoxContainer();
-            catRow.CustomMinimumSize = new Vector2(0, RowHeightPx);
+            // Use a compact row height for category headers — the icon wrapper now uses a
+            // fixed CategoryIconRowHeightPx and lets larger icons overflow vertically into
+            // the row margin, so we don't need the row to be as tall as the icon itself.
+            catRow.CustomMinimumSize = new Vector2(0, CategoryRowMinHeightPx);
             catRow.AddThemeConstantOverride("separation", 8);
             catRow.MouseFilter = MouseFilterEnum.Ignore;
             // Vertically center children inside the row.
@@ -696,10 +725,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private const float StatColumnWidthPx = 70f;
     private const float StatColumnRightPadPx = 24f;
-    private const int RowHeightPx = 26;
+    private const int RowHeightPx = 30;
     /// <summary>Boss rows get a bit more vertical room than text rows so the per-boss icon
     /// has breathing space without forcing the text rows to grow with it.</summary>
-    private const int BossRowHeightPx = 34;
+    private const int BossRowHeightPx = 40;
+    /// <summary>Category header rows are kept tight; the icon wrapper handles its own
+    /// vertical extent and overflows into the row margin if needed.</summary>
+    private const int CategoryRowMinHeightPx = 34;
 
     /// <summary>
     /// Applies the same drop shadow used by the in-game stats tooltip text. Centralised here
@@ -826,18 +858,29 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         foreach (var h in allHandles)
         {
-            if (!GodotObject.IsInstanceValid(h.Icon) || !GodotObject.IsInstanceValid(h.Highlight))
-                continue;
+            if (!GodotObject.IsInstanceValid(h.Icon)) continue;
 
             bool shouldBeGrown = newGrown.Contains(h);
             var targetScale = shouldBeGrown ? grownScale : baseScale;
             var targetAlpha = shouldBeGrown ? 1.0f : 0f;
-            var dur         = shouldBeGrown ? 0.05 : 1.00;
+            // Run history feel: snap up on hover, smooth ease back on unhover. The user
+            // asked for the unhover to be a bit quicker than run history's full second.
+            var dur         = shouldBeGrown ? 0.05 : 0.40;
 
-            tween.TweenProperty(h.Icon,      "scale",      targetScale, dur)
+            tween.TweenProperty(h.Icon, "scale", targetScale, dur)
                 .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quart);
-            tween.TweenProperty(h.Highlight, "modulate:a", targetAlpha, dur)
-                .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quart);
+
+            // Handles without a silhouette overlay (e.g. boss row icons) only animate scale.
+            if (h.Highlight != null && GodotObject.IsInstanceValid(h.Highlight))
+            {
+                // Treat the icon + silhouette as one sprite — both scale together so the
+                // halo stays at the same relative offset at any scale; only modulate alpha
+                // animates independently to fade the halo in and out.
+                tween.TweenProperty(h.Highlight, "scale",      targetScale, dur)
+                    .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quart);
+                tween.TweenProperty(h.Highlight, "modulate:a", targetAlpha, dur)
+                    .SetEase(Tween.EaseType.Out).SetTrans(Tween.TransitionType.Quart);
+            }
         }
 
         // _grownTargets is the latest desired-grown set. _animatingHandles is the union of
@@ -973,6 +1016,17 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         btn.Pressed += () => onPressed();
         return btn;
+    }
+
+    /// <summary>
+    /// Walks a node subtree and sets every Control's MouseFilter to Ignore. Used to pin the
+    /// native scrollbar handle visuals so no hover animation can override our Scale.
+    /// </summary>
+    private static void DisableMouseRecursive(Node node)
+    {
+        if (node is Control c) c.MouseFilter = Control.MouseFilterEnum.Ignore;
+        foreach (var child in node.GetChildren())
+            DisableMouseRecursive(child);
     }
 
     private static string FormatCharacterShortName(string charId)
@@ -1159,24 +1213,27 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         int rowHeight = category == "boss" ? BossRowHeightPx : RowHeightPx;
         var row = new HBoxContainer();
         row.CustomMinimumSize = new Vector2(0, rowHeight);
-        row.AddThemeConstantOverride("separation", 6);
+        // Match the category header row's separation so the icon column lines up.
+        row.AddThemeConstantOverride("separation", 8);
         row.MouseFilter = MouseFilterEnum.Ignore;
         row.Alignment = BoxContainer.AlignmentMode.Center;
         wrap.AddChild(row);
 
         MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta);
 
-        // Indent so encounter rows align under their category header. Bosses get their own
-        // per-encounter icon (run history's per-boss images) wrapped in a hover handle.
-        var leadSpacer = new Control { CustomMinimumSize = new Vector2(20, 0) };
+        // Lead spacer mirrors the width of the category header's collapse arrow (14px) so
+        // the icon column that comes next sits at the same x as the category headers.
+        var leadSpacer = new Control { CustomMinimumSize = new Vector2(14, 0) };
         row.AddChild(leadSpacer);
 
         if (category == "boss")
         {
             var bossSize = EncounterIcons.BossRowIconSize;
-            // Pin the wrapper height to the row height so the boss icon overflows vertically
-            // but the row text stays tightly packed against neighbouring boss rows.
-            var bossHandle = EncounterIcons.MakeBossHoverIcon(encounterId, bossSize, rowHeight);
+            // Boss row icons get scale-only hover (no silhouette halo) — the per-boss
+            // images are distinctive enough that we don't need a glow, but the size pop
+            // still cues which row is active. The wrapper width is pinned to the same
+            // column as the category icons so boss icons sit on the same vertical line.
+            var bossHandle = EncounterIcons.MakePlainBossIcon(encounterId, bossSize, rowHeight, EncounterIcons.CategoryIconColumnWidthPx);
             if (bossHandle != null)
             {
                 bossHandle.Wrapper.SizeFlagsVertical = SizeFlags.ShrinkCenter;
@@ -1185,14 +1242,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
             else
             {
-                row.AddChild(new Control { CustomMinimumSize = new Vector2(bossSize + 8, 0) });
+                row.AddChild(new Control { CustomMinimumSize = new Vector2(EncounterIcons.CategoryIconColumnWidthPx, 0) });
             }
         }
         else
         {
-            // Reserve the same horizontal slot used by boss rows so encounter names align.
-            var iconSlot = EncounterIcons.CategoryIconSize(category) + 8;
-            row.AddChild(new Control { CustomMinimumSize = new Vector2(iconSlot, 0) });
+            // Non-boss rows reserve the same column width so their text aligns past the
+            // shared icon column.
+            row.AddChild(new Control { CustomMinimumSize = new Vector2(EncounterIcons.CategoryIconColumnWidthPx, 0) });
         }
 
         var nameLabel = new RichTextLabel();
@@ -1663,14 +1720,35 @@ internal static class EncounterIcons
     }
 
     /// <summary>
+    /// Width of the icon column on category header rows. Every category icon is wrapped at
+    /// this exact width so their visual centers line up regardless of which icon (weak,
+    /// elite, event, etc.) is being rendered. Sized to fit the largest category icon
+    /// (elite/boss = 42px) plus its breathing room.
+    /// </summary>
+    public const int CategoryIconColumnWidthPx = 62;
+
+    /// <summary>
+    /// Vertical extent of the category icon wrapper. Smaller than the column width so the
+    /// row reads compact; larger icons overflow vertically (siblings don't clip), keeping
+    /// the visible row tight while still showing the full icon + halo.
+    /// </summary>
+    public const int CategoryIconRowHeightPx = 40;
+
+    /// <summary>
     /// Builds a category icon wrapped in a hover-handle Control. The handle's icon and
     /// highlight overlay are exposed so the bestiary can run scale + outline tweens on hover.
+    /// All category icons use the same wrapper width so their centers align across rows.
     /// </summary>
     public static NBestiaryStatsSubmenu.IconHoverHandle? MakeCategoryHoverIcon(string category, int sizePx)
     {
         var tex = LoadCategoryTexture(category);
         if (tex == null) return null;
-        return BuildHoverHandle(tex, sizePx, CategoryColor(category));
+        return BuildHoverHandle(
+            tex,
+            sizePx,
+            CategoryColor(category),
+            wrapperHeightOverride: CategoryIconRowHeightPx,
+            wrapperWidthOverride:  CategoryIconColumnWidthPx);
     }
 
     /// <summary>
@@ -1689,21 +1767,89 @@ internal static class EncounterIcons
     }
 
     /// <summary>
-    /// Pre-rendered DILATED silhouette of an icon texture, cached by source texture and
-    /// dilation radius. Each output pixel is pure white at full alpha if any source pixel
-    /// within <c>dilationPx</c> is more than 50% opaque, otherwise fully transparent. The
-    /// result is a crisp expanded version of the icon shape that, when drawn behind the icon
-    /// at 1× scale, leaves a clean uniform white halo around the icon's silhouette.
+    /// Builds a plain boss row icon — texture + scale-only hover handle, NO silhouette
+    /// overlay. The returned handle can be registered with the bestiary's bundle so the
+    /// icon still grows on hover, but no halo fades in around it.
+    /// <paramref name="wrapperWidthOverride"/> pins the wrapper width to a uniform column
+    /// (typically <see cref="CategoryIconColumnWidthPx"/>) so boss icons sit on the same
+    /// vertical line as the category icons.
+    /// </summary>
+    public static NBestiaryStatsSubmenu.IconHoverHandle? MakePlainBossIcon(
+        string encounterId,
+        int sizePx,
+        int? rowHeightOverridePx = null,
+        int? wrapperWidthOverride = null)
+    {
+        var perBoss = LoadBossTexture(encounterId);
+        Color modulate;
+        Texture2D? tex;
+        if (perBoss != null)
+        {
+            tex = perBoss;
+            modulate = Colors.White;
+        }
+        else
+        {
+            tex = LoadCategoryTexture("boss");
+            if (tex == null) return null;
+            modulate = CategoryColor("boss");
+        }
+
+        int padding = 4;
+        int outerW = wrapperWidthOverride  ?? (sizePx + padding * 2);
+        int outerH = rowHeightOverridePx   ?? (sizePx + padding * 2);
+
+        var wrapper = new Control();
+        wrapper.CustomMinimumSize = new Vector2(outerW, outerH);
+        wrapper.MouseFilter = Control.MouseFilterEnum.Ignore;
+
+        var icon = new TextureRect();
+        icon.Texture       = tex;
+        icon.AnchorLeft    = 0.5f; icon.AnchorRight = 0.5f;
+        icon.AnchorTop     = 0.5f; icon.AnchorBottom = 0.5f;
+        icon.OffsetLeft    = -sizePx / 2f;
+        icon.OffsetRight   =  sizePx / 2f;
+        icon.OffsetTop     = -sizePx / 2f;
+        icon.OffsetBottom  =  sizePx / 2f;
+        icon.StretchMode   = TextureRect.StretchModeEnum.KeepAspectCentered;
+        icon.ExpandMode    = TextureRect.ExpandModeEnum.IgnoreSize;
+        icon.MouseFilter   = Control.MouseFilterEnum.Ignore;
+        ((CanvasItem)icon).Modulate = modulate;
+        // Pivot at center so scale grows symmetrically.
+        icon.PivotOffset   = new Vector2(sizePx / 2f, sizePx / 2f);
+        wrapper.AddChild(icon);
+
+        return new NBestiaryStatsSubmenu.IconHoverHandle
+        {
+            Wrapper   = wrapper,
+            Icon      = icon,
+            Highlight = null,
+        };
+    }
+
+    /// <summary>
+    /// Pre-rendered DILATED + ANTI-ALIASED silhouette of an icon texture, cached by source
+    /// texture and dilation radius. For each output pixel we find the Euclidean distance to
+    /// the nearest opaque source pixel; if that distance is within the dilation radius the
+    /// pixel becomes a soft-gray with alpha falling off linearly across the outermost band.
+    /// The fade band gives anti-aliased edges, and the gray-not-pure-white color matches the
+    /// run-history hover halo's softer look.
     ///
     /// Why this approach instead of a runtime scale or shader:
     ///   • Scaling a TextureRect bilinearly interpolates the source's anti-aliased edges,
-    ///     making the rim a soft gradient that's hard to see.
-    ///   • A shader that recolors to white still inherits the source's anti-aliased alpha,
-    ///     producing the same gradient problem.
-    ///   • Dilating in pixel space with a hard 0|1 alpha threshold gives a uniform-color
-    ///     halo with crisp edges that reads clearly at any icon size.
+    ///     making the rim a soft gradient that's hard to see and fights the dilation.
+    ///   • A shader that recolors to white still inherits the source's anti-aliased alpha.
+    ///   • Distance-based dilation in pixel space gives uniform thickness with smooth edges
+    ///     that reads cleanly at any icon size.
     /// </summary>
     private static readonly Dictionary<(Texture2D src, int dilation), Texture2D> _silhouetteCache = new();
+
+    /// <summary>Pre-multiplied silhouette tint — half-transparent white, matching the
+    /// run-history halo's <c>StsColors.halfTransparentWhite</c> look.</summary>
+    private static readonly Color SilhouetteColor = new(1f, 1f, 1f, 0.5f);
+
+    /// <summary>Width of the linear alpha fade at the dilation boundary (in source pixels).</summary>
+    private const float SilhouetteFadeWidth = 1.5f;
 
     private static Texture2D? GetSilhouetteTexture(Texture2D source, int dilationPx = 4)
     {
@@ -1724,46 +1870,80 @@ internal static class EncounterIcons
             if (srcRgba.GetFormat() != Image.Format.Rgba8)
                 srcRgba.Convert(Image.Format.Rgba8);
 
-            int w = srcRgba.GetWidth();
-            int h = srcRgba.GetHeight();
+            int srcW = srcRgba.GetWidth();
+            int srcH = srcRgba.GetHeight();
             const float opaqueThreshold = 0.5f;
 
-            // Pre-build a hard alpha mask so we only test once per source pixel during the
-            // dilation pass (otherwise we'd hit GetPixel O(dilation²) times per output pixel
-            // and slow first-hover noticeably).
-            var mask = new bool[w * h];
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                    mask[y * w + x] = srcRgba.GetPixel(x, y).A >= opaqueThreshold;
+            // Build the destination LARGER than the source by 2*dilationPx in each dim, with
+            // the source content centered inside via a (dilationPx, dilationPx) offset. This
+            // gives the dilation room to expand outward even when the source icon's shape
+            // touches the source texture's edges (e.g. the event question mark).
+            int dstW = srcW + 2 * dilationPx;
+            int dstH = srcH + 2 * dilationPx;
 
-            var dst = Image.CreateEmpty(w, h, false, Image.Format.Rgba8);
-            var white = new Color(1f, 1f, 1f, 1f);
+            // Mask is built in destination coordinates so the distance check below doesn't
+            // need to translate between source/dest spaces.
+            var mask = new bool[dstW * dstH];
+            for (int y = 0; y < srcH; y++)
+                for (int x = 0; x < srcW; x++)
+                    if (srcRgba.GetPixel(x, y).A >= opaqueThreshold)
+                        mask[(y + dilationPx) * dstW + (x + dilationPx)] = true;
+
+            var dst = Image.CreateEmpty(dstW, dstH, false, Image.Format.Rgba8);
             int r2 = dilationPx * dilationPx;
+            float fadeStart = Math.Max(0f, dilationPx - SilhouetteFadeWidth);
+            float fadeRange = dilationPx - fadeStart;
+            if (fadeRange <= 0f) fadeRange = 1f; // safety against div-by-zero
+            int fadeStartSq = (int)(fadeStart * fadeStart);
 
-            for (int y = 0; y < h; y++)
+            for (int y = 0; y < dstH; y++)
             {
                 int yMin = Math.Max(0, y - dilationPx);
-                int yMax = Math.Min(h - 1, y + dilationPx);
-                for (int x = 0; x < w; x++)
+                int yMax = Math.Min(dstH - 1, y + dilationPx);
+                for (int x = 0; x < dstW; x++)
                 {
                     int xMin = Math.Max(0, x - dilationPx);
-                    int xMax = Math.Min(w - 1, x + dilationPx);
+                    int xMax = Math.Min(dstW - 1, x + dilationPx);
 
-                    // Find any opaque pixel within the dilation radius (Euclidean).
-                    bool insideHalo = false;
-                    for (int yy = yMin; yy <= yMax && !insideHalo; yy++)
+                    // Find the smallest squared distance to any opaque mask pixel within
+                    // the dilation radius. Break early once we hit the fully-opaque interior.
+                    int bestD2 = int.MaxValue;
+                    bool fullyInside = false;
+                    for (int yy = yMin; yy <= yMax && !fullyInside; yy++)
                     {
                         int dy = yy - y;
-                        int rowOffset = yy * w;
+                        int dy2 = dy * dy;
+                        int rowOffset = yy * dstW;
                         for (int xx = xMin; xx <= xMax; xx++)
                         {
                             int dx = xx - x;
-                            if (dx * dx + dy * dy > r2) continue;
-                            if (mask[rowOffset + xx]) { insideHalo = true; break; }
+                            int d2 = dx * dx + dy2;
+                            if (d2 > r2) continue;
+                            if (!mask[rowOffset + xx]) continue;
+                            if (d2 < bestD2) bestD2 = d2;
+                            if (d2 <= fadeStartSq) { fullyInside = true; break; }
                         }
                     }
-                    if (insideHalo)
-                        dst.SetPixel(x, y, white);
+
+                    if (bestD2 == int.MaxValue) continue; // no opaque pixel within radius
+
+                    float alpha;
+                    if (fullyInside)
+                    {
+                        alpha = 1f;
+                    }
+                    else
+                    {
+                        float dist = MathF.Sqrt(bestD2);
+                        // Linear falloff across the last fadeRange source pixels.
+                        alpha = 1f - Math.Clamp((dist - fadeStart) / fadeRange, 0f, 1f);
+                    }
+
+                    if (alpha < 0.01f) continue;
+
+                    var c = SilhouetteColor;
+                    c.A *= alpha;
+                    dst.SetPixel(x, y, c);
                 }
             }
 
@@ -1778,16 +1958,24 @@ internal static class EncounterIcons
         }
     }
 
-    private static NBestiaryStatsSubmenu.IconHoverHandle BuildHoverHandle(Texture2D tex, int sizePx, Color iconModulate, int? wrapperHeightOverride = null)
+    private static NBestiaryStatsSubmenu.IconHoverHandle BuildHoverHandle(
+        Texture2D tex,
+        int sizePx,
+        Color iconModulate,
+        int? wrapperHeightOverride = null,
+        int? wrapperWidthOverride  = null)
     {
         // Wrap the icon in a fixed-size Control so layout doesn't shift when the icon scales.
-        // Padding is small so rows stay tight; the scaled icon is allowed to draw outside the
-        // wrapper bounds (siblings don't clip).
-        int padding = 4;
-        int outerW = sizePx + padding * 2;
-        // For boss rows we override the wrapper height so the row stays compact even though
-        // the icon is taller — the icon overflows above and below into the surrounding margin.
-        int outerH = wrapperHeightOverride ?? outerW;
+        // The padding gives the halo + scale tween enough room to render without being
+        // cropped by neighbouring siblings or by parent clip rects (e.g. the encounter list
+        // scroll clipper). Padding is sized as a fraction of the icon so larger icons get
+        // proportionally more room.
+        int padding = Math.Max(10, sizePx / 4);
+        // Width override lets callers pin every category icon to the same column width so
+        // their centers line up vertically across rows; height override lets boss rows stay
+        // compact while the icon overflows. Either falls back to a square (sizePx + 2*padding).
+        int outerW = wrapperWidthOverride  ?? (sizePx + padding * 2);
+        int outerH = wrapperHeightOverride ?? (sizePx + padding * 2);
 
         var wrapper = new Control();
         wrapper.CustomMinimumSize = new Vector2(outerW, outerH);
@@ -1811,23 +1999,42 @@ internal static class EncounterIcons
             rect.PivotOffset = new Vector2(sizePx / 2f, sizePx / 2f);
         }
 
-        // Highlight uses a pre-DILATED all-white silhouette of the icon texture (built once
-        // and cached). The dilation expands the icon's shape outward by N pixels with crisp
-        // 0|1 alpha, so when drawn behind the icon at 1× scale the visible portion is a
-        // uniform-color halo that traces the silhouette without any anti-aliasing gradient.
-        // Choose dilation radius proportional to icon size so smaller icons get a smaller
-        // halo and larger icons get a thicker one.
-        int dilation = Math.Max(3, sizePx / 10);
+        // Highlight uses a pre-DILATED + ANTI-ALIASED silhouette of the icon texture (built
+        // once and cached). The silhouette texture is rendered into its own slightly-larger
+        // rect so its added padding shows up as the halo at the same scale as the icon.
+        //
+        // Sizing math:
+        //   • Dilation in SOURCE pixel space:
+        //         dilation_src = TargetHaloScreenPx × source_size / display_size
+        //     so the rendered halo is TargetHaloScreenPx screen pixels regardless of how
+        //     high-res the source texture is.
+        //   • The silhouette texture is built with dilation_src pixels of padding on every
+        //     side (see GetSilhouetteTexture). Its dimensions are (source + 2*dilation_src).
+        //   • To render that texture so the inner icon area lines up with the icon's own
+        //     rect, the silhouette TextureRect must be sized to (sizePx + 2*halo_screen_px).
+        const float TargetHaloScreenPx = 2.5f;
+        int sourceSize = Math.Max(tex.GetWidth(), tex.GetHeight());
+        if (sourceSize == 0) sourceSize = sizePx;
+        int dilation = Math.Max(2, (int)Math.Round(TargetHaloScreenPx * sourceSize / (float)sizePx));
+        // The actual screen halo width given our rounded dilation; usually ≈ TargetHaloScreenPx.
+        float haloScreen = dilation * sizePx / (float)sourceSize;
+
         var silhouetteTex = GetSilhouetteTexture(tex, dilation) ?? tex;
         var highlight = new TextureRect();
         highlight.Texture      = silhouetteTex;
-        AnchorCenteredIcon(highlight);
+        // Sized larger than the icon by haloScreen on every side so the silhouette texture's
+        // built-in padding renders as the halo at the same scale as the icon's content.
+        highlight.AnchorLeft   = 0.5f; highlight.AnchorRight = 0.5f;
+        highlight.AnchorTop    = 0.5f; highlight.AnchorBottom = 0.5f;
+        highlight.OffsetLeft   = -(sizePx / 2f + haloScreen);
+        highlight.OffsetRight  =   sizePx / 2f + haloScreen;
+        highlight.OffsetTop    = -(sizePx / 2f + haloScreen);
+        highlight.OffsetBottom =   sizePx / 2f + haloScreen;
+        highlight.PivotOffset  = new Vector2(sizePx / 2f + haloScreen, sizePx / 2f + haloScreen);
         highlight.StretchMode  = TextureRect.StretchModeEnum.KeepAspectCentered;
         highlight.ExpandMode   = TextureRect.ExpandModeEnum.IgnoreSize;
         highlight.MouseFilter  = Control.MouseFilterEnum.Ignore;
-        // Modulate.alpha is what we tween 0 → 1 on hover.
         ((CanvasItem)highlight).Modulate = new Color(1f, 1f, 1f, 0f);
-        // No Scale stretch — the dilation in pixel space already expands the silhouette.
         wrapper.AddChild(highlight);
 
         var icon = new TextureRect();
@@ -1996,9 +2203,10 @@ internal static class EncounterIcons
                 silhouettes++;
             }
 
-            // Add a 1-pixel black outline around every boss icon (encountered or silhouette)
-            // so the icons read clearly against the warm-stone bestiary button background.
-            cell = AddBlackOutline(cell);
+            // Add a black outline around every boss icon (encountered or silhouette) so the
+            // icons read clearly against the warm-stone bestiary button background. Thickness
+            // is 3 source pixels — visibly distinct without swallowing the icon detail.
+            cell = AddBlackOutline(cell, thicknessPx: 3);
 
             int col = i % cols;
             int row = i / cols;
@@ -2038,10 +2246,12 @@ internal static class EncounterIcons
     }
 
     /// <summary>
-    /// Adds a 1-pixel solid-black outline around every alpha-positive pixel. Returns a new
-    /// image so the source image is left untouched (callers may have already mutated it).
+    /// Adds a solid-black outline of the given thickness (in source pixels) around every
+    /// alpha-positive pixel. Returns a new image so the source image is left untouched.
+    /// Pixels are filled with black wherever any source pixel within the thickness radius
+    /// (Euclidean) is opaque.
     /// </summary>
-    private static Image AddBlackOutline(Image src)
+    private static Image AddBlackOutline(Image src, int thicknessPx = 1)
     {
         int w = src.GetWidth();
         int h = src.GetHeight();
@@ -2049,23 +2259,34 @@ internal static class EncounterIcons
         const float threshold = 0.05f;
         var black = new Color(0f, 0f, 0f, 1f);
 
+        // Pre-build an opaque mask so the dilation pass is O(thickness²) without GetPixel
+        // overhead per neighbour.
+        var mask = new bool[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                mask[y * w + x] = src.GetPixel(x, y).A >= threshold;
+
+        int r2 = thicknessPx * thicknessPx;
         for (int y = 0; y < h; y++)
         {
+            int yMin = Math.Max(0, y - thicknessPx);
+            int yMax = Math.Min(h - 1, y + thicknessPx);
             for (int x = 0; x < w; x++)
             {
-                var center = src.GetPixel(x, y);
-                if (center.A >= threshold) continue; // already opaque, skip
+                if (mask[y * w + x]) continue; // already opaque, skip
+                int xMin = Math.Max(0, x - thicknessPx);
+                int xMax = Math.Min(w - 1, x + thicknessPx);
 
-                // 8-neighbour test — if any neighbour is opaque, this border pixel becomes black.
                 bool nearOpaque = false;
-                for (int dy = -1; dy <= 1 && !nearOpaque; dy++)
+                for (int yy = yMin; yy <= yMax && !nearOpaque; yy++)
                 {
-                    for (int dx = -1; dx <= 1; dx++)
+                    int dy = yy - y;
+                    int rowOffset = yy * w;
+                    for (int xx = xMin; xx <= xMax; xx++)
                     {
-                        if (dx == 0 && dy == 0) continue;
-                        int nx = x + dx, ny = y + dy;
-                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-                        if (src.GetPixel(nx, ny).A >= threshold) { nearOpaque = true; break; }
+                        int dx = xx - x;
+                        if (dx * dx + dy * dy > r2) continue;
+                        if (mask[rowOffset + xx]) { nearOpaque = true; break; }
                     }
                 }
                 if (nearOpaque)
