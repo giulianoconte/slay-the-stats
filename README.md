@@ -12,7 +12,7 @@ SlayTheStats reads your full run history retroactively. Stats are updated when y
 
 - **Pick%** — how often you pick a card when it's offered on as a fight reward.
 - **Win%** — how often you win runs that include a given card or relic.
-- **Picks** — shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. `12/30`). For relics, just the number of runs it was present.
+- **Runs** — shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. `12/30`). For relics, just the number of runs it was present.
 - **Buys** — for colorless cards and relics: Shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. `12/30`).
 
 Stats are shown as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium. Stats are broken out by act acquired.
@@ -25,12 +25,12 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 ### Requirements
 
 - [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) installed for STS2.
-- [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v0.2.1 or later.
+- [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v0.2.5 or later.
 
 ### Installation
 
 1. Install [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) in STS2
-2. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.1 or later) into your mods folder if you haven't already
+2. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.5 or later) into your mods folder if you haven't already
 3. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll`, `SlayTheStats.json`, `SlayTheStats.pck`, and a `fonts/` subfolder
 
 ### Uninstalling
@@ -48,34 +48,50 @@ Paths for items 2–4:
 
 If you only want to reset stats but keep your settings, delete just `slay-the-stats.json` — it will be rebuilt from your run history on next launch.
 
+### Compendium Filters
+
+Open the in-game compendium (Card Library or Relic Collection) and click the **SlayTheStats** button in the sidebar to open the filter pane. The pane lets you tune which runs feed your stats:
+
+- **Ascension range** — show stats only from runs within an ascension band. The "Lowest" and "Highest" entries auto-track the actual ascensions present in your data, so they keep working if mods add new levels.
+- **Version range** — restrict to specific game versions, useful for ignoring runs from old balance patches.
+- **Profile** — restrict to a single save profile, or aggregate across all profiles.
+- **Class** — `All`, `Match class card` (use the card's owning class for class cards, all-chars for colorless/curse), or filter to a specific character.
+- **Group card upgrades** — merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately. Defaults to on.
+
+Active filters are highlighted in green so it's obvious which controls are diverging from your defaults. Three action buttons at the bottom:
+
+- **Clear Filters** — back to all-open (no constraints)
+- **Reset** — restore your saved defaults
+- **Save Defaults** — persist the current values as your new defaults
+
+Filter changes you make while in a run are temporary — they let you slice the data without committing — and snap back to your saved defaults the next time you boot the game. **Save Defaults** is the only way to persist a change across game boots. You can also open the filter pane standalone from the mod settings menu (via "Open Filters") to edit your defaults without entering the compendium.
+
 ### Understanding the Stats
 
 **Pick%** is sourced only from fight reward screens — the 3-card choice after defeating an enemy. Shop purchases, event cards, ancient (Neow) rewards, and other acquisition sources are not counted. Some relics modify reward screens (e.g. adding an extra card or replacing choices); those modified screens are also excluded since the pool is no longer a standard 3-card offer.
 
 **Win%** counts all runs in which the card or relic was present in your final build, from any source.
 
-**Picks** shows `present/offered` for cards (e.g. `12/30` — present in 12 runs, offered on a fight reward screen in 30) and just the present count for relics.
+**Runs** shows `present/offered` for cards (e.g. `12/30` — present in 12 runs, offered on a fight reward screen in 30) and just the present count for relics.
 
 **Shop purchases (Buys):** For colorless cards and relics, the tooltip shows how often you purchased an item relative to how often it appeared in a shop, colored relative to your overall shop buy rate. Note that appearances are counted regardless of whether you could afford the item.
 
-**Upgraded cards** (e.g. Tremble+) are tracked separately from each other by default. This can be changed in the settings.
-
-**GroupCardUpgrades**: **Upgraded cards** (e.g. Coolheaded+) can be tracked separately or grouped with their unupgraded counterparts.
+**Upgraded cards** (e.g. Tremble+) are grouped with their base versions by default — Tremble+ counts toward Tremble's stats. Toggle this via the **Group card upgrades** control in the filter pane (see [Compendium Filters](#compendium-filters) above).
 
 **Colorless Cards**, **Event Cards**, **Ancient Relics**, **Curses**, etc are all tracked.
 
-Settings can be configured in-game via [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) if installed (optional).
+Mod settings (color blind mode, in-run stats toggle, master off switch, debug mode) can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) mod. Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium — see [Compendium Filters](#compendium-filters) above.
 
 ### FAQ
 
 **Why does a card show more "present" runs than "offered" runs (e.g. 5/1)?**
-With **GroupCardUpgrades** off (the default), upgraded and base versions are tracked separately. "Present" counts all runs the card ended up in your deck from any source — including upgrading the base at a campfire — while "offered" only counts fight reward screens. Enable **GroupCardUpgrades** to merge them. Starter cards and relics (those you begin a run with) will always show 0 for "offered" since they never appear on fight reward screens.
+With **Group card upgrades** turned off in the filter pane, upgraded and base versions are tracked separately. "Present" counts all runs the card ended up in your deck from any source — including upgrading the base at a campfire — while "offered" only counts fight reward screens. Turn **Group card upgrades** back on (the default) in the filter pane to merge them. Starter cards and relics (those you begin a run with) will always show 0 for "offered" since they never appear on fight reward screens.
 
 **Why is my Win% 100% but the stat is grey?**
 Color intensity reflects both sample size and magnitude of deviation from your baseline. With very few runs, even a perfect rate stays muted — the color intensifies as evidence builds up.
 
 **Why don't I see stats for a card I've used?**
-Check your settings: if **OnlyHighestWonAscension** is enabled, runs at other ascension levels are hidden, which can make data sparse or absent if most of your runs were at a different level. You may also just need more runs with the card.
+Open the filter pane in the compendium and check your filters. If your ascension range is restricted, runs outside that band are hidden. If your class filter is set to a specific character, cards from other characters are hidden. If **Group card upgrades** is off, the upgraded and base versions of each card are tracked separately, which can split sparse data. You may also just need more runs with the card.
 
 ### Where Stats Are Saved
 
@@ -151,7 +167,7 @@ dotnet test
 | `RelicStatsTooltipPatch.cs` | Harmony patches for relic hover tooltips |
 | `TooltipHelper.cs` | Shared tooltip rendering and color helpers |
 | `Patches.cs` | Harmony patches for run-end hook and character tracking |
-| `SlayTheStatsConfig.cs` | Mod settings (OnlyHighestWonAscension, GroupCardUpgrades, ColorBlindMode) |
+| `SlayTheStatsConfig.cs` | Mod settings (color blind mode, in-run stats toggle, master tooltip kill switch, debug mode, data directory) and persisted filter-pane state (ascension/version/profile/class/group-upgrades + their saved defaults) |
 | `ModConfigBridge.cs` | Optional ModConfig-STS2 integration for in-game settings UI |
 | `StatsLogger.cs` | Debug utility — logs per-act stat tables to the Godot log |
 

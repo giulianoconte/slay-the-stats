@@ -1,8 +1,6 @@
-SlayTheStats
+Supports ModConfig (https://www.nexusmods.com/slaythespire2/mods/2).
 
-A Slay the Spire 2 mod that tracks card and relic stats across your runs and shows them as tooltips when you hover over them.
-
-Supports ModConfig-STS2 (https://www.nexusmods.com/slaythespire2/mods/2).
+Color blind setting available.
 
 ------------------------------------------------------------------------
 WHAT IT DOES
@@ -12,30 +10,47 @@ SlayTheStats reads your full run history retroactively. Stats are updated when y
 
 - Pick% -- how often you pick a card when it's offered as a fight reward.
 - Win% -- how often you win runs that include a given card or relic.
-- Picks -- shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. 12/30). For relics, just the number of runs it was present.
+- Runs -- shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. 12/30). For relics, just the number of runs present. It is split out by act - the act in which you acquired your first copy of the card.
 - Buys -- for colorless cards and relics: shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. 12/30).
 
 Stats are shown as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium.
 
 Color coding helps you read the data at a glance:
-- Pick% and Win% are colored relative to your personal baseline -- your overall win rate for the current character, and your average pick rate across all fight reward screens.
-- Color intensity scales with both sample size and deviation from baseline -- muted with little evidence, vivid when a strong trend holds across many runs.
-- Color intensity is sensitive to both sample size and deviation, so a high winrate over a few runs can be treated similar to a moderately high winrate across many runs.
+- Pick% and Win% are colored relative to your personal baseline. Your baseline is the average win rate and pick rate on fight rewards for the character.
+- Color intensity is sensitive to both sample size and deviation, so a high winrate over a few runs can be considered as significant as a moderately high winrate across many runs.
 
 ------------------------------------------------------------------------
 REQUIREMENTS
 ------------------------------------------------------------------------
 
 - GUMM (Godot Universal Mod Manager) installed for STS2: https://sts2mods.com/godot-universal-mod-manager-for-sts-2/
-- BaseLib v0.2.1 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- BaseLib v0.2.5 or later: https://www.nexusmods.com/slaythespire2/mods/103
 
 ------------------------------------------------------------------------
 INSTALLATION
 ------------------------------------------------------------------------
 
 1. Install GUMM for STS2 if you haven't already: https://sts2mods.com/godot-universal-mod-manager-for-sts-2/
-2. Download and extract BaseLib (v0.2.1 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
-3. Download SlayTheStats-v0.1.0.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, SlayTheStats.pck, and a fonts/ subfolder
+2. Download and extract BaseLib (v0.2.5 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
+3. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, SlayTheStats.pck, and a fonts/ subfolder
+
+------------------------------------------------------------------------
+COMPENDIUM FILTERS
+------------------------------------------------------------------------
+
+Open the in-game compendium (Card Library or Relic Collection) and click the SlayTheStats button in the sidebar to open the filter pane. The pane lets you tune which runs feed your stats:
+
+- Ascension range -- show stats only from runs within an ascension band e.g. A5+.
+- Version range -- restrict to specific game versions.
+- Profile -- restrict to a single save profile, or aggregate across all profiles.
+- Class -- "All", "Match class card" (use the card's owning class for class cards, all-chars for colorless/curse), or filter to a specific character.
+- Group card upgrades -- merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately.
+
+Active filters are highlighted in green so it's obvious which controls are diverging from your defaults. Three action buttons at the bottom:
+
+- Clear Filters -- remove all filters
+- Reset -- restore to your saved defaults
+- Save Defaults -- persist the current values as your new defaults. Your defaults are always used when in-run.
 
 ------------------------------------------------------------------------
 NOTES
@@ -47,13 +62,9 @@ Win% counts all runs in which the card or relic was present in your final build,
 
 Shop purchases (Buys): For colorless cards and relics, the tooltip shows how often you purchased an item relative to how often it appeared in a shop, colored relative to your overall shop buy rate. Note that appearances are counted regardless of whether you could afford the item.
 
-GroupCardUpgrades: Upgraded cards (e.g. Coolheaded+) can be tracked separately or grouped with their unupgraded counterparts.
-
-OnlyHighestWonAscension: By default stats include all your runs. Enable this setting to filter each character's stats to their highest won ascension only. For example, if you're currently trying to beat ascension 8, you will be shown stats for ascension 7. However you will have less data to draw from.
-
 Colorless Cards, Event Cards, Ancient Relics, Curses, etc are all tracked.
 
-Settings can be configured in-game via ModConfig if installed (optional): https://www.nexusmods.com/slaythespire2/mods/2
+Mod settings (color blind mode, in-run stats toggle, master off switch, debug mode) can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional ModConfig mod (https://www.nexusmods.com/slaythespire2/mods/2). Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above.
 
 ------------------------------------------------------------------------
 ACCESSIBILITY
@@ -73,14 +84,24 @@ Stats are stored in slay-the-stats.json:
 FAQ
 ------------------------------------------------------------------------
 
-Why does a card show more "present" runs than "offered" runs (e.g. 5/1)?
-With GroupCardUpgrades off (the default), upgraded and base versions are tracked separately. "Present" counts all runs the card ended up in your deck from any source -- including upgrading the base at a campfire -- while "offered" only counts fight reward screens. Enable GroupCardUpgrades to merge them. Starter cards and relics (those you begin a run with) will always show 0 for "offered" since they never appear on fight reward screens.
+Q: Why does a card show more "present" runs than "offered" runs (e.g. 5/1)?
 
-Why is my Win% 100% but the stat is grey?
-Color intensity reflects both sample size and magnitude of deviation from your baseline. With very few runs, even a perfect rate stays muted -- the color intensifies as evidence builds up.
+A: With "Group card upgrades" off, upgraded and base versions are tracked separately. "Present" counts all runs the card ended up in your deck from any source -- including upgrading the base card at a campfire -- while "offered" only counts fight reward screens. Turn on "Group card upgrades" in the filter pane to merge them. Starter cards and relics (those you begin a run with) will always show 0 for "offered" since they never appear on fight reward screens.
 
-Why don't I see stats for a card I've used?
-Check your settings: if OnlyHighestWonAscension is enabled, runs at other ascension levels are hidden, which can make data sparse or absent if most of your runs were at a different level. You may also just need more runs with the card.
+
+Q: Why is my Win% 100% but the stat is grey?
+
+A: Color intensity reflects both sample size and magnitude of deviation from your baseline. With very few runs, even a perfect rate stays muted -- the color intensifies as evidence builds up.
+
+
+Q: Why don't I see stats for a card I've used?
+
+A: Open the SlayTheStats filter pane in the compendium and check your filters. 
+
+
+Q: I'm seeing "no data" for everything.
+
+A: The mod cannot find your run history to populate data. In this case you'll need to find where your game save data is (such as run history). Set "DataDirectory" to the "SlayTheSpire2" folder which the data is stored in. For Windows it is %APPDATA%/SlayTheSpire2. Note that you need to put the full path in there. Please file a bug report so I can fix the defaults!
 
 ------------------------------------------------------------------------
 TROUBLESHOOTING
