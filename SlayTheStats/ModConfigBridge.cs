@@ -139,14 +139,14 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
-            Set(cfg, "Key",          "debug_mode");
-            Set(cfg, "Label",        "Debug Mode");
+            Set(cfg, "Key",          "tutorial_seen");
+            Set(cfg, "Label",        "Tutorial Seen");
             Set(cfg, "Type",         EnumVal("Toggle"));
-            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.DebugMode);
-            Set(cfg, "Description",  "Surface internal state in tooltips (context key, raw counters, build version) to help diagnose issues without reading logs.");
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.TutorialSeen);
+            Set(cfg, "Description",  "Whether the first-run welcome tutorial has been dismissed. Toggle off to see it again next time you open the Card Library or Relic Collection compendium page.");
             Set(cfg, "OnChanged",    new Action<object>(v =>
             {
-                SlayTheStatsConfig.DebugMode = Convert.ToBoolean(v);
+                SlayTheStatsConfig.TutorialSeen = Convert.ToBoolean(v);
                 ModConfig.SaveDebounced<SlayTheStatsConfig>();
             }));
         }));
@@ -169,14 +169,15 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
-            Set(cfg, "Key",          "open_filters");
-            Set(cfg, "Label",        "Filter Defaults");
-            Set(cfg, "Type",         EnumVal("Button"));
-            Set(cfg, "ButtonText",   "Open Filters");
-            Set(cfg, "Description",  "Open the SlayTheStats filter pane to edit the saved aggregation defaults (ascension, version, profile, class filter). Use 'Save Defaults' inside the pane to persist your changes.");
-            Set(cfg, "OnChanged",    new Action<object>(_ =>
+            Set(cfg, "Key",          "debug_mode");
+            Set(cfg, "Label",        "Debug Mode");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.DebugMode);
+            Set(cfg, "Description",  "Surface internal state in tooltips (context key, raw counters, build version) to help diagnose issues without reading logs.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
             {
-                CompendiumFilterPatch.OpenStandalonePane();
+                SlayTheStatsConfig.DebugMode = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
             }));
         }));
 

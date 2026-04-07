@@ -109,7 +109,7 @@ internal static class RelicHoverHelper
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
+                statsText = CardHoverShowPatch.NoDataText(filter);
             }
             else
             {
@@ -119,7 +119,7 @@ internal static class RelicHoverHelper
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar)
                     : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter);
+                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(filter) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter);
             }
 
             TooltipHelper.TrySceneTheftOnce();

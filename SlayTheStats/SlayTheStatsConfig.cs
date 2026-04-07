@@ -8,13 +8,13 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// When true, stats are filtered to each character's highest won ascension.
     /// e.g. if Ironclad has won up to A9, only A0–A9 runs are included for Ironclad.
     /// </summary>
-    public static bool OnlyHighestWonAscension { get; set; } = false;
+    [ConfigHideInUI] public static bool OnlyHighestWonAscension { get; set; } = false;
 
     /// <summary>
     /// When true, base and upgraded card stats are merged in tooltips
     /// (e.g. Strike and Strike+ count as one entry).
     /// </summary>
-    public static bool GroupCardUpgrades { get; set; } = true;
+    [ConfigHideInUI] public static bool GroupCardUpgrades { get; set; } = true;
 
     /// <summary>
     /// When true, uses a color-blind-friendly palette for stat coloring.
@@ -34,10 +34,11 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool DisableTooltipsEntirely { get; set; } = false;
 
     /// <summary>
-    /// When true, tooltips surface internal debug state (context key, raw counters, build version)
-    /// to aid troubleshooting without requiring log inspection.
+    /// True once the user has seen the first-run filter tutorial in the
+    /// compendium. Persisted via SimpleModConfig so it only shows on the
+    /// first compendium visit after installing the mod.
     /// </summary>
-    public static bool DebugMode { get; set; } = false;
+    public static bool TutorialSeen { get; set; } = false;
 
     /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
@@ -46,6 +47,12 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// Example: /home/deck/.local/share/SlayTheSpire2
     /// </summary>
     public static string DataDirectory { get; set; } = "";
+
+    /// <summary>
+    /// When true, tooltips surface internal debug state (context key, raw counters, build version)
+    /// to aid troubleshooting without requiring log inspection.
+    /// </summary>
+    public static bool DebugMode { get; set; } = false;
 
     // ── Aggregation filter properties (v0.2.0) ──────────────────────────────
 
@@ -68,14 +75,14 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// lower bound, auto-tracks new low ascensions); any other int = explicit
     /// floor (won't auto-include newly-discovered lower ascensions).
     /// </summary>
-    public static int AscensionMin { get; set; } = AscensionLowest;
+    [ConfigHideInUI] public static int AscensionMin { get; set; } = AscensionLowest;
 
     /// <summary>
     /// Maximum ascension to include in aggregation. AscensionHighest = +∞ (no
     /// upper bound, auto-tracks new high ascensions); any other int = explicit
     /// ceiling (won't auto-include newly-discovered higher ascensions).
     /// </summary>
-    public static int AscensionMax { get; set; } = AscensionHighest;
+    [ConfigHideInUI] public static int AscensionMax { get; set; } = AscensionHighest;
 
     /// <summary>Sentinel "Lowest" for version filter — auto-tracks oldest version in data.</summary>
     public const string VersionLowest = "__lowest__";
@@ -87,27 +94,28 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// Minimum game version to include. VersionLowest = -∞ (no lower bound);
     /// any other value = explicit floor (compared semantically, e.g. 0.4.10 &gt; 0.4.9).
     /// </summary>
-    public static string VersionMin { get; set; } = VersionLowest;
+    [ConfigHideInUI] public static string VersionMin { get; set; } = VersionLowest;
 
     /// <summary>
     /// Maximum game version to include. VersionHighest = +∞ (no upper bound);
     /// any other value = explicit ceiling (compared semantically).
     /// </summary>
-    public static string VersionMax { get; set; } = VersionHighest;
+    [ConfigHideInUI] public static string VersionMax { get; set; } = VersionHighest;
 
     /// <summary>
     /// Class filter selection. Values:
     /// - "" → All characters
     /// - "__class__" → Class-specific (use the card's owning class; colorless/curse/etc. show all-char stats)
     /// - "CHARACTER.X" → Filter to a specific character (e.g. "CHARACTER.IRONCLAD")
+    /// Defaults to "__class__" so fresh installs see class-relevant stats by default.
     /// </summary>
-    public static string ClassFilter { get; set; } = "";
+    [ConfigHideInUI] public static string ClassFilter { get; set; } = ClassFilterClassSpecific;
 
     /// <summary>Sentinel value for ClassFilter meaning "use the card's owning class".</summary>
     public const string ClassFilterClassSpecific = "__class__";
 
     /// <summary>Legacy convenience accessor — true iff ClassFilter is the class-specific sentinel.</summary>
-    public static bool ClassSpecificStats
+    [ConfigHideInUI] public static bool ClassSpecificStats
     {
         get => ClassFilter == ClassFilterClassSpecific;
         set => ClassFilter = value ? ClassFilterClassSpecific : "";
@@ -116,19 +124,21 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// <summary>
     /// Profile to filter by (e.g. "profile1"). Empty = all profiles.
     /// </summary>
-    public static string FilterProfile { get; set; } = "";
+    [ConfigHideInUI] public static string FilterProfile { get; set; } = "";
 
     // ── Persisted user defaults ────────────────────────────────────────────
     // These are the "saved defaults" the user can set via "Save as Defaults".
     // They persist across restarts via SimpleModConfig serialization.
+    // All hidden from BaseLib's auto-generated UI — they're driven by the
+    // compendium filter pane's "Save Defaults" action, not the mod settings page.
 
-    public static int DefaultAscensionMin { get; set; } = AscensionLowest;
-    public static int DefaultAscensionMax { get; set; } = AscensionHighest;
-    public static string DefaultVersionMin { get; set; } = VersionLowest;
-    public static string DefaultVersionMax { get; set; } = VersionHighest;
-    public static string DefaultClassFilter { get; set; } = "";
-    public static string DefaultFilterProfile { get; set; } = "";
-    public static bool DefaultGroupCardUpgrades { get; set; } = true;
+    [ConfigHideInUI] public static int DefaultAscensionMin { get; set; } = AscensionLowest;
+    [ConfigHideInUI] public static int DefaultAscensionMax { get; set; } = AscensionHighest;
+    [ConfigHideInUI] public static string DefaultVersionMin { get; set; } = VersionLowest;
+    [ConfigHideInUI] public static string DefaultVersionMax { get; set; } = VersionHighest;
+    [ConfigHideInUI] public static string DefaultClassFilter { get; set; } = ClassFilterClassSpecific;
+    [ConfigHideInUI] public static string DefaultFilterProfile { get; set; } = "";
+    [ConfigHideInUI] public static bool DefaultGroupCardUpgrades { get; set; } = true;
 
     internal static void SaveDefaults()
     {

@@ -20,7 +20,7 @@ internal class SlayTheStatsConfig
     public const string VersionHighest = "__highest__";
     public static string VersionMin { get; set; } = VersionLowest;
     public static string VersionMax { get; set; } = VersionHighest;
-    public static string ClassFilter { get; set; } = "";
+    public static string ClassFilter { get; set; } = ClassFilterClassSpecific;
     public const string ClassFilterClassSpecific = "__class__";
     public static bool ClassSpecificStats
     {
@@ -33,7 +33,7 @@ internal class SlayTheStatsConfig
     public static int DefaultAscensionMax { get; set; } = AscensionHighest;
     public static string DefaultVersionMin { get; set; } = VersionLowest;
     public static string DefaultVersionMax { get; set; } = VersionHighest;
-    public static string DefaultClassFilter { get; set; } = "";
+    public static string DefaultClassFilter { get; set; } = ClassFilterClassSpecific;
     public static string DefaultFilterProfile { get; set; } = "";
     public static bool DefaultGroupCardUpgrades { get; set; } = true;
 

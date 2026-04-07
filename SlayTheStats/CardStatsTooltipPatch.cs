@@ -50,7 +50,7 @@ public static class CardHoverShowPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
+                statsText = NoDataText(filter);
             }
             else
             {
@@ -60,7 +60,7 @@ public static class CardHoverShowPatch
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
-                statsText = actStats.Count == 0 ? NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter);
+                statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -325,23 +325,19 @@ public static class CardHoverShowPatch
     }
 
     /// <summary>
-    /// "No data for A6 Ironclad" / "No data for Ironclad" / "No A7 data for all characters" / "No data for all characters"
-    /// depending on the current filter context.
+    /// "No data" message followed by the comma-separated filter context (same
+    /// footer as a populated tooltip), so the user can see what filter is
+    /// excluding the data without us repeating that info in the headline.
     /// </summary>
-    internal static string NoDataText(string? character, int? ascensionMin, int? ascensionMax)
+    internal static string NoDataText(AggregationFilter filter)
     {
-        var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
-        string msg;
-        if (character != null)
-        {
-            var name = FormatCharacterName(character);
-            msg = ascPrefix.Length > 0 ? $"No data for {ascPrefix}{name}" : $"No data for {name}";
-        }
-        else
-        {
-            msg = ascPrefix.Length > 0 ? $"No {ascPrefix}data for all characters" : "No data for all characters";
-        }
-        return $"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]{msg}[/color][/font]";
+        var characterLabel = GetCharacterLabel(filter);
+        var filterCtx = BuildFilterContext(characterLabel, filter);
+        var sb = new StringBuilder();
+        sb.Append($"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]");
+        if (filterCtx.Length > 0)
+            sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+        return sb.ToString();
     }
 
     /// <summary>
@@ -369,6 +365,40 @@ public static class CardHoverShowPatch
         return ch != null ? FormatCharacterName(ch) : "All characters";
     }
 
+    // Cache of per-character display BBCode (icon + name, or plain text
+    // fallback) so we don't re-check the resource path on every tooltip
+    // repaint. Keyed by character ID (e.g. "CHARACTER.IRONCLAD").
+    private static readonly Dictionary<string, string> _characterDisplayCache = new();
+
+    /// <summary>
+    /// Returns the footer-friendly character display: an inline BBCode [img]
+    /// of the top-panel head-shot followed by the formatted character name
+    /// (e.g. "[img]...[/img] Ironclad"). Falls back to just the formatted
+    /// name if the icon resource couldn't be loaded — covers modded
+    /// characters and mismatched IDs.
+    /// </summary>
+    internal static string GetCharacterDisplay(string character)
+    {
+        if (_characterDisplayCache.TryGetValue(character, out var cached))
+            return cached;
+
+        var name = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+            ? character.Substring("CHARACTER.".Length)
+            : character;
+        var path = $"res://images/ui/top_panel/character_icon_{name.ToLowerInvariant()}.png";
+        var formattedName = FormatCharacterName(character);
+
+        string result;
+        // ResourceLoader.Exists is cheap and cached internally.
+        if (ResourceLoader.Exists(path))
+            result = $"[img=28x28]{path}[/img] {formattedName}";
+        else
+            result = formattedName;
+
+        _characterDisplayCache[character] = result;
+        return result;
+    }
+
     /// <summary>
     /// Builds a comma-separated filter context string for the footer.
     /// e.g. "A4-6, Defect, v0.100.0-v0.100.6, profile2"
@@ -380,8 +410,11 @@ public static class CardHoverShowPatch
         // Always include the ascension range, even when unfiltered ("A0-10").
         parts.Add(FormatAscensionFooter(filter.AscensionMin, filter.AscensionMax));
 
-        // Always include the character label, even when "All characters".
-        parts.Add(characterLabel);
+        // When filtered to a single character, use the character's top-panel
+        // head sprite + name. Falls back to the text label for "All characters"
+        // or when the icon resource isn't available.
+        var effectiveChar = GetEffectiveCharacter(filter);
+        parts.Add(effectiveChar != null ? GetCharacterDisplay(effectiveChar) : characterLabel);
 
         if (filter.VersionMin != null || filter.VersionMax != null)
         {
@@ -705,7 +738,7 @@ public static class InspectCardDisplayPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(effectiveChar, inspFilter.AscensionMin, inspFilter.AscensionMax);
+                statsText = CardHoverShowPatch.NoDataText(inspFilter);
             }
             else
             {
@@ -716,7 +749,7 @@ public static class InspectCardDisplayPatch
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(effectiveChar, inspFilter.AscensionMin, inspFilter.AscensionMax)
+                    ? CardHoverShowPatch.NoDataText(inspFilter)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline, inspFilter);
             }
 
@@ -802,7 +835,7 @@ public static class MerchantCardCreateHoverTipPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax);
+                statsText = CardHoverShowPatch.NoDataText(filter);
             }
             else
             {
@@ -812,7 +845,7 @@ public static class MerchantCardCreateHoverTipPatch
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(effectiveChar, filter.AscensionMin, filter.AscensionMax)
+                    ? CardHoverShowPatch.NoDataText(filter)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline, filter);
             }
 

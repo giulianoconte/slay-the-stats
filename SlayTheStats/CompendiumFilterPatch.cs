@@ -114,7 +114,11 @@ public static partial class CompendiumFilterPatch
     [HarmonyPatch(typeof(NCardLibrary), "OnSubmenuOpened")]
     public static class CardLibraryOpenedPatch
     {
-        static void Postfix() => HideAllPanes();
+        static void Postfix(NCardLibrary __instance)
+        {
+            HideAllPanes();
+            MaybeShowTutorialFor(__instance);
+        }
     }
 
     // ── Relic Collection patch ──────────────────────────────────────────────
@@ -136,7 +140,11 @@ public static partial class CompendiumFilterPatch
     [HarmonyPatch(typeof(NRelicCollection), "OnSubmenuOpened")]
     public static class RelicCollectionOpenedPatch
     {
-        static void Postfix() => HideAllPanes();
+        static void Postfix(NRelicCollection __instance)
+        {
+            HideAllPanes();
+            MaybeShowTutorialFor(__instance);
+        }
     }
 
     // ── Relic inspect — hide pane when a relic is inspected ─
@@ -564,6 +572,236 @@ public static partial class CompendiumFilterPatch
         _activeSortButtons.RemoveAll(b => !GodotObject.IsInstanceValid(b));
         foreach (var b in _activeSortButtons)
             UpdateSortButtonActiveState(b);
+    }
+
+    // ── First-run tutorial ───────────────────────────────────────────────────
+
+    private static PanelContainer? _tutorialPanel;
+
+    /// <summary>
+    /// Shows the first-run tutorial box pointing at the SlayTheStats button
+    /// inside the given submenu, if the user hasn't seen it yet. Called from
+    /// the Card Library / Relic Collection OnSubmenuOpened patches with the
+    /// opening submenu as <paramref name="openingSubmenu"/>. A click anywhere
+    /// dismisses the tutorial and persists TutorialSeen = true.
+    /// </summary>
+    internal static void MaybeShowTutorialFor(Node openingSubmenu)
+    {
+        if (SlayTheStatsConfig.TutorialSeen) return;
+        if (_tutorialPanel != null && GodotObject.IsInstanceValid(_tutorialPanel)) return;
+
+        // Find the cloned SlayTheStats button that lives inside the submenu
+        // currently being opened. Matching by ancestor (rather than visibility)
+        // is reliable because OnSubmenuOpened fires before visibility has
+        // propagated up the tree, so IsVisibleInTree() can be false here.
+        _activeSortButtons.RemoveAll(b => !GodotObject.IsInstanceValid(b));
+        NCardViewSortButton? anchorButton = null;
+        foreach (var b in _activeSortButtons)
+        {
+            if (IsAncestorOf(openingSubmenu, b))
+            {
+                anchorButton = b;
+                break;
+            }
+        }
+        if (anchorButton == null)
+        {
+            if (SlayTheStatsConfig.DebugMode)
+                MainFile.Logger.Warn($"[SlayTheStats] MaybeShowTutorialFor({openingSubmenu?.GetType().Name}): no matching button");
+            return;
+        }
+
+        // Defer by one frame so the page has laid out (button's global rect is
+        // populated and visibility has propagated, so the dimmer/arrow render
+        // in the right place).
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredShow;
+        void DeferredShow()
+        {
+            tree.ProcessFrame -= DeferredShow;
+            if (!GodotObject.IsInstanceValid(anchorButton)) return;
+            BuildTutorialPanel(anchorButton);
+        }
+    }
+
+    private static bool IsAncestorOf(Node ancestor, Node descendant)
+    {
+        Node? current = descendant;
+        while (current != null)
+        {
+            if (current == ancestor) return true;
+            current = current.GetParent();
+        }
+        return false;
+    }
+
+    private static void BuildTutorialPanel(NCardViewSortButton anchorButton)
+    {
+        var tree = (SceneTree)Engine.GetMainLoop();
+        if (tree?.Root == null) return;
+
+        // Use a CanvasLayer so the tutorial draws above the compendium's own UI.
+        var layer = new CanvasLayer
+        {
+            Name = "SlayTheStatsTutorialLayer",
+            Layer = 100,
+        };
+
+        // Full-screen click-catcher so any click dismisses the tutorial.
+        var dimmer = new ColorRect
+        {
+            Color = new Color(0, 0, 0, 0.55f),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+        };
+        dimmer.AnchorRight = 1f;
+        dimmer.AnchorBottom = 1f;
+        layer.AddChild(dimmer);
+
+        // Build the tutorial panel — stone-textured to match the filter pane.
+        var panel = new PanelContainer
+        {
+            Name = "SlayTheStatsTutorialPanel",
+        };
+        panel.AddThemeStyleboxOverride("panel", BuildPanelStyle());
+        panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+        panel.MouseFilter = Control.MouseFilterEnum.Ignore; // clicks still dismiss
+
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 16);
+        margin.AddThemeConstantOverride("margin_right", 16);
+        margin.AddThemeConstantOverride("margin_top", 14);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
+        panel.AddChild(margin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 8);
+        margin.AddChild(vbox);
+
+        var title = new Label { Text = "Welcome to SlayTheStats!" };
+        title.AddThemeColorOverride("font_color", Gold);
+        ApplyGameFont(title, 24);
+        vbox.AddChild(title);
+
+        var body = new Label
+        {
+            Text = "Click the SlayTheStats button to adjust the filters\nfor specific ascensions, versions, profiles, and more.\n\nSave default settings to customize stats shown in-run.",
+            AutowrapMode = TextServer.AutowrapMode.Off,
+        };
+        body.AddThemeColorOverride("font_color", Cream);
+        ApplyGameFont(body, 18);
+        vbox.AddChild(body);
+
+        var hint = new Label { Text = "(click anywhere to dismiss)" };
+        hint.AddThemeColorOverride("font_color", new Color(0.75f, 0.72f, 0.65f, 1f));
+        ApplyGameFont(hint, 13);
+        vbox.AddChild(hint);
+
+        layer.AddChild(panel);
+
+        // Arrow (a big ▶ / ◀ label) pointing from the panel toward the button.
+        var arrow = new Label
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        arrow.AddThemeColorOverride("font_color", Gold);
+        ApplyGameFont(arrow, 48);
+        layer.AddChild(arrow);
+
+        tree.Root.AddChild(layer);
+        _tutorialPanel = panel;
+
+        // Position the panel + arrow after layout settles (one more frame so
+        // the panel's combined minimum size is known).
+        tree.ProcessFrame += DeferredPosition;
+        void DeferredPosition()
+        {
+            tree.ProcessFrame -= DeferredPosition;
+            if (!GodotObject.IsInstanceValid(panel) || !GodotObject.IsInstanceValid(anchorButton))
+                return;
+
+            var viewport = panel.GetViewport();
+            if (viewport == null) return;
+            var vpSize = viewport.GetVisibleRect().Size;
+            var btnRect = anchorButton.GetGlobalRect();
+            var panelSize = panel.GetCombinedMinimumSize();
+
+            // Place the panel centered vertically on the button, to its right
+            // (card library button is on the left sidebar) or to its left
+            // (relic collection button is bottom-left corner) — whichever has
+            // more room.
+            const float gap = 72f;
+            float panelX, arrowX;
+            string arrowGlyph;
+            // Negative delta animates the arrow toward the left (button is on
+            // the left), positive toward the right.
+            float arrowAnimDelta;
+            if (btnRect.Position.X + btnRect.Size.X + gap + panelSize.X <= vpSize.X)
+            {
+                // Panel to the right of the button, arrow pointing ◀ at the button.
+                panelX = btnRect.Position.X + btnRect.Size.X + gap;
+                arrowX = btnRect.Position.X + btnRect.Size.X + 8;
+                arrowGlyph = "◀";
+                arrowAnimDelta = -10f;
+            }
+            else
+            {
+                // Panel to the left of the button, arrow pointing ▶.
+                panelX = btnRect.Position.X - gap - panelSize.X;
+                arrowX = btnRect.Position.X - 48;
+                arrowGlyph = "▶";
+                arrowAnimDelta = 10f;
+            }
+            var panelY = Math.Clamp(
+                btnRect.Position.Y + (btnRect.Size.Y - panelSize.Y) * 0.5f,
+                16f, vpSize.Y - panelSize.Y - 16f);
+
+            panel.AnchorLeft = 0f; panel.AnchorTop = 0f;
+            panel.AnchorRight = 0f; panel.AnchorBottom = 0f;
+            panel.GlobalPosition = new Vector2(panelX, panelY);
+
+            arrow.Text = arrowGlyph;
+            arrow.AnchorLeft = 0f; arrow.AnchorTop = 0f;
+            arrow.AnchorRight = 0f; arrow.AnchorBottom = 0f;
+            arrow.GlobalPosition = new Vector2(
+                arrowX,
+                btnRect.Position.Y + (btnRect.Size.Y - 48) * 0.5f);
+
+            // Looping back-and-forth tween on the arrow's position so it draws
+            // the eye to the SlayTheStats button. Killed automatically when the
+            // tutorial layer is freed on dismiss.
+            var basePos = arrow.Position;
+            var arrowTween = arrow.CreateTween().SetLoops();
+            arrowTween.TweenProperty(arrow, "position",
+                    new Vector2(basePos.X + arrowAnimDelta, basePos.Y), 0.45)
+                .SetTrans(Tween.TransitionType.Sine)
+                .SetEase(Tween.EaseType.InOut);
+            arrowTween.TweenProperty(arrow, "position",
+                    basePos, 0.45)
+                .SetTrans(Tween.TransitionType.Sine)
+                .SetEase(Tween.EaseType.InOut);
+        }
+
+        // Dismiss on any click. Persist TutorialSeen so it doesn't come back.
+        dimmer.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed)
+                DismissTutorial(layer);
+        };
+    }
+
+    private static void DismissTutorial(CanvasLayer layer)
+    {
+        SlayTheStatsConfig.TutorialSeen = true;
+        try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] Failed to save TutorialSeen: {e.Message}");
+        }
+        if (GodotObject.IsInstanceValid(layer))
+            layer.QueueFree();
+        _tutorialPanel = null;
     }
 
     private static void UpdateButtonActiveState(Button button)
