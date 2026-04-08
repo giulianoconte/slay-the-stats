@@ -41,6 +41,27 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool TutorialSeen { get; set; } = false;
 
     /// <summary>
+    /// True once the user has seen the bestiary tutorial overlay (introduced in
+    /// v0.3.0). Independent from the compendium tutorial because the bestiary
+    /// has its own controls and stat columns to explain.
+    /// </summary>
+    public static bool BestiaryTutorialSeen { get; set; } = false;
+
+    /// <summary>
+    /// When true, the Stats Bestiary button is not injected into the compendium
+    /// bottom row (and the bestiary submenu becomes unreachable from the menu).
+    /// For users who don't want the extra button.
+    /// </summary>
+    public static bool BestiaryButtonDisabled { get; set; } = false;
+
+    /// <summary>
+    /// When true, the in-combat encounter stats tooltip (the floating panel that
+    /// appears above hovered enemies) is suppressed entirely. The bestiary stats
+    /// page still works regardless.
+    /// </summary>
+    public static bool InCombatEncounterTooltipDisabled { get; set; } = false;
+
+    /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
     /// (the folder that contains the "steam" subfolder).
     /// Leave empty to use the platform default.

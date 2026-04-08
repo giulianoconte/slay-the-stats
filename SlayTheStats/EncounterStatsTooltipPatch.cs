@@ -30,8 +30,27 @@ public static class CreatureFocusPatch
 {
     private static bool _warnedOnce;
 
-    static void Postfix(NCreature __instance)
+    /// <summary>
+    /// NCreature.OnFocus is wired to BOTH MouseEntered AND FocusEntered signals on the
+    /// hitbox. After the player plays a card on a monster, the click sets keyboard focus
+    /// on the hitbox → FocusEntered fires → OnFocus is called → the base method
+    /// early-returns because IsFocused is already true → but our Postfix would still
+    /// run and kick off the hover timer, popping a tooltip the player didn't ask for.
+    ///
+    /// Capture IsFocused BEFORE the base call so the Postfix can tell whether this
+    /// invocation actually transitioned focus (true → run our logic) or was a no-op
+    /// re-entry (false → skip to mirror the base method's early-return).
+    /// </summary>
+    static void Prefix(NCreature __instance, out bool __state)
     {
+        __state = __instance.IsFocused;
+    }
+
+    static void Postfix(NCreature __instance, bool __state)
+    {
+        // Was already focused before this call → base method no-op'd → mirror that.
+        if (__state) return;
+
         if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
         if (!CardHoverShowPatch.IsInRun) return;
 
@@ -159,8 +178,11 @@ public static class CreatureReadyPatch
 
 internal static class EncounterStatsHover
 {
-    /// <summary>How long the player must hover an enemy before the panel appears.</summary>
-    private const double HoverDelaySeconds = 0.75;
+    /// <summary>How long the player must hover an enemy before the panel appears.
+    /// 0 = show immediately. The original 0.75s delay was kept while the tooltip was
+    /// debounced for rapid movement; reverted to instant since the column trim made the
+    /// panel small enough that pop-in during quick hovers is no longer disruptive.</summary>
+    private const double HoverDelaySeconds = 0.0;
 
     /// <summary>Vertical gap between our panel and the top of the existing tooltip stack.</summary>
     private const float StackGapPx = 8f;
@@ -172,7 +194,9 @@ internal static class EncounterStatsHover
     private static string?    _focusedEncounterId;
 
     private static PanelContainer? _panel;
-    private static RichTextLabel?  _panelLabel;
+    private static RichTextLabel?  _panelLabel;       // table body (mono font)
+    private static RichTextLabel?  _panelNameLabel;   // encounter name (Kreon bold, gold)
+    private static Label?          _panelBrandLabel;  // "SlayTheStats" suffix (grey, right-aligned)
     private static NinePatchRect?  _shadow;
     private static bool _followerInjected;
 
@@ -230,6 +254,9 @@ internal static class EncounterStatsHover
 
     private static void ShowFor(NCreature creature, string encounterId)
     {
+        // User opted out via the mod config — never build/show the in-combat tooltip.
+        if (SlayTheStatsConfig.InCombatEncounterTooltipDisabled) return;
+
         // Look up the hitbox via reflection rather than the public Hitbox getter, in case the
         // property name varies across game builds.
         var hitbox = creature.GetType()
@@ -237,53 +264,18 @@ internal static class EncounterStatsHover
             ?.GetValue(creature) as Control;
         if (hitbox == null) return;
 
-        if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap)) return;
-
-        var effectiveChar = CardHoverShowPatch.RunCharacter;
-        var filter = BuildFilter(effectiveChar);
-        var actStats = StatsAggregator.AggregateEncountersByAct(contextMap, filter);
-
-        string? category = null;
-        if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
-            category = meta.Category;
-
-        var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
-        var characterLabel = effectiveChar != null ? FormatCharacterName(effectiveChar) : "All";
-
-        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
-        double dmgPctBaseline    = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category);
-
-        var combined = new EncounterEvent();
-        foreach (var stat in actStats.Values)
-        {
-            combined.Fought           += stat.Fought;
-            combined.Died             += stat.Died;
-            combined.WonRun           += stat.WonRun;
-            combined.TurnsTakenSum    += stat.TurnsTakenSum;
-            combined.DamageTakenSum   += stat.DamageTakenSum;
-            combined.DamageTakenSqSum += stat.DamageTakenSqSum;
-            combined.HpEnteringSum    += stat.HpEnteringSum;
-            combined.MaxHpSum         += stat.MaxHpSum;
-            combined.PotionsUsedSum   += stat.PotionsUsedSum;
-            combined.DmgPctSum        += stat.DmgPctSum;
-            combined.DmgPctSqSum      += stat.DmgPctSqSum;
-        }
-
-        string statsText = combined.Fought == 0
-            ? EncounterTooltipHelper.NoDataText(characterLabel, filter.AscensionMin, filter.AscensionMax)
-            : EncounterTooltipHelper.BuildEncounterStatsTextSingleRow(
-                combined, deathRateBaseline, dmgPctBaseline,
-                characterLabel, filter.AscensionMin, filter.AscensionMax, categoryLabel);
-
-        var encounterName = EncounterCategory.FormatName(encounterId);
-        var bbcode = $"[b]{encounterName}[/b]                    [color=#606060]SlayTheStats[/color]\n{statsText}";
-
         EnsurePanel();
-        if (_panel == null || _panelLabel == null) return;
+        if (_panel == null || _panelLabel == null || _panelNameLabel == null) return;
 
-        _panelLabel.Text = bbcode;
-        _panelLabel.ResetSize();
-        _panel.ResetSize();
+        var handle = new TooltipPanelHandle
+        {
+            Panel      = _panel,
+            NameLabel  = _panelNameLabel,
+            BrandLabel = _panelBrandLabel!,
+            TableLabel = _panelLabel,
+            Shadow     = _shadow!,
+        };
+        if (!PopulatePanelData(handle, encounterId)) return;
 
         // Reparent to the root so we render above everything else.
         var root = (Engine.GetMainLoop() as SceneTree)?.Root;
@@ -311,6 +303,81 @@ internal static class EncounterStatsHover
 
         // Position immediately so there's no one-frame flicker before the follower runs.
         UpdatePosition();
+    }
+
+    /// <summary>
+    /// Loads encounter data via the StatsDb, builds the table BBCode + name BBCode, and
+    /// writes them into the supplied panel handle's labels. Returns false if the encounter
+    /// id has no data in the db (caller should skip the show in that case).
+    /// </summary>
+    private static bool PopulatePanelData(TooltipPanelHandle handle, string encounterId)
+    {
+        if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap)) return false;
+
+        var effectiveChar = CardHoverShowPatch.RunCharacter;
+        var filter = BuildFilter(effectiveChar);
+        var actStats = StatsAggregator.AggregateEncountersByAct(contextMap, filter);
+
+        string? category = null;
+        if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
+            category = meta.Category;
+
+        var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
+        var characterLabel = effectiveChar != null ? FormatCharacterName(effectiveChar) : "All";
+
+        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
+        double dmgPctBaseline    = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category);
+        double dmgBaseline       = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category);
+
+        var combined = new EncounterEvent();
+        foreach (var stat in actStats.Values)
+        {
+            combined.Fought           += stat.Fought;
+            combined.Died             += stat.Died;
+            combined.WonRun           += stat.WonRun;
+            combined.TurnsTakenSum    += stat.TurnsTakenSum;
+            combined.DamageTakenSum   += stat.DamageTakenSum;
+            combined.DamageTakenSqSum += stat.DamageTakenSqSum;
+            combined.HpEnteringSum    += stat.HpEnteringSum;
+            combined.MaxHpSum         += stat.MaxHpSum;
+            combined.PotionsUsedSum   += stat.PotionsUsedSum;
+            combined.DmgPctSum        += stat.DmgPctSum;
+            combined.DmgPctSqSum      += stat.DmgPctSqSum;
+        }
+
+        string statsText = combined.Fought == 0
+            ? EncounterTooltipHelper.NoDataText(characterLabel, filter.AscensionMin, filter.AscensionMax)
+            : EncounterTooltipHelper.BuildEncounterStatsTextSingleRow(
+                combined, deathRateBaseline, dmgPctBaseline, dmgBaseline,
+                effectiveChar, filter.AscensionMin, filter.AscensionMax, categoryLabel);
+
+        var encounterName = TruncateEncounterNameIfTooLong(EncounterCategory.FormatName(encounterId));
+
+        // Trailing spaces extend the FitContent-computed rect past the rightmost letter
+        // so its drop shadow can render in full without being clipped at the rect
+        // boundary. (RichTextLabel + FitContent pegs its width to the text width which
+        // is one px short of where the shadow ends.)
+        handle.NameLabel.Text = $"[b]{encounterName}   [/b]";
+        handle.TableLabel.Text = statsText;
+        handle.NameLabel.ResetSize();
+        handle.TableLabel.ResetSize();
+        handle.Panel.ResetSize();
+        return true;
+    }
+
+    /// <summary>
+    /// Encounter names that exceed this many characters are truncated with an ellipsis
+    /// so they don't push the SlayTheStats brand off the right edge of the in-combat
+    /// tooltip. Vanilla names should all fit (the longest currently known are
+    /// "Lagavulin Matriarch" and "Overgrowth Crawlers" at 19 chars); the cap exists for
+    /// modded encounters with absurd labels.
+    /// </summary>
+    private const int MaxEncounterNameChars = 22;
+
+    private static string TruncateEncounterNameIfTooLong(string name)
+    {
+        if (name.Length <= MaxEncounterNameChars) return name;
+        return name.Substring(0, MaxEncounterNameChars - 1) + "…";
     }
 
     public static void Hide()
@@ -359,10 +426,16 @@ internal static class EncounterStatsHover
         }
 
         // Center horizontally over the anchor; clamp to viewport so the panel never escapes
-        // the screen.
+        // the screen. The stone-texture stylebox has asymmetric content margins (left=22,
+        // right=0) AND asymmetric texture margins (left=55, right=91) — the two pull in
+        // opposite directions, so the net visual content center is offset from the bbox
+        // center by less than the full content-margin asymmetry. Empirically -6 px lines
+        // up with the underlying hover-tip stack; -11 (full content-margin asymmetry) was
+        // too much and shifted the panel slightly left.
+        const float ContentMarginShiftX = 6f;
         var panelSize    = _panel.Size;
         var viewportSize = _panel.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-        float x = anchor.X + anchorSize.X * 0.5f - panelSize.X * 0.5f;
+        float x = anchor.X + anchorSize.X * 0.5f - panelSize.X * 0.5f - ContentMarginShiftX;
         x = Math.Clamp(x, 0f, Math.Max(0f, viewportSize.X - panelSize.X));
         float y = anchor.Y - panelSize.Y - StackGapPx;
         if (y < 0f) y = anchor.Y + anchorSize.Y + StackGapPx; // overflow → drop below
@@ -384,21 +457,137 @@ internal static class EncounterStatsHover
         return dict[owner] as NHoverTipSet;
     }
 
+    /// <summary>Bag of references for one encounter tooltip instance. Used by both the
+    /// main hover-driven tooltip and the debug test panels (which are always-visible
+    /// fixed-position copies showing canned encounter IDs to verify layout).</summary>
+    internal sealed class TooltipPanelHandle
+    {
+        public required PanelContainer Panel;
+        public required RichTextLabel  NameLabel;
+        public required Label          BrandLabel;
+        public required RichTextLabel  TableLabel;
+        public required NinePatchRect  Shadow;
+    }
+
     private static void EnsurePanel()
     {
         if (_panel != null && GodotObject.IsInstanceValid(_panel))
             return;
 
+        var handle = BuildTooltipPanelHandle("SlayTheStatsEncounterTooltip");
+        _panel           = handle.Panel;
+        _panelLabel      = handle.TableLabel;
+        _panelNameLabel  = handle.NameLabel;
+        _panelBrandLabel = handle.BrandLabel;
+        _shadow          = handle.Shadow;
+    }
+
+    /// <summary>
+    /// Builds a fresh, unparented tooltip panel + shadow with all the labels themed
+    /// the same way the main hover tooltip uses. Caller is responsible for adding the
+    /// panel and shadow to the scene tree, populating the labels via PopulatePanelData,
+    /// and positioning them.
+    /// </summary>
+    private static TooltipPanelHandle BuildTooltipPanelHandle(string panelName)
+    {
         // Make sure the shared TooltipHelper assets (panel stylebox, fonts) are initialized.
         TooltipHelper.TrySceneTheftOnce();
 
         var panel = new PanelContainer();
-        panel.Name      = "SlayTheStatsEncounterTooltip";
+        panel.Name      = panelName;
         panel.Visible   = false;
         panel.MouseFilter = Control.MouseFilterEnum.Ignore;
-        panel.CustomMinimumSize = new Vector2(TooltipHelper.EncounterTooltipWidth, 0);
+        // After v0.3.0 trim (4 cols: Dmg|Var|Turns|Deaths), the in-combat tooltip fits
+        // within the standard hover-tip width — no longer needs the wider EncounterTooltipWidth.
+        panel.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
         panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
         panel.ZIndex = 200;
+
+        // Inner VBox: header HBox (encounter name | SlayTheStats brand) + table label.
+        // Splitting into two control levels lets the encounter name use Kreon while the
+        // table uses monospace, AND lets the brand sit on the same line as the name
+        // without literal-spaces alignment hacks.
+        var vbox = new VBoxContainer();
+        vbox.Name = "EncounterStatsVBox";
+        vbox.AddThemeConstantOverride("separation", 4);
+        vbox.MouseFilter = Control.MouseFilterEnum.Ignore;
+        // Force the vbox to fill the panel's content area horizontally so the header
+        // HBox's spacer can push the brand to the right edge.
+        vbox.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth - 22f, 0);
+        panel.AddChild(vbox);
+
+        // Header is a plain Control (not an HBox) so we can anchor the encounter name
+        // to the top-left and the brand label to the top-right independently. HBox +
+        // ExpandFill didn't reliably push the brand flush right because RichTextLabel
+        // with FitContent reports its content size as its minimum, and the leftover
+        // space ended up distributed unpredictably.
+        const int HeaderHeightPx = 28;
+        const int BrandRightPadPx = 24;
+        var headerRow = new Control();
+        headerRow.Name = "HeaderRow";
+        headerRow.CustomMinimumSize = new Vector2(0, HeaderHeightPx);
+        headerRow.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        headerRow.MouseFilter = Control.MouseFilterEnum.Ignore;
+        vbox.AddChild(headerRow);
+
+        var kreonBold = TooltipHelper.Fonts.Bold;
+        var kreonRegular = TooltipHelper.Fonts.Normal;
+
+        var nameLabel = new RichTextLabel();
+        nameLabel.Name                = "EncounterNameLabel";
+        nameLabel.BbcodeEnabled       = true;
+        nameLabel.FitContent          = true;
+        nameLabel.AutowrapMode        = TextServer.AutowrapMode.Off;
+        nameLabel.ClipContents        = false;
+        nameLabel.ScrollActive        = false;
+        nameLabel.SelectionEnabled    = false;
+        nameLabel.ShortcutKeysEnabled = false;
+        nameLabel.MouseFilter         = Control.MouseFilterEnum.Ignore;
+        // Anchor top-left; FitContent grows the rect to fit text. PopulatePanelData
+        // adds trailing spaces to the text so the rect extends past the rightmost
+        // letter, giving its shadow room to render without being clipped at the rect
+        // boundary.
+        nameLabel.AnchorLeft   = 0f;
+        nameLabel.AnchorTop    = 0f;
+        nameLabel.AnchorRight  = 0f;
+        nameLabel.AnchorBottom = 1f;
+        nameLabel.OffsetLeft   = 0;
+        nameLabel.OffsetTop    = 0;
+        nameLabel.OffsetBottom = 0;
+        // Kreon font (bold) + classic header gold so the encounter name matches the
+        // bestiary stats title and the compendium tooltip headers. Using BBCode tags
+        // alone is not enough — RichTextLabel needs the bold font themed in or [b]
+        // tags fall back to a synthetic bold of the default font.
+        if (kreonBold != null) nameLabel.AddThemeFontOverride("bold_font", kreonBold);
+        if (kreonRegular != null) nameLabel.AddThemeFontOverride("normal_font", kreonRegular);
+        nameLabel.AddThemeFontSizeOverride("normal_font_size", 20);
+        nameLabel.AddThemeFontSizeOverride("bold_font_size", 20);
+        nameLabel.AddThemeColorOverride("default_color", new Color(0.937f, 0.784f, 0.318f, 1f)); // #efc851
+        ApplyTooltipShadow(nameLabel);
+        headerRow.AddChild(nameLabel);
+
+        var brandLabel = new Label();
+        brandLabel.Name = "SlayTheStatsBrand";
+        brandLabel.Text = "SlayTheStats";
+        brandLabel.AddThemeColorOverride("font_color", new Color(0.376f, 0.376f, 0.376f, 1f)); // #606060
+        brandLabel.AddThemeFontSizeOverride("font_size", 14);
+        brandLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        if (kreonRegular != null) brandLabel.AddThemeFontOverride("font", kreonRegular);
+        ApplyTooltipShadow(brandLabel);
+        // Anchor to top-right so the brand's right edge always sits BrandRightPadPx
+        // inside the header's right edge, regardless of the encounter name length.
+        // VerticalAlignment.Top (not Center) nudges the brand up so its top margin
+        // from the panel roughly matches the right margin — visual symmetry with the
+        // stone frame corner.
+        brandLabel.AnchorLeft   = 1f;
+        brandLabel.AnchorRight  = 1f;
+        brandLabel.AnchorTop    = 0f;
+        brandLabel.AnchorBottom = 0f;
+        brandLabel.GrowHorizontal = Control.GrowDirection.Begin;
+        brandLabel.OffsetRight  = -BrandRightPadPx;
+        brandLabel.OffsetTop    = 0;
+        brandLabel.VerticalAlignment = VerticalAlignment.Top;
+        headerRow.AddChild(brandLabel);
 
         var label = new RichTextLabel();
         label.Name                = "EncounterStatsLabel";
@@ -409,6 +598,7 @@ internal static class EncounterStatsHover
         label.SelectionEnabled    = false;
         label.ShortcutKeysEnabled = false;
         label.MouseFilter         = Control.MouseFilterEnum.Ignore;
+        label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
 
         var monoFont = TooltipHelper.GetMonoFont();
         if (monoFont != null)
@@ -421,8 +611,8 @@ internal static class EncounterStatsHover
         label.AddThemeFontSizeOverride("bold_font_size", 18);
         label.AddThemeColorOverride("default_color", new Color(1f, 0.9647f, 0.8863f, 1f));
         label.AddThemeConstantOverride("line_separation", 0);
-
-        panel.AddChild(label);
+        ApplyTooltipShadow(label);
+        vbox.AddChild(label);
 
         // Steal the same stone-tile stylebox the shared TooltipHelper builds for cards/relics.
         var style = TooltipHelper.BuildPanelStyle();
@@ -430,7 +620,7 @@ internal static class EncounterStatsHover
             panel.AddThemeStyleboxOverride("panel", style);
 
         var shadow = new NinePatchRect();
-        shadow.Name              = "SlayTheStatsEncounterShadow";
+        shadow.Name              = panelName + "Shadow";
         shadow.Texture           = ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
         shadow.PatchMarginLeft   = 55;
         shadow.PatchMarginRight  = 91;
@@ -441,9 +631,38 @@ internal static class EncounterStatsHover
         shadow.Visible           = false;
         shadow.MouseFilter       = Control.MouseFilterEnum.Ignore;
 
-        _panel      = panel;
-        _panelLabel = label;
-        _shadow     = shadow;
+        return new TooltipPanelHandle
+        {
+            Panel      = panel,
+            NameLabel  = nameLabel,
+            BrandLabel = brandLabel,
+            TableLabel = label,
+            Shadow     = shadow,
+        };
+    }
+
+    /// <summary>
+    /// Adds a drop shadow to a tooltip text control. Offset 3/2 — 1.5:1 right:down
+    /// ratio, right-biased without feeling top-heavy.
+    /// </summary>
+    private static void ApplyTooltipShadow(Control control)
+    {
+        var shadow = new Color(0f, 0f, 0f, 0.55f);
+        switch (control)
+        {
+            case RichTextLabel rt:
+                rt.AddThemeColorOverride("font_shadow_color", shadow);
+                rt.AddThemeConstantOverride("shadow_offset_x", 3);
+                rt.AddThemeConstantOverride("shadow_offset_y", 2);
+                rt.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+            case Label lb:
+                lb.AddThemeColorOverride("font_shadow_color", shadow);
+                lb.AddThemeConstantOverride("shadow_offset_x", 3);
+                lb.AddThemeConstantOverride("shadow_offset_y", 2);
+                lb.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+        }
     }
 
     private static AggregationFilter BuildFilter(string? character)

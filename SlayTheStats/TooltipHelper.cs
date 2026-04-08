@@ -134,8 +134,6 @@ internal static class TooltipHelper
     /// injects the position follower on first call, and makes the panel visible.
     /// </summary>
     internal static float ActiveWidth = TooltipWidth;
-    /// <summary>When set, the position follower places the tooltip at this fixed position instead of following a holder.</summary>
-    internal static Vector2? FixedPosition;
 
     internal static void ShowPanel(string tableText, Control? holder = null, float? widthOverride = null)
     {
@@ -598,20 +596,6 @@ public partial class SlayTheStatsPositionFollower : Node
         // must continue running to reposition when a native NHoverTipSet appears (e.g. on
         // hovering the upgrade button or any card keyword).
         if (!TooltipHelper.HasActiveHover && !TooltipHelper.InspectActive) return;
-
-        // Fixed position mode — used by the bestiary panel to place tooltip at a known location
-        if (TooltipHelper.FixedPosition.HasValue)
-        {
-            p.CustomMinimumSize = new Vector2(TooltipHelper.ActiveWidth, 0);
-            p.Position = TooltipHelper.FixedPosition.Value;
-            var fixedShadow = TooltipHelper.GetShadowPublic();
-            if (fixedShadow != null && GodotObject.IsInstanceValid(fixedShadow))
-            {
-                fixedShadow.Position = p.Position + new Vector2(TooltipHelper.ShadowOffset, TooltipHelper.ShadowOffset);
-                fixedShadow.Size = p.Size;
-            }
-            return;
-        }
 
         var root          = (Engine.GetMainLoop() as SceneTree)?.Root;
         var tipSet        = TooltipHelper.FindTipSet(root);

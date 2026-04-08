@@ -426,7 +426,7 @@ public static partial class CompendiumFilterPatch
         return null;
     }
 
-    private static void RegisterPane(PanelContainer pane)
+    internal static void RegisterPane(PanelContainer pane)
     {
         // Clean up any stale references.
         _activePanes.RemoveAll(p => !GodotObject.IsInstanceValid(p));
@@ -439,6 +439,21 @@ public static partial class CompendiumFilterPatch
     /// Duplicates an existing NCardViewSortButton to get the exact game style:
     /// textures, game fonts (Kreon), HSV shader material, tween animations, and SFX.
     /// </summary>
+    /// <summary>
+    /// Returns a freshly cloned SlayTheStats sort button if a template has been cached
+    /// (i.e. the card library or relic collection has been opened at least once this
+    /// session). Returns null otherwise — callers must provide their own fallback.
+    /// </summary>
+    internal static NCardViewSortButton? TryCloneTemplateButton()
+    {
+        if (_sortButtonTemplate == null || !GodotObject.IsInstanceValid(_sortButtonTemplate))
+            return null;
+        return CloneSortButton(_sortButtonTemplate);
+    }
+
+    internal static void WireExternalSortButtonToPane(NCardViewSortButton button, PanelContainer pane)
+        => WireSortButtonToPane(button, pane);
+
     private static NCardViewSortButton CloneSortButton(NCardViewSortButton template)
     {
         // Duplicate nodes + scripts but NOT signal connections — ConnectSignals()
@@ -671,7 +686,7 @@ public static partial class CompendiumFilterPatch
     /// using the button's actual global rect (not hard-coded offsets).  The pane's bottom
     /// is aligned with the button's bottom so it grows upward and stays on-screen.
     /// </summary>
-    private static void RepositionPaneNextToButton(Control button, PanelContainer pane)
+    internal static void RepositionPaneNextToButton(Control button, PanelContainer pane)
     {
         if (!GodotObject.IsInstanceValid(button) || !GodotObject.IsInstanceValid(pane))
             return;
@@ -793,7 +808,7 @@ public static partial class CompendiumFilterPatch
         };
     }
 
-    private static void SyncAllControls()
+    internal static void SyncAllControls()
     {
         foreach (var cb in _syncCallbacks) cb();
     }
@@ -1262,8 +1277,35 @@ public static partial class CompendiumFilterPatch
         }
     }
 
-    private static PanelContainer BuildFilterPane(Action? onClose = null)
+    /// <summary>
+    /// Builds the SlayTheStats filter pane. Used by both the compendium card/relic filter
+    /// buttons (full pane) and the bestiary filter button (subset — no class filter, no
+    /// group-card-upgrades toggle, since the bestiary already exposes per-character scoring
+    /// in its own row and group-upgrades is a card-aggregation concern).
+    /// </summary>
+    /// <param name="onClose">If provided, a small ✕ button is added to the title row that
+    /// invokes this callback. Used by the bestiary which doesn't have an external close
+    /// trigger.</param>
+    /// <param name="includeClassFilter">When false, the class dropdown row is omitted.</param>
+    /// <param name="includeGroupUpgrades">When false, the "Group card upgrades" toggle is
+    /// omitted.</param>
+    /// <param name="onFilterChanged">If provided, invoked alongside RefreshAllSortButtonStates
+    /// every time a filter control mutates the config. Used by the bestiary to refresh its
+    /// encounter list when filters change while the pane is open.</param>
+    internal static PanelContainer BuildFilterPane(
+        Action? onClose = null,
+        bool includeClassFilter = true,
+        bool includeGroupUpgrades = true,
+        Action? onFilterChanged = null)
     {
+        // Local helper invoked at the end of every filter mutation. Wraps the existing sidebar
+        // suffix refresh and forwards to any caller-supplied callback.
+        void NotifyChanged()
+        {
+            RefreshAllSortButtonStates();
+            onFilterChanged?.Invoke();
+        }
+
         var pane = new FilterPanelContainer();
         pane.Name = "SlayTheStatsFilterPane";
         pane.Visible = false;
@@ -1354,7 +1396,7 @@ public static partial class CompendiumFilterPatch
                 HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
             }
             HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         };
         verMax.ItemSelected += (idx) =>
         {
@@ -1367,7 +1409,7 @@ public static partial class CompendiumFilterPatch
                 HighlightIfNonDefault(verMin, SlayTheStatsConfig.IsNonDefault("VersionMin"));
             }
             HighlightIfNonDefault(verMax, SlayTheStatsConfig.IsNonDefault("VersionMax"));
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         };
 
         // ── Profile filter ──
@@ -1388,7 +1430,7 @@ public static partial class CompendiumFilterPatch
         {
             SlayTheStatsConfig.FilterProfile = idx == 0 ? "" : profSelect.GetItemText((int)idx);
             HighlightIfNonDefault(profSelect, SlayTheStatsConfig.IsNonDefault("FilterProfile"));
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         };
 
         // ── Ascension range ──
@@ -1425,7 +1467,7 @@ public static partial class CompendiumFilterPatch
                 HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
             }
             HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         };
         ascMax.ValueChanged += (val) =>
         {
@@ -1437,43 +1479,52 @@ public static partial class CompendiumFilterPatch
                 HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
             }
             HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         };
 
         // ── Class filter dropdown ──
         // Values aligned with item index: ["", "__class__", "CHARACTER.IRONCLAD", ...]
-        var classRow = new HBoxContainer();
-        classRow.AddThemeConstantOverride("separation", 6);
-        vbox.AddChild(classRow);
-        classRow.AddChild(MakeLabel("Class:", 120));
-
-        var classValues = new List<string> { "", SlayTheStatsConfig.ClassFilterClassSpecific };
-        var classLabels = new List<string> { "All", "Match class card" };
-        foreach (var ch in GetOrderedCharacters(MainFile.Db))
+        // Skipped on the bestiary side: the bestiary already exposes per-character scoring
+        // via its own "Score by:" chip row, so the class dropdown would be redundant there.
+        OptionButton? classSelect = null;
+        List<string>? classValues = null;
+        if (includeClassFilter)
         {
-            classValues.Add(ch);
-            classLabels.Add(FormatCharName(ch));
-        }
-        var classSelect = new OptionButton();
-        classSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        classSelect.AddThemeColorOverride("font_color", Cream);
-        classSelect.AddThemeColorOverride("font_hover_color", Gold);
-        classSelect.AddThemeColorOverride("font_focus_color", Gold);
-        ApplyGameFont(classSelect, 16);
-        for (int i = 0; i < classLabels.Count; i++)
-            classSelect.AddItem(classLabels[i], i);
-        SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
-        classRow.AddChild(classSelect);
+            var classRow = new HBoxContainer();
+            classRow.AddThemeConstantOverride("separation", 6);
+            vbox.AddChild(classRow);
+            classRow.AddChild(MakeLabel("Class:", 120));
 
-        HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
+            classValues = new List<string> { "", SlayTheStatsConfig.ClassFilterClassSpecific };
+            var classLabels = new List<string> { "All", "Match class card" };
+            foreach (var ch in GetOrderedCharacters(MainFile.Db))
+            {
+                classValues.Add(ch);
+                classLabels.Add(FormatCharName(ch));
+            }
+            classSelect = new OptionButton();
+            classSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            classSelect.AddThemeColorOverride("font_color", Cream);
+            classSelect.AddThemeColorOverride("font_hover_color", Gold);
+            classSelect.AddThemeColorOverride("font_focus_color", Gold);
+            ApplyGameFont(classSelect, 16);
+            for (int i = 0; i < classLabels.Count; i++)
+                classSelect.AddItem(classLabels[i], i);
+            SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
+            classRow.AddChild(classSelect);
 
-        classSelect.ItemSelected += (idx) =>
-        {
-            var i = (int)idx;
-            SlayTheStatsConfig.ClassFilter = (i >= 0 && i < classValues.Count) ? classValues[i] : "";
             HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
-            RefreshAllSortButtonStates();
-        };
+
+            var classSelectLocal = classSelect;
+            var classValuesLocal = classValues;
+            classSelect.ItemSelected += (idx) =>
+            {
+                var i = (int)idx;
+                SlayTheStatsConfig.ClassFilter = (i >= 0 && i < classValuesLocal.Count) ? classValuesLocal[i] : "";
+                HighlightIfNonDefault(classSelectLocal, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
+                NotifyChanged();
+            };
+        }
 
         AddSeparator(vbox);
 
@@ -1482,79 +1533,84 @@ public static partial class CompendiumFilterPatch
         // own "Multiplayer Cards" / "View Upgrades" checkboxes). Falls back to
         // a Godot CheckBox if the template hasn't been cached yet — happens if
         // the relic page is opened before the card library has ever loaded.
-        Control groupUpgradesControl;
-        Action<bool> setGroupUpgrades;
+        // Skipped on the bestiary side: GroupCardUpgrades is a card-aggregation
+        // concern with no effect on encounter stats.
+        Action<bool>? setGroupUpgrades = null;
         Action highlightGroupUpgrades = () => { };
-        if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
+        if (includeGroupUpgrades)
         {
-            var clonedTickbox = CloneTickbox(_tickboxTemplate, "Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
-            clonedTickbox.Toggled += (box) =>
+            Control groupUpgradesControl;
+            if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
             {
-                SlayTheStatsConfig.GroupCardUpgrades = box.IsTicked;
-                highlightGroupUpgrades();
-                RefreshAllSortButtonStates();
-            };
-            groupUpgradesControl = clonedTickbox;
-            setGroupUpgrades = v => clonedTickbox.IsTicked = v;
-            // Tint the tickbox's inner MegaLabel green when GroupCardUpgrades
-            // differs from the saved default — matches the highlight pattern
-            // used by the other filter rows.
-            highlightGroupUpgrades = () =>
-            {
-                if (!GodotObject.IsInstanceValid(clonedTickbox)) return;
-                // NLibraryStatTickbox stores its label at the direct child path
-                // "Label" — match how the game's own _Ready looks it up. Falls
-                // back to a recursive search if the layout differs unexpectedly.
-                var label = (clonedTickbox.GetNodeOrNull<Control>("Label")
-                            ?? clonedTickbox.FindChild("Label", true, false)) as Control;
-                if (label == null)
+                var clonedTickbox = CloneTickbox(_tickboxTemplate, "Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+                clonedTickbox.Toggled += (box) =>
                 {
-                    if (SlayTheStatsConfig.DebugMode)
-                        MainFile.Logger.Warn("[SlayTheStats] highlightGroupUpgrades: tickbox Label not found");
-                    return;
-                }
+                    SlayTheStatsConfig.GroupCardUpgrades = box.IsTicked;
+                    highlightGroupUpgrades();
+                    NotifyChanged();
+                };
+                groupUpgradesControl = clonedTickbox;
+                setGroupUpgrades = v => clonedTickbox.IsTicked = v;
+                // Tint the tickbox's inner MegaLabel green when GroupCardUpgrades
+                // differs from the saved default — matches the highlight pattern
+                // used by the other filter rows.
+                highlightGroupUpgrades = () =>
+                {
+                    if (!GodotObject.IsInstanceValid(clonedTickbox)) return;
+                    // NLibraryStatTickbox stores its label at the direct child path
+                    // "Label" — match how the game's own _Ready looks it up. Falls
+                    // back to a recursive search if the layout differs unexpectedly.
+                    var label = (clonedTickbox.GetNodeOrNull<Control>("Label")
+                                ?? clonedTickbox.FindChild("Label", true, false)) as Control;
+                    if (label == null)
+                    {
+                        if (SlayTheStatsConfig.DebugMode)
+                            MainFile.Logger.Warn("[SlayTheStats] highlightGroupUpgrades: tickbox Label not found");
+                        return;
+                    }
 
-                bool nonDefault = SlayTheStatsConfig.IsNonDefault("GroupUpgrades");
-                var color = nonDefault ? ActiveFilterColor : Colors.White;
+                    bool nonDefault = SlayTheStatsConfig.IsNonDefault("GroupUpgrades");
+                    var color = nonDefault ? ActiveFilterColor : Colors.White;
 
-                // Set font_color via theme override only. Don't also set Modulate
-                // to the same color — Modulate multiplies into the rendered color,
-                // so white * white * (font green) = pure green; but green * white *
-                // (font green) = green² which is much darker than the green used
-                // in the other filter rows. Force Modulate back to white in case
-                // an earlier render-pass had set it.
-                label.AddThemeColorOverride("font_color", color);
-                label.Modulate = Colors.White;
-            };
-        }
-        else
-        {
-            var fallback = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
-            fallback.Toggled += (pressed) =>
+                    // Set font_color via theme override only. Don't also set Modulate
+                    // to the same color — Modulate multiplies into the rendered color,
+                    // so white * white * (font green) = pure green; but green * white *
+                    // (font green) = green² which is much darker than the green used
+                    // in the other filter rows. Force Modulate back to white in case
+                    // an earlier render-pass had set it.
+                    label.AddThemeColorOverride("font_color", color);
+                    label.Modulate = Colors.White;
+                };
+            }
+            else
             {
-                SlayTheStatsConfig.GroupCardUpgrades = pressed;
+                var fallback = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+                fallback.Toggled += (pressed) =>
+                {
+                    SlayTheStatsConfig.GroupCardUpgrades = pressed;
+                    highlightGroupUpgrades();
+                    NotifyChanged();
+                };
+                groupUpgradesControl = fallback;
+                setGroupUpgrades = v => fallback.SetPressedNoSignal(v);
+                highlightGroupUpgrades = () =>
+                    fallback.AddThemeColorOverride(
+                        "font_color",
+                        SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Colors.White);
+            }
+            vbox.AddChild(groupUpgradesControl);
+            // Initial highlight — deferred so the cloned tickbox's _Ready has run
+            // (and its MegaLabel reference is initialised) before we look it up.
+            var tickboxTree = (SceneTree)Engine.GetMainLoop();
+            tickboxTree.ProcessFrame += DeferredGroupUpgradesHighlight;
+            void DeferredGroupUpgradesHighlight()
+            {
+                tickboxTree.ProcessFrame -= DeferredGroupUpgradesHighlight;
                 highlightGroupUpgrades();
-                RefreshAllSortButtonStates();
-            };
-            groupUpgradesControl = fallback;
-            setGroupUpgrades = v => fallback.SetPressedNoSignal(v);
-            highlightGroupUpgrades = () =>
-                fallback.AddThemeColorOverride(
-                    "font_color",
-                    SlayTheStatsConfig.IsNonDefault("GroupUpgrades") ? ActiveFilterColor : Colors.White);
-        }
-        vbox.AddChild(groupUpgradesControl);
-        // Initial highlight — deferred so the cloned tickbox's _Ready has run
-        // (and its MegaLabel reference is initialised) before we look it up.
-        var tickboxTree = (SceneTree)Engine.GetMainLoop();
-        tickboxTree.ProcessFrame += DeferredGroupUpgradesHighlight;
-        void DeferredGroupUpgradesHighlight()
-        {
-            tickboxTree.ProcessFrame -= DeferredGroupUpgradesHighlight;
-            highlightGroupUpgrades();
-        }
+            }
 
-        AddSeparator(vbox);
+            AddSeparator(vbox);
+        }
 
         // ── Action buttons ──
         var row1 = new HBoxContainer();
@@ -1565,13 +1621,13 @@ public static partial class CompendiumFilterPatch
         {
             SlayTheStatsConfig.ClearAllFilters();
             SyncAllControls();
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         }));
         row1.AddChild(MakeActionButton("Reset", () =>
         {
             SlayTheStatsConfig.RestoreDefaults();
             SyncAllControls();
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         }));
         row1.AddChild(MakeActionButton("Save Defaults", () =>
         {
@@ -1582,7 +1638,7 @@ public static partial class CompendiumFilterPatch
                 MainFile.Logger.Warn($"[SlayTheStats] Failed to save config: {e.Message}");
             }
             SyncAllControls();
-            RefreshAllSortButtonStates();
+            NotifyChanged();
         }));
 
         // ── Sync callback: refresh all controls from config when pane opens ──
@@ -1603,9 +1659,12 @@ public static partial class CompendiumFilterPatch
             HighlightStepperIfNonDefault(ascMin, SlayTheStatsConfig.IsNonDefault("AscensionMin"));
             HighlightStepperIfNonDefault(ascMax, SlayTheStatsConfig.IsNonDefault("AscensionMax"));
 
-            SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
-            HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
-            setGroupUpgrades(SlayTheStatsConfig.GroupCardUpgrades);
+            if (classSelect != null && classValues != null)
+            {
+                SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
+                HighlightIfNonDefault(classSelect, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
+            }
+            setGroupUpgrades?.Invoke(SlayTheStatsConfig.GroupCardUpgrades);
             highlightGroupUpgrades();
         });
 

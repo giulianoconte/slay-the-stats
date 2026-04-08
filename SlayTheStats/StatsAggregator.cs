@@ -384,6 +384,36 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Computes average absolute damage taken across all encounters matching the filter
+    /// in a given category and act. Used by the in-combat tooltip footer where the
+    /// player has a single character and absolute damage is more meaningful than the
+    /// %-of-max-HP variant. Falls back to 0 if no data.
+    /// </summary>
+    public static double GetEncounterDmgBaseline(StatsDb db, AggregationFilter filter, string? category = null, int? act = null)
+    {
+        long totalDmg = 0;
+        int totalFought = 0;
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+                if (act != null && ctx.Act != act) continue;
+
+                totalFought += stat.Fought;
+                totalDmg += stat.DamageTakenSum;
+            }
+        }
+
+        return totalFought == 0 ? 0.0 : (double)totalDmg / totalFought;
+    }
+
+    /// <summary>
     /// Computes average death rate across all encounters matching the filter in a given category and act.
     /// Falls back to 10.0 if no data.
     /// </summary>

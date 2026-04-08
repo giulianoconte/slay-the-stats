@@ -182,6 +182,48 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
+            Set(cfg, "Key",          "bestiary_tutorial_seen");
+            Set(cfg, "Label",        "Bestiary Tutorial Seen");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.BestiaryTutorialSeen);
+            Set(cfg, "Description",  "Whether the bestiary tutorial overlay has been dismissed. Toggle off to see it again on next bestiary open.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.BestiaryTutorialSeen = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "bestiary_button_disabled");
+            Set(cfg, "Label",        "Disable Stats Bestiary Button");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.BestiaryButtonDisabled);
+            Set(cfg, "Description",  "Hide the Stats Bestiary button from the compendium bottom row. Requires a game restart to take effect.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.BestiaryButtonDisabled = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
+            Set(cfg, "Key",          "in_combat_encounter_tooltip_disabled");
+            Set(cfg, "Label",        "Disable In-Combat Encounter Tooltip");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.InCombatEncounterTooltipDisabled);
+            Set(cfg, "Description",  "Suppress the floating encounter stats tooltip that appears above enemies on hover during combat. The Stats Bestiary still works regardless.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.InCombatEncounterTooltipDisabled = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
             Set(cfg, "Key",          "data_directory");
             Set(cfg, "Label",        "Data Directory");
             Set(cfg, "Type",         EnumVal("TextInput"));

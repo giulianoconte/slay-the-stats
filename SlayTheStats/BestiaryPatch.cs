@@ -2,6 +2,7 @@ using BaseLib.Utils;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
@@ -72,6 +73,9 @@ public static class BestiaryButtonPatch
     {
         try
         {
+            // User opted out via the mod config — skip injection entirely.
+            if (SlayTheStatsConfig.BestiaryButtonDisabled) return;
+
             // Anchor next to the existing bottom-row buttons (Statistics, Run History) rather than
             // the locked game bestiary button at the top.
             var runHistoryButton = ((Node)__instance).GetNodeOrNull<Control>("%RunHistoryButton");
@@ -122,9 +126,9 @@ public static class BestiaryButtonPatch
                     var hsvField = AccessTools.Field(typeof(NCompendiumBottomButton), "_hsv");
                     hsvField?.SetValue(ourButton, ownMat);
                 }
-                // Slightly orange-warm tint, less saturated than before so it sits next to
-                // the other compendium tiles without screaming.
-                ((CanvasItem)bgPanel).SelfModulate = new Color(1.05f, 0.92f, 0.78f, 1f);
+                // Earthy / dirt tone — desaturated brown-tan instead of the prior warm
+                // orange so it reads as "field guide" rather than "hazard warning".
+                ((CanvasItem)bgPanel).SelfModulate = new Color(0.88f, 0.80f, 0.62f, 1f);
             }
 
             // Replace the icon with a square grid of boss icons (encountered in full color,
@@ -210,6 +214,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private HBoxContainer? _biomeTabRow;
     private HBoxContainer? _sortTabRow;
     private HBoxContainer? _sortCharRow;
+    /// <summary>SlayTheStats filter button anchored at the bottom-left of the bestiary
+    /// submenu (mirroring NRelicCollection's filter button position). Cloned from the
+    /// game-native NCardViewSortButton template when one is cached, otherwise a plain
+    /// Button fallback. Toggles _filterPane.</summary>
+    private Control? _filterButton;
+    /// <summary>"?" info button next to the encounter title that toggles a popup
+    /// describing every stat column. Lives inline in the title row of the right-hand
+    /// stats panel.</summary>
+    private Button? _legendButton;
+    /// <summary>The active column-legend popup, if any. Tracked so the toggle handler
+    /// can find and free it on second click.</summary>
+    private PanelContainer? _legendPopup;
+    /// <summary>Shared filter pane built via CompendiumFilterPatch.BuildFilterPane with
+    /// the class dropdown and group-card-upgrades toggle suppressed (the bestiary's
+    /// "Score by:" row covers per-character scoring, and group-upgrades is a card-only
+    /// concern).</summary>
+    private PanelContainer? _filterPane;
     private HBoxContainer? _statsColumnHeaderRow;
     private VBoxContainer? _encounterList;
     private RichTextLabel? _statsLabel;
@@ -225,6 +246,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <summary>null = all characters; otherwise a CHARACTER.* id used for sort scoring.</summary>
     private string? _sortCharacter;
     private readonly HashSet<string> _collapsedCategories = new();
+    /// <summary>When the user collapses/expands a category by clicking its header, the
+    /// list is rebuilt and the old PanelContainer the mouse was hovering is replaced.
+    /// Without intervention, the new header sits unhovered (the mouse hasn't moved, so
+    /// no MouseEntered fires) and the highlight flickers off. We stash the toggled
+    /// category here before the rebuild and reapply hover state to the matching
+    /// freshly-built catWrap.</summary>
+    private string? _pendingHoverCategory;
     private readonly Dictionary<string, Control> _rowsByEncounter = new();
     /// <summary>Per-category bundles of icon hover handles, used to drive the run-history-style
     /// scale-up tween whenever the player hovers a category header or any encounter row inside
@@ -273,6 +301,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ConnectSignals();
     }
 
+    public override void OnSubmenuOpened()
+    {
+        base.OnSubmenuOpened();
+        // First-time visitors get a one-shot explainer overlay covering the controls and
+        // stat columns. Persisted via SlayTheStatsConfig.BestiaryTutorialSeen.
+        if (!SlayTheStatsConfig.BestiaryTutorialSeen)
+            MaybeShowBestiaryTutorial();
+    }
+
     private void BuildUI()
     {
         if (_built) return;
@@ -304,6 +341,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         outerVbox.AddChild(new HSeparator());
 
         // ── Biome tabs ──
+        // The SlayTheStats filter button is NOT inserted here — it's placed at the
+        // bottom-left of the submenu (matching NRelicCollection's anchored position) so
+        // every compendium page shows the button in the same on-screen spot.
         _biomeTabRow = new HBoxContainer();
         _biomeTabRow.AddThemeConstantOverride("separation", 8);
         outerVbox.AddChild(_biomeTabRow);
@@ -379,7 +419,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         //     ├─ Scrollbar         (NScrollbar — must be a direct child before _Ready runs)
         //     └─ Clipper (Control with ClipContents)
         //          └─ EncounterList (the actual scrollable content; passed to SetContent)
-        var bestiaryScroll = new NScrollableContainer
+        // Use the FastScrollContainer subclass so wheel events scroll farther per click —
+        // the encounter list is long and the base 40px-per-click feels slow.
+        var bestiaryScroll = new FastScrollContainer
         {
             Name = "ScrollContainer",
             ClipChildren = CanvasItem.ClipChildrenMode.Only,
@@ -500,7 +542,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statsVbox.SizeFlagsVertical = SizeFlags.ExpandFill;
         statsBox.AddChild(statsVbox);
 
-        // Title — encounter / category name in Kreon, golden, matching stats tooltip headers.
+        // Title row: encounter / category name in Kreon gold + a small "?" legend button
+        // on the right that toggles a popup explaining each stat column.
+        var titleRow = new HBoxContainer();
+        titleRow.AddThemeConstantOverride("separation", 8);
+        titleRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        statsVbox.AddChild(titleRow);
+
         _statsTitleLabel = new RichTextLabel();
         _statsTitleLabel.BbcodeEnabled = true;
         _statsTitleLabel.FitContent = true;
@@ -513,7 +561,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyKreonFont(_statsTitleLabel, bold: true);
         ApplyTextShadow(_statsTitleLabel);
         _statsTitleLabel.Text = "";
-        statsVbox.AddChild(_statsTitleLabel);
+        titleRow.AddChild(_statsTitleLabel);
+
+        _legendButton = BuildLegendButton();
+        titleRow.AddChild(_legendButton);
 
         // Stats label uses the monospace font (the table is the only Kreon-exempt UI element).
         _statsLabel = new RichTextLabel();
@@ -552,6 +603,391 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         renderStyle.SetCornerRadiusAll(4);
         ((PanelContainer)_renderArea).AddThemeStyleboxOverride("panel", renderStyle);
         rightPanel.AddChild(_renderArea);
+
+        // ── Filter pane ──
+        // Built after the rest of the UI so it sits last in the child list and draws on
+        // top of the encounter list/stats panel when visible. Subset pane: no class filter
+        // (the bestiary's "Score by:" row covers per-character scoring) and no group-card-
+        // upgrades toggle (encounter stats are unaffected by card aggregation).
+        BuildAndAttachFilterPane();
+    }
+
+    private void BuildAndAttachFilterPane()
+    {
+        _filterPane = CompendiumFilterPatch.BuildFilterPane(
+            onClose: () => { if (_filterPane != null) _filterPane.Visible = false; },
+            includeClassFilter: false,
+            includeGroupUpgrades: false,
+            onFilterChanged: () =>
+            {
+                // Filters changed via the pane — re-aggregate and redraw the whole list,
+                // and refresh the right-hand stats panel for whatever's currently hovered.
+                RefreshEncounterList();
+                if (_hoveredEncounterId != null)
+                {
+                    UpdateStatsPanel(_hoveredEncounterId);
+                    RenderMonsterPreview(_hoveredEncounterId);
+                }
+            });
+
+        AddChild(_filterPane);
+        CompendiumFilterPatch.RegisterPane(_filterPane);
+
+        // Filter toggle button — anchored to the bottom-left of the submenu, matching the
+        // exact pattern NRelicCollection uses (CompendiumFilterPatch.InjectRelicCollection
+        // Button) so the button is in the same on-screen spot across compendium pages.
+        // Prefer cloning the cached game-native sort button template so it has identical
+        // textures/fonts/animations/SFX. Falls back to a styled fallback if the card
+        // library hasn't been opened yet this session and no template is cached.
+        var clonedButton = CompendiumFilterPatch.TryCloneTemplateButton();
+        if (clonedButton != null)
+        {
+            // Match the card-library button's natural size from the cached template.
+            var templateSize = clonedButton.Size;
+            if (templateSize.X < 10) templateSize.X = clonedButton.CustomMinimumSize.X;
+            if (templateSize.Y < 10) templateSize.Y = clonedButton.CustomMinimumSize.Y;
+            if (templateSize.X < 10) templateSize.X = 180;
+            if (templateSize.Y < 10) templateSize.Y = 50;
+            clonedButton.CustomMinimumSize = templateSize;
+
+            // Bottom-left anchor (mirrors InjectRelicCollectionButton).
+            const float padX = 20f;
+            const float padY = 20f;
+            clonedButton.AnchorLeft   = 0f;
+            clonedButton.AnchorRight  = 0f;
+            clonedButton.AnchorTop    = 1f;
+            clonedButton.AnchorBottom = 1f;
+            clonedButton.OffsetLeft   = padX;
+            clonedButton.OffsetRight  = padX + templateSize.X;
+            clonedButton.OffsetTop    = -templateSize.Y - padY;
+            clonedButton.OffsetBottom = -padY;
+
+            AddChild(clonedButton);
+            CompendiumFilterPatch.WireExternalSortButtonToPane(clonedButton, _filterPane);
+            _filterButton = clonedButton;
+        }
+        else
+        {
+            // Fallback when no cached NCardViewSortButton template — happens if the user
+            // opens the bestiary in a session where they haven't visited Card Library or
+            // Relic Collection yet. Plain Godot Button anchored to the same spot.
+            var fallback = new Button();
+            fallback.Text = "SlayTheStats";
+            fallback.Name = "SlayTheStatsFilterButtonFallback";
+            fallback.CustomMinimumSize = new Vector2(180, 50);
+
+            const float padX = 20f;
+            const float padY = 20f;
+            fallback.AnchorLeft   = 0f;
+            fallback.AnchorRight  = 0f;
+            fallback.AnchorTop    = 1f;
+            fallback.AnchorBottom = 1f;
+            fallback.OffsetLeft   = padX;
+            fallback.OffsetRight  = padX + 180;
+            fallback.OffsetTop    = -50 - padY;
+            fallback.OffsetBottom = -padY;
+
+            ApplyKreonFont(fallback, bold: true);
+            fallback.AddThemeColorOverride("font_color", new Color(0.85f, 0.75f, 0.55f, 1f));
+            fallback.AddThemeColorOverride("font_hover_color", new Color(1f, 0.9f, 0.7f, 1f));
+
+            fallback.Pressed += () =>
+            {
+                if (_filterPane == null) return;
+                _filterPane.Visible = !_filterPane.Visible;
+                if (_filterPane.Visible)
+                {
+                    CompendiumFilterPatch.RepositionPaneNextToButton(fallback, _filterPane);
+                    CompendiumFilterPatch.SyncAllControls();
+                }
+            };
+            if (_filterPane is FilterPanelContainer fpc)
+                fpc.AssociatedButton = fallback;
+
+            AddChild(fallback);
+            _filterButton = fallback;
+        }
+
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.Logger.Info($"[SlayTheStats] Bestiary filter pane attached (clonedTemplate={(clonedButton != null)}, active={CompendiumFilterPatch.HasActiveFilters()})");
+    }
+
+    // ───────────────────────── Tutorial overlay ─────────────────────────
+
+    /// <summary>The active tutorial CanvasLayer, if any. Tracked so the dismiss handler
+    /// can find and free it on click.</summary>
+    private CanvasLayer? _bestiaryTutorialLayer;
+
+    /// <summary>
+    /// Builds and shows a one-shot explainer overlay covering the bestiary controls and
+    /// stat columns. Persists BestiaryTutorialSeen on dismiss so it never appears again
+    /// unless the user toggles the setting back off in mod config.
+    /// </summary>
+    private void MaybeShowBestiaryTutorial()
+    {
+        if (_bestiaryTutorialLayer != null && GodotObject.IsInstanceValid(_bestiaryTutorialLayer))
+            return;
+
+        // Defer one frame so the bestiary's own layout has settled before we draw the
+        // dimmer over it (otherwise the panel can render before the encounter list and
+        // briefly show through).
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredBuild;
+        void DeferredBuild()
+        {
+            tree.ProcessFrame -= DeferredBuild;
+            BuildBestiaryTutorialPanel();
+        }
+    }
+
+    private void BuildBestiaryTutorialPanel()
+    {
+        var layer = new CanvasLayer
+        {
+            Name  = "SlayTheStatsBestiaryTutorialLayer",
+            Layer = 100,
+        };
+
+        // Full-screen click-catcher so any click dismisses.
+        var dimmer = new ColorRect
+        {
+            Color       = new Color(0, 0, 0, 0.55f),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
+        dimmer.AnchorRight  = 1f;
+        dimmer.AnchorBottom = 1f;
+        layer.AddChild(dimmer);
+
+        // Centered panel — stone-textured to match the rest of the SlayTheStats UI.
+        var panel = new PanelContainer { Name = "SlayTheStatsBestiaryTutorialPanel" };
+        panel.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
+        panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+        panel.MouseFilter  = MouseFilterEnum.Ignore;
+        panel.AnchorLeft   = 0.5f;
+        panel.AnchorRight  = 0.5f;
+        panel.AnchorTop    = 0.5f;
+        panel.AnchorBottom = 0.5f;
+        panel.GrowHorizontal = GrowDirection.Both;
+        panel.GrowVertical   = GrowDirection.Both;
+
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left",   24);
+        margin.AddThemeConstantOverride("margin_right",  24);
+        margin.AddThemeConstantOverride("margin_top",    20);
+        margin.AddThemeConstantOverride("margin_bottom", 20);
+        panel.AddChild(margin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 10);
+        margin.AddChild(vbox);
+
+        var title = new Label { Text = "Welcome to the Stats Bestiary!" };
+        title.AddThemeColorOverride("font_color", new Color(0.95f, 0.78f, 0.32f, 1f));
+        title.AddThemeFontSizeOverride("font_size", 26);
+        ApplyKreonFont(title, bold: true);
+        ApplyTextShadow(title);
+        vbox.AddChild(title);
+
+        // Body — RichTextLabel so we can highlight key terms in gold.
+        var body = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent    = true,
+            ScrollActive  = false,
+            AutowrapMode  = TextServer.AutowrapMode.Off,
+            MouseFilter   = MouseFilterEnum.Ignore,
+            CustomMinimumSize = new Vector2(720, 0),
+        };
+        body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+        body.AddThemeFontSizeOverride("normal_font_size", 18);
+        body.AddThemeFontSizeOverride("bold_font_size",   18);
+        ApplyKreonFont(body);
+        body.Text = string.Join('\n', new[]
+        {
+            "[b][color=#efc851]Encounter list[/color][/b] (left): every monster group you've ever fought, organised by biome and category.",
+            "  • Hover any row to see per-character stats on the right.",
+            "  • Hover a category header (Boss / Elite / Normal …) for an aggregated view.",
+            "  • Click a category header to collapse / expand it.",
+            "",
+            "[b][color=#efc851]Biome tabs[/color][/b] (top): switch between Acts and individual biomes. \"All\" shows everything.",
+            "[b][color=#efc851]Sort by[/color][/b] / [b][color=#efc851]Score by[/color][/b]: pick how the encounter list is ordered. \"Score by\" restricts the sort score to one character.",
+            "[b][color=#efc851]Filters[/color][/b] (bottom-left): the SlayTheStats button opens a pane to filter by ascension / version / profile.",
+            "",
+            "[b][color=#efc851]Stat columns:[/color][/b]",
+            "  • [b]Dmg[/b] — average damage taken in this fight. Tints orange if higher than the category baseline, teal if lower.",
+            "  • [b]Var[/b]  — variance of damage taken. High variance = swingy / inconsistent encounter.",
+            "  • [b]Turns[/b] — average turns the fight lasts.",
+            "  • [b]Pots[/b]  — average potions used per fight.",
+            "  • [b]Deaths[/b] — runs that ended at this encounter / total times fought. Color intensity grows with sample size.",
+        });
+        vbox.AddChild(body);
+
+        var hint = new Label { Text = "(click anywhere to dismiss)" };
+        hint.AddThemeColorOverride("font_color", new Color(0.75f, 0.72f, 0.65f, 1f));
+        hint.AddThemeFontSizeOverride("font_size", 13);
+        ApplyKreonFont(hint);
+        vbox.AddChild(hint);
+
+        layer.AddChild(panel);
+
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree?.Root.AddChild(layer);
+        _bestiaryTutorialLayer = layer;
+
+        dimmer.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed)
+                DismissBestiaryTutorial();
+        };
+
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.Logger.Info("[SlayTheStats] Bestiary tutorial shown");
+    }
+
+    // ───────────────────────── Column legend popup ─────────────────────────
+
+    private Button BuildLegendButton()
+    {
+        var btn = new Button
+        {
+            Text = "?",
+            CustomMinimumSize = new Vector2(28, 28),
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            FocusMode = Control.FocusModeEnum.None,
+            TooltipText = "What do these columns mean?",
+        };
+
+        var style = new StyleBoxFlat();
+        style.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
+        style.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
+        style.SetBorderWidthAll(1);
+        style.SetCornerRadiusAll(14);
+        style.ContentMarginLeft = style.ContentMarginRight = 6;
+        style.ContentMarginTop = style.ContentMarginBottom = 0;
+        btn.AddThemeStyleboxOverride("normal", style);
+        var hover = (StyleBoxFlat)style.Duplicate();
+        hover.BorderColor = new Color(0.918f, 0.745f, 0.318f, 0.95f);
+        hover.BgColor = new Color(0.15f, 0.16f, 0.22f, 1f);
+        btn.AddThemeStyleboxOverride("hover", hover);
+
+        btn.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
+        btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        btn.AddThemeFontSizeOverride("font_size", 16);
+        ApplyKreonFont(btn, bold: true);
+        ApplyTextShadow(btn);
+
+        btn.Pressed += () =>
+        {
+            SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+            ToggleLegendPopup();
+        };
+        return btn;
+    }
+
+    private void ToggleLegendPopup()
+    {
+        if (_legendPopup != null && GodotObject.IsInstanceValid(_legendPopup))
+        {
+            _legendPopup.QueueFree();
+            _legendPopup = null;
+            return;
+        }
+        BuildLegendPopup();
+    }
+
+    private void BuildLegendPopup()
+    {
+        if (_legendButton == null) return;
+
+        var popup = new PanelContainer { Name = "SlayTheStatsBestiaryLegendPopup" };
+        popup.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
+        popup.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+        popup.MouseFilter = MouseFilterEnum.Stop;
+        popup.ZIndex = 95;
+
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 18);
+        margin.AddThemeConstantOverride("margin_right", 18);
+        margin.AddThemeConstantOverride("margin_top", 14);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
+        popup.AddChild(margin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 6);
+        margin.AddChild(vbox);
+
+        var title = new Label { Text = "Stat columns" };
+        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        title.AddThemeFontSizeOverride("font_size", 18);
+        ApplyKreonFont(title, bold: true);
+        ApplyTextShadow(title);
+        vbox.AddChild(title);
+
+        var body = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent    = true,
+            ScrollActive  = false,
+            AutowrapMode  = TextServer.AutowrapMode.Off,
+            MouseFilter   = MouseFilterEnum.Ignore,
+            CustomMinimumSize = new Vector2(560, 0),
+        };
+        body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+        body.AddThemeFontSizeOverride("normal_font_size", 16);
+        body.AddThemeFontSizeOverride("bold_font_size", 16);
+        ApplyKreonFont(body);
+        body.Text = string.Join('\n', new[]
+        {
+            "[b][color=#efc851]Dmg[/color][/b] — average damage taken in this fight. Tints orange when above the category baseline, teal when below.",
+            "[b][color=#efc851]Var[/color][/b] — variance of damage taken. High = swingy / inconsistent.",
+            "[b][color=#efc851]Turns[/color][/b] — average turns the fight lasts.",
+            "[b][color=#efc851]Pots[/color][/b] — average potions used per fight.",
+            "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total times fought. Color intensity grows with sample size.",
+            "",
+            "[i][color=#9c9c9c]Click ? again to dismiss.[/color][/i]",
+        });
+        vbox.AddChild(body);
+
+        // Anchor next to the legend button (top-right of stats panel). Add as a child of
+        // the bestiary submenu so it floats above the encounter list/stats panel.
+        AddChild(popup);
+        _legendPopup = popup;
+
+        // Defer position so we can read the button's global rect after layout settles.
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredPosition;
+        void DeferredPosition()
+        {
+            tree.ProcessFrame -= DeferredPosition;
+            if (!GodotObject.IsInstanceValid(popup) || !GodotObject.IsInstanceValid(_legendButton))
+                return;
+
+            var btnRect = _legendButton.GetGlobalRect();
+            var popupSize = popup.GetCombinedMinimumSize();
+            var viewport = popup.GetViewport();
+            var vpSize = viewport?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+
+            // Place below + right of the button, clamped to the viewport.
+            float x = Math.Clamp(btnRect.Position.X + btnRect.Size.X - popupSize.X,
+                                 16f, Math.Max(16f, vpSize.X - popupSize.X - 16f));
+            float y = Math.Clamp(btnRect.Position.Y + btnRect.Size.Y + 8f,
+                                 16f, Math.Max(16f, vpSize.Y - popupSize.Y - 16f));
+            popup.AnchorLeft = popup.AnchorRight = popup.AnchorTop = popup.AnchorBottom = 0f;
+            popup.GlobalPosition = new Vector2(x, y);
+        }
+    }
+
+    private void DismissBestiaryTutorial()
+    {
+        SlayTheStatsConfig.BestiaryTutorialSeen = true;
+        try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] Failed to save BestiaryTutorialSeen: {e.Message}");
+        }
+        if (_bestiaryTutorialLayer != null && GodotObject.IsInstanceValid(_bestiaryTutorialLayer))
+            _bestiaryTutorialLayer.QueueFree();
+        _bestiaryTutorialLayer = null;
     }
 
     // ───────────────────────── Public API ─────────────────────────
@@ -594,6 +1030,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var encounters = GetEncountersForBiome(_selectedBiome);
         var categories = new[] { "weak", "normal", "elite", "boss", "event", "unknown" };
         var filter = BuildFilter();
+        // Snapshot + clear so a stale pending value can't carry into a future rebuild
+        // if the targeted category disappeared (filtered out / no encounters).
+        var pendingHoverCategory = _pendingHoverCategory;
+        _pendingHoverCategory = null;
 
         RefreshStatsColumnHeader();
 
@@ -671,12 +1111,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             // Hover the category header to show pool-aggregate stats; click to collapse/expand.
             var capturedCategory = category;
             var capturedEncIds = catEncounters;
-            catWrap.MouseEntered += () =>
+            void ApplyCategoryHover()
             {
+                if (!GodotObject.IsInstanceValid(catWrap)) return;
                 catWrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
                 HighlightCategory(capturedCategory, true);
                 OnCategoryHover(capturedCategory, capturedEncIds);
-            };
+            }
+            catWrap.MouseEntered += ApplyCategoryHover;
             catWrap.MouseExited += () =>
             {
                 catWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
@@ -691,6 +1133,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
             _encounterList.AddChild(catWrap);
 
+            // If we just rebuilt because the user toggled this category, hand the hover
+            // state off to the new wrapper so the highlight stays on. Defer one frame so
+            // it runs after the wrapper has been laid out and Godot has finished its own
+            // mouse-enter dispatch for the rebuilt tree.
+            if (pendingHoverCategory == category)
+                Callable.From(ApplyCategoryHover).CallDeferred();
+
             if (collapsed) continue;
 
             foreach (var encId in catEncounters)
@@ -703,9 +1152,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // Force the scroll container to recompute its content limit so scroll bounds match
         // the actual list size for the current biome (not the largest biome we've shown).
-        // We re-call SetContent on a deferred frame: NScrollableContainer's
-        // UpdateScrollLimitBottom reads _content.Size.Y, which is only accurate after the
-        // VBoxContainer has finished re-laying out its children — i.e. next frame.
+        //
+        // The catch is NScrollableContainer.ScrollLimitBottom reads `_content.Size.Y`, but
+        // VBoxContainer's Size.Y is only updated by Godot's container layout pass — which
+        // runs after the current frame. So when we just removed/added rows, Size.Y is still
+        // the OLD (potentially much larger) height for one frame. Instead of waiting two
+        // frames, we explicitly set Size.Y to the new combined-min-height ourselves so the
+        // scroll bound is correct from the very next frame onward. We preserve Size.X so
+        // the rows don't collapse horizontally (the bug from the previous ResetSize attempt).
         if (_bestiaryScrollContainer != null && _encounterList != null)
         {
             var scroll = _bestiaryScrollContainer;
@@ -715,6 +1169,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 if (!GodotObject.IsInstanceValid(scroll) || !GodotObject.IsInstanceValid(content)) return;
                 try
                 {
+                    var minSize = content.GetCombinedMinimumSize();
+                    if (minSize.Y > 0)
+                        content.Size = new Vector2(content.Size.X, minSize.Y);
                     scroll.SetContent(content);
                     scroll.InstantlyScrollToTop();
                 }
@@ -744,13 +1201,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         {
             case RichTextLabel rt:
                 rt.AddThemeColorOverride("font_shadow_color", shadow);
-                rt.AddThemeConstantOverride("shadow_offset_x", 2);
+                // Offset 3/2 — 1.5:1 right:down ratio.
+                rt.AddThemeConstantOverride("shadow_offset_x", 3);
                 rt.AddThemeConstantOverride("shadow_offset_y", 2);
                 rt.AddThemeConstantOverride("shadow_outline_size", 0);
                 break;
             case Label lb:
                 lb.AddThemeColorOverride("font_shadow_color", shadow);
-                lb.AddThemeConstantOverride("shadow_offset_x", 2);
+                lb.AddThemeConstantOverride("shadow_offset_x", 3);
                 lb.AddThemeConstantOverride("shadow_offset_y", 2);
                 lb.AddThemeConstantOverride("shadow_outline_size", 0);
                 break;
@@ -896,6 +1354,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (!_collapsedCategories.Add(category))
             _collapsedCategories.Remove(category);
+        // The mouse is still over the (now-replaced) header; let RefreshEncounterList
+        // hand the hover state off to the freshly-built catWrap so the highlight
+        // doesn't flicker off and back on.
+        _pendingHoverCategory = category;
         RefreshEncounterList();
     }
 
@@ -1014,7 +1476,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyKreonFont(btn);
         ApplyTextShadow(btn);
 
-        btn.Pressed += () => onPressed();
+        btn.Pressed += () =>
+        {
+            // Match the native NButton click sfx so the bestiary's biome / sort / score-by
+            // chip rows feel consistent with the rest of the game's UI buttons.
+            SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+            onPressed();
+        };
         return btn;
     }
 
@@ -1149,6 +1617,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var capturedBiome = biome;
             btn.Pressed += () =>
             {
+                SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
                 _selectedBiome = capturedBiome;
                 RefreshEncounterList();
             };
@@ -1363,7 +1832,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         var statsText = EncounterTooltipHelper.BuildEncounterStatsText(
             combined, deathRateBaseline, dmgPctBaseline,
-            filter.AscensionMin, filter.AscensionMax, categoryLabel);
+            filter.AscensionMin, filter.AscensionMax, categoryLabel,
+            filter: filter);
 
         var biomeName = _selectedBiome != null ? FormatBiomeName(_selectedBiome) : "";
         SetStatsTitle($"All {categoryLabel} Encounters — {biomeName}");
@@ -1411,7 +1881,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         else
             statsText = EncounterTooltipHelper.BuildEncounterStatsText(
                 charStats, deathRateBaseline, dmgPctBaseline,
-                filter.AscensionMin, filter.AscensionMax, categoryLabel);
+                filter.AscensionMin, filter.AscensionMax, categoryLabel,
+                filter: filter);
 
         SetStatsTitle(EncounterCategory.FormatName(encounterId));
         _statsLabel.Text = statsText;
