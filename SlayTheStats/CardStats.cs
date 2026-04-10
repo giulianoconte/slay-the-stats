@@ -79,7 +79,25 @@ public class StatsDb
 {
     public const string CurrentModVersion = "v0.3.0";
 
+    /// <summary>
+    /// Schema version — bumped whenever the db structure changes in a way
+    /// that requires re-parsing all runs (e.g. adding DamageValues to
+    /// EncounterEvent). Independent of the mod version so a data-model
+    /// change within the same release still triggers a reparse. When the
+    /// loaded db's schema version doesn't match, Load() returns a fresh db
+    /// and all runs are re-processed.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2; // bumped from 1: added EncounterEvent.DamageValues
+
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
+    /// <summary>
+    /// Persisted schema version. Defaults to 0 (NOT CurrentSchemaVersion) so
+    /// that old JSON files that predate this field deserialize as 0, which
+    /// doesn't match CurrentSchemaVersion and triggers a reparse. New dbs
+    /// created in-memory get CurrentSchemaVersion written by Save() because
+    /// the Load() path sets it explicitly after validation passes.
+    /// </summary>
+    [JsonPropertyName("schema_version")] public int SchemaVersion { get; set; } = 0;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();
     [JsonPropertyName("relics")]     public Dictionary<string, Dictionary<string, RelicStat>> Relics     { get; set; } = new();
     [JsonPropertyName("characters")] public Dictionary<string, CharacterStat>                 Characters { get; set; } = new();
@@ -101,13 +119,16 @@ public class StatsDb
             {
                 var json = File.ReadAllText(path);
                 var db = JsonSerializer.Deserialize<StatsDb>(json);
-                if (db == null) return new StatsDb();
+                if (db == null) return new StatsDb { SchemaVersion = CurrentSchemaVersion };
 
-                if (db.ModVersion != CurrentModVersion)
+                if (db.ModVersion != CurrentModVersion || db.SchemaVersion != CurrentSchemaVersion)
                 {
-                    warn?.Invoke($"Mod version changed (file={db.ModVersion}, current={CurrentModVersion}). Reprocessing all runs.");
-                    return new StatsDb();
+                    warn?.Invoke($"Db schema changed (file mod={db.ModVersion} schema={db.SchemaVersion}, current mod={CurrentModVersion} schema={CurrentSchemaVersion}). Reprocessing all runs.");
+                    return new StatsDb { SchemaVersion = CurrentSchemaVersion };
                 }
+
+                // Stamp the current schema so Save() writes the right version.
+                db.SchemaVersion = CurrentSchemaVersion;
 
                 // Re-apply category derivation against the current EncounterCategory rules so
                 // that data stored under older classifications (e.g. OVERGROWTH_CRAWLERS as
@@ -122,7 +143,7 @@ public class StatsDb
         {
             warn?.Invoke($"Failed to load stats: {e.Message}");
         }
-        return new StatsDb();
+        return new StatsDb { SchemaVersion = CurrentSchemaVersion };
     }
 
     public void Save(string path, Action<string>? warn = null)

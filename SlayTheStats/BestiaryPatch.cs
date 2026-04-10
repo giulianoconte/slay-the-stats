@@ -2,8 +2,11 @@ using BaseLib.Utils;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens;
@@ -238,6 +241,42 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private NScrollableContainer? _bestiaryScrollContainer;
     private MarginContainer? _headerMarginContainer;
     private Control? _renderArea;
+    /// <summary>The currently-active SubViewport — the one whose texture is
+    /// displayed in <see cref="_renderArea"/>. Tracked separately from the LRU
+    /// cache so <see cref="ClearMonsterPreview"/> can flip the previous active
+    /// to Disabled (no GPU cost) without evicting it.</summary>
+    private SubViewport? _previewViewport;
+    /// <summary>LRU cache of live SubViewports keyed by encounter id. Each
+    /// cached viewport keeps its NCreatureVisuals children and Spine animation
+    /// state alive in the scene tree; only the active one has
+    /// <c>RenderTargetUpdateMode.Always</c>, the rest are <c>Disabled</c> so the
+    /// GPU only pays for one render at a time. On cache hit we reactivate the
+    /// cached viewport and get animated preview instantly with no
+    /// re-instantiation cost.</summary>
+    private readonly Dictionary<string, SubViewport> _liveViewports = new();
+    /// <summary>LRU order tracking — head = most recently used, tail = evict
+    /// next. Kept as a LinkedList so move-to-head is O(1) via the stored node
+    /// reference.</summary>
+    private readonly LinkedList<string> _lruOrder = new();
+    /// <summary>Quick lookup from encounter id to the node inside
+    /// <see cref="_lruOrder"/> so moves to head are O(1).</summary>
+    private readonly Dictionary<string, LinkedListNode<string>> _lruNodes = new();
+    /// <summary>Static-sprite cache used when
+    /// <see cref="SlayTheStatsConfig.BestiaryStaticSprites"/> is on. First
+    /// hover of each encounter still builds a SubViewport and captures its
+    /// texture into an ImageTexture a few frames later; subsequent hovers
+    /// display the captured texture directly, no viewport involved. Keyed by
+    /// encounter id, session-lifetime (cleared when the submenu rebuilds).
+    /// </summary>
+    private readonly Dictionary<string, ImageTexture> _staticSpriteCache = new();
+    /// <summary>Debounce timer used to suppress render work during rapid hover
+    /// scrolling. Restarted on every new hover; only fires its Timeout after
+    /// the mouse has settled for <see cref="HoverDebounceSeconds"/>.</summary>
+    private Godot.Timer? _hoverDebounceTimer;
+    /// <summary>Encounter id queued up for render after the debounce fires.
+    /// Cleared when the timer actually runs the render or when a cache hit
+    /// short-circuits the debounce.</summary>
+    private string? _pendingHoverEncounterId;
     private string? _selectedBiome;
     private string? _hoveredEncounterId;
     private EncounterSortMode _sortMode = EncounterSortMode.Name;
@@ -245,6 +284,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private bool _sortDescending = false;
     /// <summary>null = all characters; otherwise a CHARACTER.* id used for sort scoring.</summary>
     private string? _sortCharacter;
+    /// <summary>When true, stat-based sort modes order by a z-score
+    /// (observed vs category baseline, weighted by sample size) instead of
+    /// the raw metric value. Makes well-sampled encounters with meaningful
+    /// deviation surface above low-N noise. Toggled by the "Raw/Sig" chip
+    /// next to the sort row. Ignored for Name and Seen.</summary>
+    private bool _sortBySignificance = false;
     private readonly HashSet<string> _collapsedCategories = new();
     /// <summary>When the user collapses/expands a category by clicking its header, the
     /// list is rebuilt and the old PanelContainer the mouse was hovering is replaced.
@@ -633,44 +678,25 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         AddChild(_filterPane);
         CompendiumFilterPatch.RegisterPane(_filterPane);
 
-        // Filter toggle button — anchored to the bottom-left of the submenu, matching the
-        // exact pattern NRelicCollection uses (CompendiumFilterPatch.InjectRelicCollection
-        // Button) so the button is in the same on-screen spot across compendium pages.
-        // Prefer cloning the cached game-native sort button template so it has identical
-        // textures/fonts/animations/SFX. Falls back to a styled fallback if the card
-        // library hasn't been opened yet this session and no template is cached.
-        var clonedButton = CompendiumFilterPatch.TryCloneTemplateButton();
-        if (clonedButton != null)
+        // Filter toggle button — uses the same shared helper as the relic
+        // page (CompendiumFilterPatch.CreateAndAttachStyledFilterButton) so
+        // the cloned NCardViewSortButton lands at the bottom-left with the
+        // identical anchor/size/wiring. Three-strategy template resolution
+        // (cached → live tree walk → cold NCardLibrary.Create()) handles the
+        // case where the user opens the bestiary before any other compendium
+        // page in a session. Falls through to the unstyled fallback only if
+        // every strategy returns null.
+        var template = CompendiumFilterPatch.ResolveSortButtonTemplate(this);
+        if (template != null && _filterPane != null)
         {
-            // Match the card-library button's natural size from the cached template.
-            var templateSize = clonedButton.Size;
-            if (templateSize.X < 10) templateSize.X = clonedButton.CustomMinimumSize.X;
-            if (templateSize.Y < 10) templateSize.Y = clonedButton.CustomMinimumSize.Y;
-            if (templateSize.X < 10) templateSize.X = 180;
-            if (templateSize.Y < 10) templateSize.Y = 50;
-            clonedButton.CustomMinimumSize = templateSize;
-
-            // Bottom-left anchor (mirrors InjectRelicCollectionButton).
-            const float padX = 20f;
-            const float padY = 20f;
-            clonedButton.AnchorLeft   = 0f;
-            clonedButton.AnchorRight  = 0f;
-            clonedButton.AnchorTop    = 1f;
-            clonedButton.AnchorBottom = 1f;
-            clonedButton.OffsetLeft   = padX;
-            clonedButton.OffsetRight  = padX + templateSize.X;
-            clonedButton.OffsetTop    = -templateSize.Y - padY;
-            clonedButton.OffsetBottom = -padY;
-
-            AddChild(clonedButton);
-            CompendiumFilterPatch.WireExternalSortButtonToPane(clonedButton, _filterPane);
-            _filterButton = clonedButton;
+            _filterButton = CompendiumFilterPatch.CreateAndAttachStyledFilterButton(this, _filterPane, template);
         }
         else
         {
-            // Fallback when no cached NCardViewSortButton template — happens if the user
-            // opens the bestiary in a session where they haven't visited Card Library or
-            // Relic Collection yet. Plain Godot Button anchored to the same spot.
+            // Last-resort fallback — plain Godot Button. Should be unreachable
+            // in practice now that ResolveSortButtonTemplate has the cold-
+            // instance strategy, but kept defensively in case the cold load
+            // also fails on some platform.
             var fallback = new Button();
             fallback.Text = "SlayTheStats";
             fallback.Name = "SlayTheStatsFilterButtonFallback";
@@ -709,7 +735,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info($"[SlayTheStats] Bestiary filter pane attached (clonedTemplate={(clonedButton != null)}, active={CompendiumFilterPatch.HasActiveFilters()})");
+            MainFile.Logger.Info($"[SlayTheStats] Bestiary filter pane attached (styled={(_filterButton is NCardViewSortButton)}, active={CompendiumFilterPatch.HasActiveFilters()})");
     }
 
     // ───────────────────────── Tutorial overlay ─────────────────────────
@@ -1044,7 +1070,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var catEncounters = encounters
                 .Where(e => EncounterCategory.Derive(e) == category)
                 .ToList();
-            catEncounters = SortEncounters(catEncounters, _sortMode, _sortDescending, filter, _sortCharacter);
+            catEncounters = SortEncounters(catEncounters, _sortMode, _sortDescending, filter, _sortCharacter, _sortBySignificance);
 
             if (catEncounters.Count == 0) continue;
 
@@ -1232,7 +1258,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             child.QueueFree();
         }
 
-        var displayMode = _sortMode == EncounterSortMode.Name ? EncounterSortMode.DmgPct : _sortMode;
+        var displayMode = _sortMode == EncounterSortMode.Name ? EncounterSortMode.MedianDamage : _sortMode;
 
         var spacer = new Control();
         spacer.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -1391,6 +1417,24 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 });
             _sortTabRow.AddChild(btn);
         }
+
+        // Raw / Significance toggle chip — only meaningful for stat-based
+        // sort modes. Name sorts alphabetically regardless; Seen is the raw
+        // sample count and has no baseline comparison. For the three rate/
+        // average modes, significance sorts by z-score vs the category
+        // baseline, so well-sampled encounters with meaningful deviation
+        // surface above low-N noise.
+        var gap = new Control { CustomMinimumSize = new Vector2(12, 0) };
+        _sortTabRow.AddChild(gap);
+        var sigBtn = MakeChipButton(
+            _sortBySignificance ? "Sig" : "Raw",
+            _sortBySignificance,
+            () =>
+            {
+                _sortBySignificance = !_sortBySignificance;
+                RefreshEncounterList();
+            });
+        _sortTabRow.AddChild(sigBtn);
     }
 
     private string BuildSortLabel(EncounterSortMode mode, bool selected)
@@ -1538,7 +1582,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         EncounterSortMode mode,
         bool descending,
         AggregationFilter filter,
-        string? sortCharacter)
+        string? sortCharacter,
+        bool bySignificance)
     {
         if (mode == EncounterSortMode.Name)
         {
@@ -1554,7 +1599,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // (optionally restricted to a specific character) and sort. Encounters with no data fall
         // to the bottom but remain alphabetically grouped among themselves.
         var scored = encounters
-            .Select(id => (id, score: EncounterSorting.Score(id, mode, filter, sortCharacter)))
+            .Select(id => (id, score: EncounterSorting.Score(id, mode, filter, sortCharacter, bySignificance)))
             .ToList();
 
         IOrderedEnumerable<(string id, double? score)> sorted =
@@ -1757,7 +1802,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statLabel.AddThemeFontSizeOverride("normal_font_size", 15);
         ApplyKreonFont(statLabel);
         ApplyTextShadow(statLabel);
-        var displayMode = sortMode == EncounterSortMode.Name ? EncounterSortMode.DmgPct : sortMode;
+        var displayMode = sortMode == EncounterSortMode.Name ? EncounterSortMode.MedianDamage : sortMode;
         statLabel.Text = $"[right][color=#a8a39a]{EncounterSorting.FormatScore(encounterId, displayMode, filter, sortCharacter)}[/color][/right]";
         row.AddChild(statLabel);
 
@@ -1789,7 +1834,72 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         _hoveredEncounterId = encounterId;
         UpdateStatsPanel(encounterId);
-        RenderMonsterPreview(encounterId);
+        ScheduleMonsterPreviewRender(encounterId);
+    }
+
+    /// <summary>
+    /// Route a hover through either the instant cache-hit path or the
+    /// debounce timer. Cache hits swap to the already-live viewport without
+    /// waiting (no reason to debounce — the cost is just a TextureRect swap).
+    /// Cache misses start the debounce timer; only if the hover settles for
+    /// <see cref="HoverDebounceSeconds"/> do we actually instantiate a new
+    /// SubViewport. Rapid scrolling across unseen rows therefore costs ~zero.
+    /// </summary>
+    private void ScheduleMonsterPreviewRender(string encounterId)
+    {
+        // Cache hit (either mode): instant render, skip debounce.
+        bool staticHit = SlayTheStatsConfig.BestiaryStaticSprites &&
+                         _staticSpriteCache.ContainsKey(encounterId);
+        bool liveHit   = !SlayTheStatsConfig.BestiaryStaticSprites &&
+                         _liveViewports.ContainsKey(encounterId);
+        if (staticHit || liveHit)
+        {
+            CancelPendingRender();
+            RenderMonsterPreview(encounterId);
+            return;
+        }
+
+        // Cache miss: tear down the visible rect immediately so the user gets
+        // feedback that their hover registered, and deactivate any live
+        // viewport that was displayed. Then arm the debounce.
+        ClearMonsterPreview();
+
+        _pendingHoverEncounterId = encounterId;
+        EnsureHoverDebounceTimer();
+        _hoverDebounceTimer!.Start(); // restarts the countdown
+    }
+
+    private void EnsureHoverDebounceTimer()
+    {
+        if (_hoverDebounceTimer != null) return;
+        _hoverDebounceTimer = new Godot.Timer
+        {
+            OneShot = true,
+            WaitTime = HoverDebounceSeconds,
+            // Keep the timer ticking even if the submenu is Hidden momentarily
+            // during a submenu transition; otherwise the Timeout signal can
+            // drop on the floor and leave the debounce state half-armed.
+            ProcessMode = Node.ProcessModeEnum.Always,
+        };
+        _hoverDebounceTimer.Timeout += OnHoverDebounceTimeout;
+        ((Node)this).AddChild(_hoverDebounceTimer);
+    }
+
+    private void CancelPendingRender()
+    {
+        _pendingHoverEncounterId = null;
+        _hoverDebounceTimer?.Stop();
+    }
+
+    private void OnHoverDebounceTimeout()
+    {
+        var enc = _pendingHoverEncounterId;
+        _pendingHoverEncounterId = null;
+        if (enc == null) return;
+        // The user may have moved to a different row in the meantime — if
+        // they're not still hovering this one, drop the render.
+        if (_hoveredEncounterId != enc) return;
+        RenderMonsterPreview(enc);
     }
 
     private void OnCategoryHover(string category, List<string> encounterIds)
@@ -1846,6 +1956,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void OnEncounterUnhover()
     {
         _hoveredEncounterId = null;
+        CancelPendingRender();
         SetStatsTitle("");
         if (_statsLabel != null)
             _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
@@ -1896,41 +2007,802 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     // ───────────────────────── Monster Preview ─────────────────────────
 
+    /// <summary>Horizontal gap (pixels) between adjacent monsters in a multi-monster
+    /// encounter preview.</summary>
+    private const float MonsterPreviewGap = 40f;
+    /// <summary>Padding inside the SubViewport canvas so sprite edges don't clip against
+    /// the viewport border.</summary>
+    private const float MonsterPreviewPad = 32f;
+    /// <summary>Baseline height (in canvas pixels) used to size the SubViewport. The
+    /// canvas width is derived from this + the render area's aspect ratio so the
+    /// SubViewport output exactly matches the render area shape — no letterbox bars.
+    /// Cross-encounter proportionality is preserved: the fixed base height means a
+    /// small monster and a boss are always rendered at the same absolute pixel
+    /// scale unless the encounter overflows (in which case the canvas grows in both
+    /// dims together, preserving aspect).</summary>
+    private const int MonsterPreviewBaseHeight = 800;
+    /// <summary>Fallback aspect ratio used when the render area's size isn't yet
+    /// known (e.g. first hover before the panel has been laid out).</summary>
+    private const float MonsterPreviewFallbackAspect = 1.5f;
+    /// <summary>Fixed pixel margin between sprite feet and the canvas bottom edge.
+    /// Kept small and absolute (not a fraction of canvas height) so tall sprites
+    /// don't get visually shrunk just because their bigger canvas also wastes a
+    /// bigger fraction on floor space. 60px gives a pleasant "they're not pinned
+    /// to the bottom" vibe without stealing screen real estate.</summary>
+    private const float MonsterPreviewFloorMargin = 60f;
+    /// <summary>Max number of live SubViewports kept alive in the LRU cache.
+    /// Each cached viewport holds its NCreatureVisuals children (Spine scenes)
+    /// in memory, but only the ACTIVE one has RenderTargetUpdateMode.Always —
+    /// the rest sit at Disabled and cost nothing per frame. Memory footprint
+    /// is dominated by cached Spine scene instances, which are already
+    /// preloaded by the game. 40 comfortably covers a whole biome worth of
+    /// encounters so most hovers are cache hits after a short warm-up.</summary>
+    private const int MaxLiveViewports = 40;
+    /// <summary>Debounce window in seconds. Hovers that happen while the mouse
+    /// is moving rapidly get collapsed — we only instantiate a SubViewport once
+    /// the hover has settled on a row for this long. 40 ms is low enough that
+    /// the first-hover latency doesn't feel like lag (under the ~100 ms
+    /// perception threshold) but high enough to collapse rapid scrolls into a
+    /// single render of the final row.</summary>
+    private const float HoverDebounceSeconds = 0.04f;
+    /// <summary>Scale applied to each NCreatureVisuals so bestiary sprites match the
+    /// apparent size they have in combat. The game's NCombatRoom.SceneContainer scales
+    /// creature visuals up (see NMonsterDeathVfx bounds math), whereas Bounds.Size we
+    /// read off the raw NCreatureVisuals is 1x. 1.40x calibrated against Seapunk in a
+    /// real run — tweak if monsters still read too small or too large.</summary>
+    private const float MonsterPreviewScale = 1.40f;
+
+    /// <summary>
+    /// Render the Spine visuals for every monster in the hovered encounter. If
+    /// a live SubViewport for this encounter already exists in the LRU cache,
+    /// reactivate it and swap the displayed TextureRect to its texture — the
+    /// Spine animation state is preserved in the scene tree so it picks right
+    /// up where it left off. Otherwise instantiate a fresh SubViewport, build
+    /// the visuals, add to the cache, and evict the oldest entry if we're at
+    /// capacity.
+    /// </summary>
     private void RenderMonsterPreview(string encounterId)
     {
         ClearMonsterPreview();
         if (_renderArea == null) return;
-        if (!MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta)) return;
 
-        // TODO: implement on-hover Spine rendering via SubViewport.
-        // Until then, render the monster names as a wrapping line — autowrap so the text
-        // never pushes the render-area panel wider than its allotted column.
-        var label = new Label();
-        label.Name = "MonsterPreviewLabel";
-        label.Text = string.Join("   ", meta.MonsterIds.Select(FormatMonsterName));
-        label.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.45f, 0.6f));
-        label.AddThemeFontSizeOverride("font_size", 16);
-        label.HorizontalAlignment = HorizontalAlignment.Center;
-        label.VerticalAlignment = VerticalAlignment.Center;
-        label.SizeFlagsVertical = SizeFlags.ExpandFill;
-        label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        // Clip the text inside the render area so a single very long word can never balloon
-        // the panel's width.
-        label.ClipContents = true;
-        ApplyKreonFont(label);
-        ((Node)_renderArea).AddChild(label);
+        // GPU-friendly mode: static-sprite cache hit. Display the baked
+        // ImageTexture directly, no SubViewport involved.
+        if (SlayTheStatsConfig.BestiaryStaticSprites &&
+            _staticSpriteCache.TryGetValue(encounterId, out var bakedTex) &&
+            bakedTex != null)
+        {
+            AttachStaticTextureRect(bakedTex);
+            return;
+        }
+
+        // Live-animation mode: cache hit reuses the live SubViewport.
+        if (!SlayTheStatsConfig.BestiaryStaticSprites &&
+            _liveViewports.TryGetValue(encounterId, out var cachedViewport) &&
+            GodotObject.IsInstanceValid(cachedViewport))
+        {
+            TouchLru(encounterId);
+            ActivateViewport(cachedViewport);
+            AttachViewportTextureRect(cachedViewport);
+            return;
+        }
+
+        if (!MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta)) return;
+        if (meta.MonsterIds == null || meta.MonsterIds.Count == 0) return;
+
+        // Resolve the MonsterModels. Unknown ids (modded monsters whose model isn't
+        // loaded, malformed ids, etc.) are skipped silently — we still show whatever
+        // we can resolve.
+        var monsters = new List<MonsterModel>();
+        foreach (var id in meta.MonsterIds)
+        {
+            MonsterModel? model = null;
+            try
+            {
+                model = ModelDb.GetByIdOrNull<MonsterModel>(ModelId.Deserialize(id));
+            }
+            catch (Exception e)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] RenderMonsterPreview: lookup failed for '{id}': {e.Message}");
+            }
+            if (model != null) monsters.Add(model);
+        }
+        if (monsters.Count == 0)
+        {
+            // Doormaker's encounter lists MONSTER.DOOR in the run file, but there
+            // is no MonsterModel for DOOR (the Doormaker class transforms into it
+            // at runtime). Similar cases may exist for future encounters. Fall
+            // through to the static icon path instead of showing a blank pane.
+            ShowStaticEncounterPreview(encounterId);
+            return;
+        }
+
+        // Offscreen SubViewport — lives as a sibling under the submenu, not inside
+        // _renderArea. SubViewport isn't a Control so PanelContainer wouldn't know
+        // how to lay it out; instead we let the viewport render independently and
+        // blit its texture into a TextureRect inside _renderArea.
+        // Compute the canvas dims so the SubViewport aspect matches the render area
+        // exactly → TextureRect with KeepAspectCentered produces no letterbox bars.
+        // If the render area hasn't been laid out yet (Size == 0), fall back to the
+        // default aspect. The canvas grows below if the scaled content overflows.
+        float renderAspect = MonsterPreviewFallbackAspect;
+        var raSize = ((Control)_renderArea).Size;
+        if (raSize.X > 1f && raSize.Y > 1f) renderAspect = raSize.X / raSize.Y;
+        int baselineH = MonsterPreviewBaseHeight;
+        int baselineW = Mathf.CeilToInt(baselineH * renderAspect);
+
+        var viewport = new SubViewport
+        {
+            Name = "MonsterPreviewViewport",
+            TransparentBg = true,
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
+            // Baseline canvas size matched to the render area's aspect — may grow
+            // below if content overflows (grown in both dims to keep aspect).
+            Size = new Vector2I(baselineW, baselineH),
+        };
+        ((Node)this).AddChild(viewport);
+        _previewViewport = viewport;
+
+        // First pass: instantiate, wire up the Spine animator, set skin, start the
+        // idle loop, and measure each monster's pixel-space bounds. Mirrors the
+        // sequence from NBestiary.SelectMonster (GenerateAnimator → SetUpSkin →
+        // SetAnimation("idle_loop")). Adding the NCreatureVisuals to the viewport
+        // runs _Ready() synchronously so Bounds/SpineBody are valid immediately.
+        //
+        // We record a *Rect* per monster (not just a size), because the Rect's
+        // origin-relative position is what lets us properly center off-axis
+        // creatures (Kaiser Crab's Crusher/Rocket have their NCreatureVisuals
+        // origin shifted far to one side — they live on the left/right of the
+        // combat screen — so without honoring Bounds.Position we'd place them
+        // outside the slot).
+        var visualsList = new List<NCreatureVisuals>();
+        var boundsRects = new List<Rect2>();   // bounds rect in viewport coords (scaled)
+        float totalWidth = 0f;
+        float maxHeight = 0f;
+        int spineCount = 0;
+
+        // Per-encounter counter of how many instances of each monster id we've
+        // already processed. Used to alternate skin variants across repeated
+        // monsters in the same encounter (e.g. 4x PhantasmalGardener with
+        // tall/short/tall/short). Keyed on the ModelId string.
+        var monsterInstanceIndex = new Dictionary<string, int>();
+
+        foreach (var monster in monsters)
+        {
+            string monsterIdStr = monster.Id.ToString();
+            if (!monsterInstanceIndex.TryGetValue(monsterIdStr, out int instanceIdx)) instanceIdx = 0;
+            monsterInstanceIndex[monsterIdStr] = instanceIdx + 1;
+            NCreatureVisuals visuals;
+            try
+            {
+                visuals = monster.CreateVisuals();
+            }
+            catch (Exception e)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] RenderMonsterPreview: CreateVisuals failed for {monster.Id}: {e.Message}");
+                continue;
+            }
+            viewport.AddChild(visuals);
+
+            if (visuals.HasSpineAnimation && visuals.SpineBody != null)
+            {
+                try
+                {
+                    monster.GenerateAnimator(visuals.SpineBody);
+                }
+                catch (Exception e)
+                {
+                    MainFile.Logger.Warn($"[SlayTheStats] RenderMonsterPreview: GenerateAnimator failed for {monster.Id}: {e.Message}");
+                }
+
+                // Skin: try the monster's own SetUpSkin first (the normal path). Many
+                // monsters override SetupSkins and reference base.Creature.SlotName to
+                // pick a per-slot variant (PhantasmalGardener, Vantom, TwoTailedRat,
+                // etc.) — that throws here because we're not in combat and Creature
+                // is null. Fall back to picking the first non-"default" skin so the
+                // skeleton has *some* art bound and isn't invisible.
+                bool skinSet = false;
+                try
+                {
+                    visuals.SetUpSkin(monster);
+                    skinSet = true;
+                }
+                catch
+                {
+                    // Expected for monsters whose SetupSkins override reads
+                    // base.Creature.SlotName — fall back to a data-driven skin
+                    // pick below.
+                }
+                if (!skinSet)
+                {
+                    TryApplyFallbackSkin(visuals, monsterIdStr, instanceIdx);
+                }
+                else
+                {
+                    // Even when SetUpSkin succeeds, some skeletons (SkulkingColony,
+                    // etc.) end up with their "default" skin bound, which for skin-
+                    // variant skeletons is empty and renders nothing. If the bound
+                    // bounding rect is suspiciously tiny, try picking a non-default
+                    // skin as a safety net.
+                    EnsureNonEmptySkin(visuals, monsterIdStr);
+                }
+
+                // Try the standard idle_loop animation first; fall back to common
+                // alternatives if it doesn't exist on this skeleton.
+                TryPlayIdleAnimation(visuals, monsterIdStr);
+                spineCount++;
+            }
+            // else: no Spine animation (e.g. Crusher/Rocket use
+            // NKaiserCrabBossBackground for their body); if every monster in
+            // the encounter is non-Spine, we'll fall back to a static icon
+            // below.
+
+            // Scale up to match in-combat apparent size. Layout math below uses the
+            // scaled bounds so monsters don't overlap.
+            ((Node2D)visuals).Scale = new Vector2(MonsterPreviewScale, MonsterPreviewScale);
+
+            // Measure the sprite's extent in local (origin-relative) coords.
+            Rect2 localBounds = MeasureLocalBounds(visuals);
+            // Scale into viewport coords by the preview scale (we also apply this
+            // scale to the Node2D below, so the measured rect has to reflect it).
+            Rect2 scaledBounds = new Rect2(
+                localBounds.Position * MonsterPreviewScale,
+                localBounds.Size * MonsterPreviewScale);
+            boundsRects.Add(scaledBounds);
+            totalWidth += scaledBounds.Size.X;
+            if (scaledBounds.Size.Y > maxHeight) maxHeight = scaledBounds.Size.Y;
+            visualsList.Add(visuals);
+        }
+
+        // If none of the monsters resolved to a Spine-backed visual (e.g. Kaiser Crab
+        // bosses Crusher/Rocket use NKaiserCrabBossBackground for their body; Doormaker
+        // uses static placeholder images), free the useless viewport and fall back to
+        // showing the boss icon as a static TextureRect — same art used in the row
+        // list for boss encounters.
+        if (spineCount == 0)
+        {
+            ((Node)viewport).QueueFree();
+            _previewViewport = null;
+            ShowStaticEncounterPreview(encounterId);
+            return;
+        }
+
+        if (visualsList.Count == 0)
+        {
+            ((Node)viewport).QueueFree();
+            _previewViewport = null;
+            return;
+        }
+
+        // Compute the content span (sum of widths + gaps). Canvas starts at the
+        // aspect-matched baseline and grows each dimension INDEPENDENTLY if
+        // content overflows — coupling the growth (i.e. growing both dims to
+        // preserve aspect) was shrinking tall sprites because the overflowing
+        // vertical would also blow up the horizontal, cutting the render scale.
+        // Independent growth reintroduces a bit of letterbox for off-aspect
+        // encounters, but preserves sprite size which is what matters more.
+        //
+        // Vertical: feet sit at (vpH - floorMargin). Need canvas tall enough that
+        // sprite top (feetY - maxHeight) >= pad. I.e. vpH >= maxHeight + pad + floorMargin.
+        float contentWidth  = totalWidth + MonsterPreviewGap * Math.Max(0, visualsList.Count - 1);
+        float neededW = contentWidth + MonsterPreviewPad * 2f;
+        float neededH = maxHeight + MonsterPreviewPad + MonsterPreviewFloorMargin;
+        int vpW = Math.Max(baselineW, Mathf.CeilToInt(neededW));
+        int vpH = Math.Max(baselineH, Mathf.CeilToInt(neededH));
+        if (vpW != baselineW || vpH != baselineH)
+            viewport.Size = new Vector2I(vpW, vpH);
+
+        // Second pass: position each NCreatureVisuals using its bounds RECT (not
+        // just size), so monsters whose origin isn't at the visible centre of
+        // their sprite (Kaiser Crab: Crusher's origin is far to the left of its
+        // rendered body; Rocket's origin is far to the right) land with their
+        // visible content in the correct slot. Vantom's tall tail-above-head is
+        // also handled because the bounds rect captures the full vertical extent.
+        //
+        // For each slot we pick:
+        //   target_visible_center_x = slot center
+        //   target_visible_bottom_y = feetY (so the bottom of the sprite lands at
+        //                                    the "ground line")
+        //
+        // visuals.Position + scaledBounds.Position is the top-left of the rendered
+        // rect in viewport space, and visuals.Position + scaledBounds.End is the
+        // bottom-right. Solving for visuals.Position:
+        //   visuals.Position.x = slot_center_x - (scaledBounds.Position.x + scaledBounds.Size.x/2)
+        //   visuals.Position.y = feetY         - (scaledBounds.Position.y + scaledBounds.Size.y)
+        float startX = vpW * 0.5f - contentWidth * 0.5f;
+        float cursor = startX;
+        float feetY  = vpH - MonsterPreviewFloorMargin;
+        for (int i = 0; i < visualsList.Count; i++)
+        {
+            var v = visualsList[i];
+            var sb = boundsRects[i];
+            float slotCenterX = cursor + sb.Size.X * 0.5f;
+            float posX = slotCenterX - (sb.Position.X + sb.Size.X * 0.5f);
+            float posY = feetY       - (sb.Position.Y + sb.Size.Y);
+            ((Node2D)v).Position = new Vector2(posX, posY);
+            cursor += sb.Size.X + MonsterPreviewGap;
+        }
+
+        if (SlayTheStatsConfig.BestiaryStaticSprites)
+        {
+            // GPU-friendly path: show the live viewport temporarily, then a
+            // few frames later capture its texture into an ImageTexture,
+            // swap the displayed rect to the static capture, and free the
+            // SubViewport. Subsequent hovers hit the static cache.
+            ActivateViewport(viewport);
+            AttachViewportTextureRect(viewport);
+            _ = CaptureStaticSpriteAsync(viewport, encounterId);
+        }
+        else
+        {
+            // Live-animation path: hand the viewport to the LRU cache
+            // (evicts the oldest entry if at capacity), mark it active, and
+            // display its live texture.
+            AddToLruCache(encounterId, viewport);
+            ActivateViewport(viewport);
+            AttachViewportTextureRect(viewport);
+        }
     }
 
-    private void ClearMonsterPreview()
+    /// <summary>
+    /// GPU-friendly mode helper: wait a few process frames for Spine to
+    /// initialize and the SubViewport to draw at least once, then capture
+    /// its texture into an <see cref="ImageTexture"/>, store it in
+    /// <see cref="_staticSpriteCache"/> under the encounter id, swap the
+    /// displayed TextureRect to the static capture, and free the viewport.
+    /// Bails out (freeing the viewport anyway) if the user has already
+    /// moved to a different encounter by the time the capture is ready.
+    /// </summary>
+    private async Task CaptureStaticSpriteAsync(SubViewport viewport, string encounterId)
+    {
+        try
+        {
+            // Wait 4 process frames — same number NSettingsScreen uses
+            // before its viewport-texture capture. Three is the documented
+            // minimum for Spine initialization; four gives a safety margin.
+            for (int i = 0; i < 4; i++)
+            {
+                await ((GodotObject)this).ToSignal(((Node)this).GetTree(), SceneTree.SignalName.ProcessFrame);
+            }
+            if (!GodotObject.IsInstanceValid(viewport))
+                return;
+
+            var vpTex = viewport.GetTexture();
+            var image = vpTex?.GetImage();
+            if (image == null || image.IsEmpty())
+            {
+                if (GodotObject.IsInstanceValid(viewport))
+                    ((Node)viewport).QueueFree();
+                if (_previewViewport == viewport) _previewViewport = null;
+                return;
+            }
+            var baked = ImageTexture.CreateFromImage(image);
+            _staticSpriteCache[encounterId] = baked;
+
+            // If the user is still hovering this encounter, swap the
+            // TextureRect to the static capture so the visible preview
+            // stops animating. Otherwise the user has moved on and
+            // ClearMonsterPreview has already removed our TextureRect.
+            bool stillHovered = _hoveredEncounterId == encounterId;
+            if (stillHovered && _renderArea != null)
+            {
+                var oldRect = ((Node)_renderArea).GetNodeOrNull("MonsterPreviewTex");
+                if (oldRect != null)
+                {
+                    ((Node)_renderArea).RemoveChild(oldRect);
+                    ((Node)oldRect).QueueFree();
+                }
+                AttachStaticTextureRect(baked);
+            }
+
+            // Free the viewport regardless — static mode never keeps live
+            // viewports around.
+            if (GodotObject.IsInstanceValid(viewport))
+                ((Node)viewport).QueueFree();
+            if (_previewViewport == viewport) _previewViewport = null;
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] CaptureStaticSpriteAsync failed for {encounterId}: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Add a <see cref="TextureRect"/> to the render area displaying a baked
+    /// static ImageTexture. GPU-friendly mode's equivalent of
+    /// <see cref="AttachViewportTextureRect"/>.
+    /// </summary>
+    private void AttachStaticTextureRect(Texture2D baked)
     {
         if (_renderArea == null) return;
-        var preview = ((Node)_renderArea).GetNodeOrNull("MonsterPreviewLabel");
-        if (preview != null)
+        var rect = new TextureRect
         {
-            ((Node)_renderArea).RemoveChild(preview);
-            preview.QueueFree();
+            Name = "MonsterPreviewTex",
+            Texture = baked,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            MouseFilter = MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+        };
+        ((Node)_renderArea).AddChild(rect);
+    }
+
+    // ─────────────────────────── LRU viewport cache ───────────────────────────
+
+    /// <summary>
+    /// Attach a TextureRect to <see cref="_renderArea"/> that displays the
+    /// given SubViewport's live texture. Used on both cache-miss (fresh
+    /// build) and cache-hit (reactivating a cached viewport) paths.
+    /// </summary>
+    private void AttachViewportTextureRect(SubViewport viewport)
+    {
+        if (_renderArea == null) return;
+        var tex = new TextureRect
+        {
+            Name = "MonsterPreviewTex",
+            Texture = viewport.GetTexture(),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            MouseFilter = MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+        };
+        ((Node)_renderArea).AddChild(tex);
+    }
+
+    /// <summary>
+    /// Flip the given SubViewport to <c>Always</c> render mode (active) and
+    /// track it in <see cref="_previewViewport"/>. Only one viewport at a
+    /// time should be in Always mode — everyone else stays Disabled so the
+    /// GPU only pays for a single Spine render per frame.
+    /// </summary>
+    private void ActivateViewport(SubViewport viewport)
+    {
+        viewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+        _previewViewport = viewport;
+    }
+
+    /// <summary>
+    /// Insert a newly-built viewport into the LRU cache. If the cache is at
+    /// capacity, evict the oldest entry (farthest from head) and free its
+    /// SubViewport. Idempotent — re-adding an existing id just bumps it to
+    /// the head.
+    /// </summary>
+    private void AddToLruCache(string encounterId, SubViewport viewport)
+    {
+        // If somehow already present, remove old entry first (should not
+        // happen because the hit path handles cached entries before us).
+        if (_liveViewports.TryGetValue(encounterId, out var existing))
+        {
+            RemoveFromLru(encounterId);
+            if (GodotObject.IsInstanceValid(existing))
+                ((Node)existing).QueueFree();
         }
+
+        _liveViewports[encounterId] = viewport;
+        var node = _lruOrder.AddFirst(encounterId);
+        _lruNodes[encounterId] = node;
+
+        // Evict from tail if over capacity.
+        while (_liveViewports.Count > MaxLiveViewports && _lruOrder.Count > 0)
+        {
+            var evictId = _lruOrder.Last!.Value;
+            var evictVp = _liveViewports[evictId];
+            RemoveFromLru(evictId);
+            if (GodotObject.IsInstanceValid(evictVp))
+            {
+                ((Node)evictVp).QueueFree();
+            }
+        }
+    }
+
+    /// <summary>Move an existing cache entry to the head of the LRU order (marks
+    /// it as most-recently-used).</summary>
+    private void TouchLru(string encounterId)
+    {
+        if (!_lruNodes.TryGetValue(encounterId, out var node)) return;
+        _lruOrder.Remove(node);
+        _lruOrder.AddFirst(node);
+    }
+
+    /// <summary>Remove an encounter from all three LRU bookkeeping structures
+    /// (dict + linked list + node map). Does NOT free the viewport — the
+    /// caller is responsible for deciding whether to.</summary>
+    private void RemoveFromLru(string encounterId)
+    {
+        _liveViewports.Remove(encounterId);
+        if (_lruNodes.TryGetValue(encounterId, out var node))
+        {
+            _lruOrder.Remove(node);
+            _lruNodes.Remove(encounterId);
+        }
+    }
+
+    /// <summary>
+    /// Fallback preview for encounters whose monsters don't have standalone Spine
+    /// visuals (e.g. Kaiser Crab: Crusher/Rocket render via NKaiserCrabBossBackground;
+    /// Doormaker: swaps between static placeholder images per turn). Shows the
+    /// pre-rendered boss icon from res://images/ui/run_history/ — the same art used
+    /// on the encounter row in the list.
+    /// </summary>
+    private void ShowStaticEncounterPreview(string encounterId)
+    {
+        if (_renderArea == null) return;
+        var attempted = new List<string>();
+        Texture2D? tex = null;
+
+        // 1) Try the run_history boss icon first (e.g. doormaker_boss.png / kaiser_crab_boss.png).
+        //    This is the art used in the encounter row on the left list.
+        string entryFromEncounter = encounterId;
+        int dotEnc = entryFromEncounter.IndexOf('.');
+        if (dotEnc >= 0) entryFromEncounter = entryFromEncounter[(dotEnc + 1)..];
+        entryFromEncounter = entryFromEncounter.ToLowerInvariant();
+
+        string[] encounterPaths =
+        {
+            $"res://images/ui/run_history/{entryFromEncounter}.png",
+            // Some IDs end in "_boss" but the icon file drops it (or vice-versa).
+            // Try both directions.
+            entryFromEncounter.EndsWith("_boss")
+                ? $"res://images/ui/run_history/{entryFromEncounter[..^5]}.png"
+                : $"res://images/ui/run_history/{entryFromEncounter}_boss.png",
+        };
+        foreach (var p in encounterPaths)
+        {
+            attempted.Add(p);
+            tex = EncounterIcons.LoadTextureExternal(p);
+            if (tex != null) break;
+        }
+
+        // 2) Fall back to per-monster icons — try each monster in the encounter,
+        //    looking under a handful of plausible paths.
+        if (tex == null && MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta) && meta.MonsterIds != null)
+        {
+            foreach (var mid in meta.MonsterIds)
+            {
+                string entry = mid;
+                int dot = entry.IndexOf('.');
+                if (dot >= 0) entry = entry[(dot + 1)..];
+                entry = entry.ToLowerInvariant();
+                string[] monsterPaths =
+                {
+                    $"res://images/monsters/{entry}.png",
+                    $"res://images/ui/run_history/{entry}.png",
+                    $"res://images/ui/bestiary/{entry}.png",
+                };
+                foreach (var p in monsterPaths)
+                {
+                    attempted.Add(p);
+                    tex = EncounterIcons.LoadTextureExternal(p);
+                    if (tex != null) break;
+                }
+                if (tex != null) break;
+            }
+        }
+
+        if (tex == null)
+        {
+            // No asset found for this encounter — log once so we know which
+            // encounter needs an icon file checked in.
+            MainFile.Logger.Warn($"[SlayTheStats] ShowStaticEncounterPreview: no static texture for {encounterId}. Tried: {string.Join(", ", attempted)}");
+            return;
+        }
+        var rect = new TextureRect
+        {
+            Name = "MonsterPreviewTex",
+            Texture = tex,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            MouseFilter = MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+        };
+        ((Node)_renderArea).AddChild(rect);
+    }
+
+    /// <summary>
+    /// Monster-specific skin patterns for encounters that normally pick a skin
+    /// per combat slot (SetupSkins reads <c>base.Creature.SlotName</c>, which is
+    /// null when we instantiate outside combat). For these monsters we replicate
+    /// the game's per-slot selection using the visual's ordinal index within the
+    /// same encounter. PhantasmalGardener: slots first/third → tall, slots
+    /// second/fourth → short (matches the logic in PhantasmalGardener.SetupSkins).
+    /// </summary>
+    private static readonly Dictionary<string, string[]> SlotSkinPatterns = new()
+    {
+        { "MONSTER.PHANTASMAL_GARDENER", new[] { "tall", "short", "tall", "short" } },
+    };
+
+    /// <summary>
+    /// Bind a skin from the skeleton's data to the visuals. Used when a monster's
+    /// own SetupSkins override throws (most commonly because it references
+    /// <c>base.Creature.SlotName</c>, which is null outside combat). If the
+    /// monster has a known per-slot skin pattern (see SlotSkinPatterns), pick the
+    /// skin for the given instance index; otherwise fall back to the first
+    /// non-"default" skin in the skeleton data.
+    /// </summary>
+    private static void TryApplyFallbackSkin(NCreatureVisuals visuals, string idForLog, int instanceIdx)
+    {
+        try
+        {
+            var skeleton = visuals.SpineBody?.GetSkeleton();
+            if (skeleton == null) return;
+
+            // Per-monster pattern first, if one is registered for this id.
+            string? pickedName = null;
+            if (SlotSkinPatterns.TryGetValue(idForLog, out var pattern) && pattern.Length > 0)
+            {
+                var candidate = pattern[instanceIdx % pattern.Length];
+                // Only use it if the skin actually exists on the skeleton.
+                var data = skeleton.GetData();
+                if (data.FindSkin(candidate) != null)
+                    pickedName = candidate;
+            }
+
+            // Generic fallback: first non-"default" skin in the data resource.
+            pickedName ??= PickSkinName(skeleton);
+
+            if (pickedName == null) return;
+            skeleton.SetSkinByName(pickedName);
+            skeleton.SetSlotsToSetupPose();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] TryApplyFallbackSkin: {idForLog} failed: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// If the skeleton's current bound skin looks empty (zero-area bounds), attempt
+    /// to switch to a non-"default" skin. Safety net for vanilla monsters whose
+    /// default skin has no art bound (SkulkingColony etc.).
+    /// </summary>
+    private static void EnsureNonEmptySkin(NCreatureVisuals visuals, string idForLog)
+    {
+        try
+        {
+            var skeleton = visuals.SpineBody?.GetSkeleton();
+            if (skeleton == null) return;
+            var bounds = skeleton.GetBounds();
+            if (bounds.Size.X > 4f && bounds.Size.Y > 4f) return; // skin already has content
+            var pickedName = PickSkinName(skeleton);
+            if (pickedName == null) return;
+            skeleton.SetSkinByName(pickedName);
+            skeleton.SetSlotsToSetupPose();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] EnsureNonEmptySkin: {idForLog} failed: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Return the sprite's local-space bounding rect (origin-relative), in the
+    /// same coordinate system used for positioning the NCreatureVisuals inside
+    /// the viewport. We prefer <c>visuals.Bounds</c> (the UI %Bounds Control) —
+    /// that's in post-body-scale pixel coords and matches the size used by the
+    /// game's own combat layout (NCombatRoom references visuals.Bounds.Size.X
+    /// throughout its creature placement math). The Spine skeleton's own
+    /// GetBounds() is in pre-body-scale units and would need to be multiplied by
+    /// <c>visuals.GetCurrentBody().Scale</c> to be comparable — too risky as a
+    /// silent default. Skeleton bounds are only used if %Bounds is missing.
+    /// </summary>
+    private static Rect2 MeasureLocalBounds(NCreatureVisuals visuals)
+    {
+        if (visuals.Bounds != null)
+        {
+            var uiSize = visuals.Bounds.Size;
+            if (uiSize.X > 4f && uiSize.Y > 4f)
+                return new Rect2(visuals.Bounds.Position, uiSize);
+        }
+
+        // Fallback: scale the spine bounds by body.Scale so they come out in the
+        // same pixel-space coords that NCreatureVisuals.Bounds uses.
+        try
+        {
+            var skeleton = visuals.SpineBody?.GetSkeleton();
+            if (skeleton != null)
+            {
+                var sb = skeleton.GetBounds();
+                Vector2 bodyScale = new Vector2(1f, 1f);
+                var body = visuals.GetCurrentBody();
+                if (body != null) bodyScale = ((Node2D)body).Scale;
+                return new Rect2(sb.Position * bodyScale, sb.Size * bodyScale);
+            }
+        }
+        catch { }
+
+        return new Rect2(-80f, -160f, 160f, 160f);
+    }
+
+    /// <summary>
+    /// Start playing an idle animation on the visuals. Tries "idle_loop" first
+    /// (the canonical name the game's own NBestiary uses), then a few common
+    /// fallbacks. Some monsters use non-standard idle names or only have a
+    /// default static pose.
+    /// </summary>
+    private static void TryPlayIdleAnimation(NCreatureVisuals visuals, string idForLog)
+    {
+        string[] candidates = { "idle_loop", "idle", "idle_1", "default" };
+        foreach (var name in candidates)
+        {
+            try
+            {
+                var data = visuals.SpineBody?.GetSkeleton()?.GetData();
+                if (data == null) return;
+                if (data.FindAnimation(name) == null) continue;
+                visuals.SpineAnimation.SetAnimation(name);
+                return;
+            }
+            catch (Exception e)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] TryPlayIdleAnimation: {idForLog} '{name}' failed: {e.Message}");
+            }
+        }
+        // No idle animation found — leave the skeleton in its default pose.
+    }
+
+    /// <summary>
+    /// Iterate the skeleton's skin list and return the first non-"default" skin
+    /// name. Falls back to the first skin of any name if every skin is named
+    /// "default". Returns null if the data resource has no skins at all.
+    /// </summary>
+    private static string? PickSkinName(MegaSkeleton skeleton)
+    {
+        var data = skeleton.GetData();
+        Godot.Collections.Array<GodotObject> skins;
+        try { skins = data.GetSkins(); }
+        catch { return null; }
+        string? firstAny = null;
+        foreach (var skinObj in skins)
+        {
+            if (skinObj == null) continue;
+            string? name = null;
+            // Spine bindings expose the skin name via get_skin_name; fall back to
+            // get_name if that's not the method on this binding version.
+            try { name = skinObj.Call("get_skin_name").AsString(); } catch { }
+            if (string.IsNullOrEmpty(name))
+            {
+                try { name = skinObj.Call("get_name").AsString(); } catch { }
+            }
+            if (string.IsNullOrEmpty(name)) continue;
+            firstAny ??= name;
+            if (name != "default") return name;
+        }
+        return firstAny;
+    }
+
+    /// <summary>
+    /// Tear down the currently-displayed monster preview: removes the
+    /// TextureRect from <see cref="_renderArea"/> and flips the active
+    /// SubViewport to Disabled so it stops rendering (but stays alive in the
+    /// LRU cache). Also clears any leftover placeholder label from older code
+    /// paths. Does NOT free cached viewports — only <see cref="AddToLruCache"/>
+    /// and the cache-clearing helpers touch the LRU.
+    /// </summary>
+    private void ClearMonsterPreview()
+    {
+        if (_renderArea != null)
+        {
+            foreach (var name in new[] { "MonsterPreviewLabel", "MonsterPreviewTex" })
+            {
+                var node = ((Node)_renderArea).GetNodeOrNull(name);
+                if (node != null)
+                {
+                    ((Node)_renderArea).RemoveChild(node);
+                    ((Node)node).QueueFree();
+                }
+            }
+        }
+        if (_previewViewport != null && GodotObject.IsInstanceValid(_previewViewport))
+        {
+            // Cached viewport — stop rendering to save GPU, but keep it alive
+            // so re-hovering the same encounter is instant and resumes
+            // animation from where it left off.
+            _previewViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+        }
+        _previewViewport = null;
     }
 
     // ───────────────────────── Helpers ─────────────────────────
@@ -2029,9 +2901,8 @@ internal enum EncounterSortMode
     Name,
     Seen,
     DeathRate,
-    AvgDamage,
-    DmgPct,
-    Variance,
+    MedianDamage,
+    IQR,
 }
 
 internal static class EncounterSorting
@@ -2041,19 +2912,17 @@ internal static class EncounterSorting
         EncounterSortMode.Name,
         EncounterSortMode.Seen,
         EncounterSortMode.DeathRate,
-        EncounterSortMode.AvgDamage,
-        EncounterSortMode.DmgPct,
-        EncounterSortMode.Variance,
+        EncounterSortMode.MedianDamage,
+        EncounterSortMode.IQR,
     };
 
     public static string Label(EncounterSortMode mode) => mode switch
     {
-        EncounterSortMode.Name      => "Name",
-        EncounterSortMode.Seen      => "Seen",
-        EncounterSortMode.DeathRate => "Death%",
-        EncounterSortMode.AvgDamage => "Dmg",
-        EncounterSortMode.DmgPct    => "Dmg%",
-        EncounterSortMode.Variance  => "Variance",
+        EncounterSortMode.Name         => "Name",
+        EncounterSortMode.Seen         => "Seen",
+        EncounterSortMode.DeathRate    => "Death%",
+        EncounterSortMode.MedianDamage => "Dmg",
+        EncounterSortMode.IQR          => "IQR",
         _ => mode.ToString(),
     };
 
@@ -2061,51 +2930,91 @@ internal static class EncounterSorting
     /// Computes a single sortable score for an encounter under the given filter. If a sort
     /// character is provided, the score is restricted to that character; otherwise it sums
     /// across all characters that pass the filter. Returns null if there's no data.
+    ///
+    /// When <paramref name="bySignificance"/> is true, stat-based modes return a z-score
+    /// (<c>(observed − baseline) / standard_error</c>) instead of the raw rate/average —
+    /// well-sampled encounters with meaningful deviation from the category baseline
+    /// surface above low-N noise. Name/Seen ignore the flag because the concept doesn't
+    /// apply (Name is alphabetic; Seen already IS the sample size).
     /// </summary>
-    public static double? Score(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter)
+    public static double? Score(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter, bool bySignificance = false)
     {
         if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap)) return null;
 
         var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
         if (perChar.Count == 0) return null;
 
-        long fought = 0, died = 0;
-        long damageTakenSum = 0;
-        double dmgPctSum = 0;
-        double dmgPctSqSum = 0;
-
+        // For median/IQR modes we need the merged DamageValues list; for
+        // other modes the aggregate sums suffice.
+        EncounterEvent combined = new();
         if (sortCharacter != null)
         {
             if (!perChar.TryGetValue(sortCharacter, out var stat) || stat.Fought == 0) return null;
-            fought         = stat.Fought;
-            died           = stat.Died;
-            damageTakenSum = stat.DamageTakenSum;
-            dmgPctSum      = stat.DmgPctSum;
-            dmgPctSqSum    = stat.DmgPctSqSum;
+            combined = stat;
         }
         else
         {
             foreach (var stat in perChar.Values)
             {
-                fought         += stat.Fought;
-                died           += stat.Died;
-                damageTakenSum += stat.DamageTakenSum;
-                dmgPctSum      += stat.DmgPctSum;
-                dmgPctSqSum    += stat.DmgPctSqSum;
+                combined.Fought         += stat.Fought;
+                combined.Died           += stat.Died;
+                combined.DamageTakenSum += stat.DamageTakenSum;
+                combined.DmgPctSum      += stat.DmgPctSum;
+                if (stat.DamageValues != null)
+                {
+                    combined.DamageValues ??= new List<int>();
+                    combined.DamageValues.AddRange(stat.DamageValues);
+                }
             }
         }
 
+        long fought = combined.Fought;
         if (fought == 0) return null;
 
-        return mode switch
+        double raw = mode switch
         {
-            EncounterSortMode.Seen      => fought,
-            EncounterSortMode.DeathRate => (double)died / fought,
-            EncounterSortMode.AvgDamage => (double)damageTakenSum / fought,
-            EncounterSortMode.DmgPct    => dmgPctSum / fought,
-            EncounterSortMode.Variance  => Math.Max(0, dmgPctSqSum / fought - Math.Pow(dmgPctSum / fought, 2)),
-            _ => null,
+            EncounterSortMode.Seen         => fought,
+            EncounterSortMode.DeathRate    => (double)combined.Died / fought,
+            EncounterSortMode.MedianDamage => combined.DamageMedian() ?? (double)combined.DamageTakenSum / fought,
+            EncounterSortMode.IQR          =>
+                combined.DamageIQR() is var iqr && iqr.HasValue
+                    ? iqr.Value.p75 - iqr.Value.p25
+                    : 0,
+            _ => double.NaN,
         };
+        if (double.IsNaN(raw)) return null;
+
+        if (!bySignificance || mode == EncounterSortMode.Seen)
+            return raw;
+
+        // Significance: z-score against the category baseline, weighted by sample
+        // size. Low-N encounters get small z-scores even with large deviation;
+        // well-sampled encounters with modest deviation beat them.
+        string? category = null;
+        if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
+            category = meta.Category;
+
+        switch (mode)
+        {
+            case EncounterSortMode.DeathRate:
+            {
+                double p0 = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
+                double se = Math.Sqrt(Math.Max(1e-9, p0 * (1 - p0) / fought));
+                return (raw - p0) / se;
+            }
+            case EncounterSortMode.MedianDamage:
+            {
+                double mu0 = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category);
+                double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, mu0) / fought));
+                return (raw - mu0) / se;
+            }
+            case EncounterSortMode.IQR:
+            {
+                // IQR spread has no single baseline — rescale by √n.
+                return raw * Math.Sqrt(fought);
+            }
+        }
+        return raw;
     }
 
     /// <summary>
@@ -2117,11 +3026,10 @@ internal static class EncounterSorting
         if (score == null) return "—";
         return mode switch
         {
-            EncounterSortMode.Seen      => ((long)score.Value).ToString(),
-            EncounterSortMode.DeathRate => $"{score.Value * 100:0}%",
-            EncounterSortMode.AvgDamage => $"{score.Value:0.0}",
-            EncounterSortMode.DmgPct    => $"{score.Value * 100:0}%",
-            EncounterSortMode.Variance  => $"{score.Value * 10000:0.0}",
+            EncounterSortMode.Seen         => ((long)score.Value).ToString(),
+            EncounterSortMode.DeathRate    => $"{score.Value * 100:0}%",
+            EncounterSortMode.MedianDamage => $"{score.Value:0}",
+            EncounterSortMode.IQR          => $"{score.Value:0}",
             _ => "—",
         };
     }
@@ -2553,7 +3461,7 @@ internal static class EncounterIcons
         return LoadTexture($"res://images/ui/run_history/{slug}.png");
     }
 
-    private static Texture2D? LoadBossTexture(string encounterId)
+    internal static Texture2D? LoadBossTexture(string encounterId)
     {
         // Strip ENCOUNTER. prefix; the rest lowercased should match the per-boss filename.
         // E.g. "ENCOUNTER.LAGAVULIN_MATRIARCH_BOSS" -> "lagavulin_matriarch_boss.png"
@@ -2580,6 +3488,10 @@ internal static class EncounterIcons
         _cache[path] = tex;
         return tex;
     }
+
+    /// <summary>Public wrapper for other classes (e.g. NBestiaryStatsSubmenu's static
+    /// preview fallback) to load textures through the same cached loader.</summary>
+    internal static Texture2D? LoadTextureExternal(string path) => LoadTexture(path);
 
     private static Texture2D? _bossCompositeCache;
 

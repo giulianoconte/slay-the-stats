@@ -56,12 +56,10 @@ public static class EncounterTooltipHelper
     {
         var sb = new StringBuilder();
 
-        // Header — column widths align with FormatRow. Pairs each base metric with its %
-        // variant where applicable. Order is the v0.3.0 reorder
-        // (Dmg | Var | Turns | Pots | Deaths) with the % variant column tucked next to
-        // its base.
-        //   Label(11)  Dmg(4)  Dmg%(5)  Var(4)  Var%(5)  Turns(6)  Pots(5)  Deaths(7)  Dth%(5)
-        sb.Append("              Dmg  Dmg%   Var  Var% Turns  Pots  Deaths  Dth%\n");
+        // Header — column widths align with FormatRow.
+        //   Label(11)  Dmg(5)  Mid50%(9)  Turns(5)  Pots(5)  Deaths(7)  Dth%(5)
+        // "Dmg" = median damage. "Mid 50%" = IQR (p25-p75).
+        sb.Append("              Dmg   Mid 50% Turns  Pots  Deaths  Dth%\n");
 
         var total = new EncounterEvent();
 
@@ -100,16 +98,17 @@ public static class EncounterTooltipHelper
         else
             sb.Append(FormatEmptyRow($"{"All",-11}"));
 
-        // Footer
-        // When a filter is provided, line 1 omits the asc prefix (it's repeated in the
-        // filter context line below) and a second line contains the full filter
-        // description — same layout as the compendium card/relic tooltip footers.
+        // Footer — line 1 is the category dmg% baseline; line 2 is the
+        // filter context line (asc · char · version · profile) produced by
+        // the shared CardHoverShowPatch.BuildFilterContext. The filter is
+        // always provided by bestiary callers, so the context line always
+        // renders; per-surface rules in BuildFilterContext collapse or
+        // omit segments as appropriate.
         var baselineDmg = $"{Math.Round(dmgPctBaseline):F0}%";
         var filterCtx = filter != null
             ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
             : "";
-        var ascPrefix = filterCtx.Length > 0 ? "" : FormatAscensionPrefix(ascensionMin, ascensionMax);
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{ascPrefix}{categoryLabel} Avg Dmg%: {baselineDmg}");
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline {categoryLabel.ToLowerInvariant()} pool dmg%: {baselineDmg}");
         if (filterCtx.Length > 0)
             sb.Append($"\n{filterCtx}");
         sb.Append("[/color][/font_size][/font]");
@@ -131,33 +130,46 @@ public static class EncounterTooltipHelper
     /// meaningful than the % variant.</param>
     /// <param name="character">Run character ID (e.g. "CHARACTER.DEFECT") used to look
     /// up the head sprite for the footer. Null falls back to a plain "All" label.</param>
+    /// <param name="filter">Filter that produced these aggregates — required so the
+    /// footer can render the full <see cref="CardHoverShowPatch.BuildFilterContext"/>
+    /// line, matching the card / relic tooltip footer format. Every active filter
+    /// (asc range, character, version range, profile) is visible even at default
+    /// values like A0-20.</param>
     internal static string BuildEncounterStatsTextSingleRow(
         EncounterEvent stat,
         double deathRateBaseline,
         double dmgPctBaseline,
         double dmgBaseline,
         string? character,
-        int? ascensionMin,
-        int? ascensionMax,
-        string categoryLabel)
+        string categoryLabel,
+        AggregationFilter filter)
     {
         var sb = new StringBuilder();
 
         // Header — column widths align with FormatRowCombat:
-        //   Dmg(5)  Var(5)  Turns(5)  Deaths(7)
-        sb.Append("  Dmg   Var Turns  Deaths\n");
+        //   Dmg(5)  Mid50%(9)  Turns(5)  Deaths(7)
+        sb.Append("  Dmg   Mid 50% Turns  Deaths\n");
 
         if (stat.Fought > 0)
             sb.Append(FormatRowCombat(stat, deathRateBaseline, dmgPctBaseline));
         else
             sb.Append($"[color={TooltipHelper.NeutralShade}]No data[/color]");
 
-        var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
+        // Footer — line 1 is the absolute-damage baseline
+        // ("Baseline {category} pool dmg: X.X"). Line 2 is the filter
+        // context — asc · char · version · profile, separator is the
+        // interpunct (U+00B7). Segments collapse/disappear per the rules
+        // in CardHoverShowPatch.BuildFilterContext.
         var baselineDmgAbs = $"{dmgBaseline:F1}";
-        var charDisplay = character != null
+        var charLabel = character != null
             ? CardHoverShowPatch.GetCharacterDisplay(character)
             : "All chars";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{charDisplay} • {ascPrefix}{categoryLabel} Avg Dmg: {baselineDmgAbs}[/color][/font_size][/font]");
+        var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
+        var categoryLower = categoryLabel.ToLowerInvariant();
+        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline {categoryLower} pool dmg: {baselineDmgAbs}");
+        if (filterCtx.Length > 0)
+            sb.Append($"\n{filterCtx}");
+        sb.Append("[/color][/font_size][/font]");
 
         return sb.ToString();
     }
@@ -170,11 +182,15 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>
-    /// Bestiary multi-row formatter — 8 columns:
-    ///   Dmg | Dmg% | Var | Var% | Turns | Pots | Deaths | Death%
-    /// Dmg and Dmg% use ColBad against the dmg-pct baseline. Death% uses ColBad against
+    /// Bestiary multi-row formatter — 6 columns:
+    ///   Dmg (median) | Mid 50% (p25-p75) | Turns | Pots | Deaths | Death%
+    ///
+    /// Dmg uses ColBad against the dmg-pct baseline. Death% uses ColBad against
     /// the death-rate baseline. Deaths colors the *denominator* (Fought) by sample size
     /// via ColN so the cell visualises confidence (more samples → brighter).
+    ///
+    /// When DamageValues is null (old db that predates per-fight tracking), falls back
+    /// to the mean (DamageTakenSum / Fought) so nothing breaks on upgrade.
     /// </summary>
     private static string FormatRow(string label, EncounterEvent stat, double deathRateBaseline, double dmgPctBaseline)
     {
@@ -183,37 +199,36 @@ public static class EncounterTooltipHelper
         double deathRate = 100.0 * stat.Died / n;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
         double avgPots   = (double)stat.PotionsUsedSum / n;
-        double avgDmg    = (double)stat.DamageTakenSum / n;
         double avgDmgPct = stat.DmgPctSum / n * 100.0;
-        double varDmg    = (double)stat.DamageTakenSqSum / n - avgDmg * avgDmg;
-        double varDmgPct = (stat.DmgPctSqSum / n - (stat.DmgPctSum / n) * (stat.DmgPctSum / n)) * 100.0 * 100.0;
 
-        var fDmg     = $"{avgDmg:F1}";
-        var fDmgPct  = $"{Math.Round(avgDmgPct)}%";
-        var fVar     = $"{Math.Max(0, varDmg):F1}";
-        var fVarPct  = $"{Math.Round(Math.Max(0, varDmgPct))}%";
-        var fTurns   = $"{avgTurns:F1}";
-        var fPots    = $"{avgPots:F1}";
+        // Median damage. Fall back to mean if per-fight values not yet tracked.
+        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
+
+        // IQR: p25-p75. Empty string if not enough data for a meaningful IQR.
+        var iqr = stat.DamageIQR();
+        string fIqr = iqr.HasValue
+            ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}"
+            : "-";
+
+        var fDmg      = $"{dmgMedian:F0}";
+        var fTurns    = $"{avgTurns:F1}";
+        var fPots     = $"{avgPots:F1}";
         var fDeathPct = $"{Math.Round(deathRate)}%";
 
-        // Dmg + Dmg% colored against the dmg% baseline. Both encode severity (direction)
-        // and confidence (intensity grows with n).
-        var cDmg     = ColBad($"{fDmg,5}", avgDmgPct, n, dmgPctBaseline);
-        var cDmgPct  = ColBad($"{fDmgPct,5}", avgDmgPct, n, dmgPctBaseline);
-        var cVar     = $"[color={TooltipHelper.NeutralShade}]{fVar,5}[/color]";
-        var cVarPct  = $"[color={TooltipHelper.NeutralShade}]{fVarPct,5}[/color]";
-        var cTurns   = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
-        var cPots    = $"[color={TooltipHelper.NeutralShade}]{fPots,5}[/color]";
-        var cDeaths  = FormatDeathsCell(stat.Died, n, deathRate, deathRateBaseline);
+        var cDmg      = ColBad($"{fDmg,5}", avgDmgPct, n, dmgPctBaseline);
+        var cIqr      = $"[color={TooltipHelper.NeutralShade}]{fIqr,9}[/color]";
+        var cTurns    = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
+        var cPots     = $"[color={TooltipHelper.NeutralShade}]{fPots,5}[/color]";
+        var cDeaths   = FormatDeathsCell(stat.Died, n, deathRate, deathRateBaseline);
         var cDeathPct = ColBad($"{fDeathPct,5}", deathRate, n, deathRateBaseline);
 
-        return $"{label} {cDmg} {cDmgPct} {cVar} {cVarPct} {cTurns} {cPots} {cDeaths} {cDeathPct}";
+        return $"{label} {cDmg} {cIqr} {cTurns} {cPots} {cDeaths} {cDeathPct}";
     }
 
     /// <summary>
-    /// In-combat single-row formatter — 4 columns: Dmg | Var | Turns | Deaths (drops
-    /// Pots vs FormatRow, plus the per-character label since the in-combat tooltip is
-    /// always for the current run's character — no point repeating it). Tighter
+    /// In-combat single-row formatter — 4 columns: Dmg (median) | Mid 50% (IQR) |
+    /// Turns | Deaths (drops Pots vs FormatRow, plus the per-character label since
+    /// the in-combat tooltip is always for the current run's character). Tighter
     /// formatting so the table fits inside the standard hover-tip width.
     /// </summary>
     private static string FormatRowCombat(EncounterEvent stat, double deathRateBaseline, double dmgPctBaseline)
@@ -222,20 +237,21 @@ public static class EncounterTooltipHelper
 
         double deathRate = 100.0 * stat.Died / n;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
-        double avgDmg    = (double)stat.DamageTakenSum / n;
         double avgDmgPct = stat.DmgPctSum / n * 100.0;
-        double varDmg    = (double)stat.DamageTakenSqSum / n - avgDmg * avgDmg;
 
-        var fDmg   = $"{avgDmg:F1}";
-        var fVar   = $"{Math.Max(0, varDmg):F1}";
+        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
+        var iqr = stat.DamageIQR();
+        string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
+
+        var fDmg   = $"{dmgMedian:F0}";
         var fTurns = $"{avgTurns:F1}";
 
         var cDmg    = ColBad($"{fDmg,5}", avgDmgPct, n, dmgPctBaseline);
-        var cVar    = $"[color={TooltipHelper.NeutralShade}]{fVar,5}[/color]";
+        var cIqr    = $"[color={TooltipHelper.NeutralShade}]{fIqr,9}[/color]";
         var cTurns  = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
         var cDeaths = FormatDeathsCell(stat.Died, n, deathRate, deathRateBaseline);
 
-        return $"{cDmg} {cVar} {cTurns} {cDeaths}";
+        return $"{cDmg} {cIqr} {cTurns} {cDeaths}";
     }
 
     /// <summary>
@@ -281,8 +297,8 @@ public static class EncounterTooltipHelper
     {
         var dash = $"[color={TooltipHelper.NeutralShade}]";
         // Match the column widths used in FormatRow:
-        //   Dmg(5) Dmg%(5) Var(5) Var%(5) Turns(5) Pots(5) Deaths(7) Dth%(5)
-        return $"{label} {dash}{"-",5}[/color] {dash}{"-",5}[/color] {dash}{"-",5}[/color] {dash}{"-",5}[/color] {dash}{"-",5}[/color] {dash}{"-",5}[/color] {dash}{"-",7}[/color] {dash}{"-",5}[/color]";
+        //   Dmg(5) Mid50%(9) Turns(5) Pots(5) Deaths(7) Dth%(5)
+        return $"{label} {dash}{"-",5}[/color] {dash}{"-",9}[/color] {dash}{"-",5}[/color] {dash}{"-",5}[/color] {dash}{"-",7}[/color] {dash}{"-",5}[/color]";
     }
 
     private static string ColBad(string text, double pct, int n, double baseline)
@@ -303,6 +319,12 @@ public static class EncounterTooltipHelper
         total.PotionsUsedSum   += stat.PotionsUsedSum;
         total.DmgPctSum        += stat.DmgPctSum;
         total.DmgPctSqSum      += stat.DmgPctSqSum;
+        // Merge per-fight damage lists for median/IQR on the "All" row.
+        if (stat.DamageValues != null && stat.DamageValues.Count > 0)
+        {
+            total.DamageValues ??= new List<int>();
+            total.DamageValues.AddRange(stat.DamageValues);
+        }
     }
 
     private static string FormatAscensionPrefix(int? ascMin, int? ascMax)

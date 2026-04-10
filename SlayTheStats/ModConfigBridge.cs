@@ -224,6 +224,20 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
+            Set(cfg, "Key",          "bestiary_static_sprites");
+            Set(cfg, "Label",        "Bestiary: Static Sprites (GPU-Friendly)");
+            Set(cfg, "Type",         EnumVal("Toggle"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.BestiaryStaticSprites);
+            Set(cfg, "Description",  "Render bestiary monster previews as static captured sprites instead of live Spine animations. First hover still draws once to capture the image, then the SubViewport is freed. Dramatically lower GPU cost at the expense of idle animation. Recommended for weaker GPUs.");
+            Set(cfg, "OnChanged",    new Action<object>(v =>
+            {
+                SlayTheStatsConfig.BestiaryStaticSprites = Convert.ToBoolean(v);
+                ModConfig.SaveDebounced<SlayTheStatsConfig>();
+            }));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
             Set(cfg, "Key",          "data_directory");
             Set(cfg, "Label",        "Data Directory");
             Set(cfg, "Type",         EnumVal("TextInput"));

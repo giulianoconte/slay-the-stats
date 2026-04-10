@@ -66,6 +66,12 @@ public static class CreatureFocusPatch
 
         try
         {
+            // Only show encounter stats for actual enemy monsters — NCreature.OnFocus
+            // fires for the player and for pets (Osty et al) too, since they all derive
+            // from NCreature. Walk Entity to Creature and gate on IsMonster so hovering
+            // the player / pet never pops the stats tooltip.
+            if (!IsEnemyMonster(__instance)) return;
+
             var encounterId = GetEncounterId(__instance);
             if (encounterId == null) return;
             if (!MainFile.Db.Encounters.ContainsKey(encounterId)) return;
@@ -79,6 +85,36 @@ public static class CreatureFocusPatch
                 MainFile.Logger.Warn($"[SlayTheStats] Encounter focus failed: {e.Message}");
                 _warnedOnce = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// True iff the hovered NCreature's underlying Creature entity is a
+    /// monster (as opposed to the player or a friendly pet like Osty).
+    /// NCreature.OnFocus fires for any creature in combat — without this
+    /// gate, the stats tooltip would pop over the player's head and over
+    /// pet hitboxes. Reads <c>Creature.IsMonster</c> via reflection to stay
+    /// consistent with the rest of the patch's reflection-based entity
+    /// walking. Defensive: returns false on any reflection failure so we
+    /// only show the tooltip when we're confident it's a monster.
+    /// </summary>
+    private static bool IsEnemyMonster(NCreature creature)
+    {
+        try
+        {
+            var entity = creature.GetType()
+                .GetProperty("Entity", BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(creature);
+            if (entity == null) return false;
+
+            var isMonster = entity.GetType()
+                .GetProperty("IsMonster", BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(entity);
+            return isMonster is bool b && b;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -298,10 +334,30 @@ internal static class EncounterStatsHover
         }
 
         CurrentOwner = hitbox;
+
+        // Hide for one frame to let the WordSmart-wrapped label finalise its
+        // height. The label's GetMinimumSize returns the unwrapped height on
+        // the first query after SetText, then the correct wrapped height on
+        // the next frame. If we position+show this frame, panelSize.Y is
+        // stale and UpdatePosition's y<0 overflow branch drops the tooltip
+        // below the hover stack for a frame. Deferring avoids that flicker.
+        _panel.Visible = false;
+        if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
+        Callable.From(DeferredShowAndPosition).CallDeferred();
+    }
+
+    /// <summary>
+    /// Called via <see cref="Callable.CallDeferred"/> from
+    /// <see cref="ShowForCreature"/> once the current frame's layout has
+    /// propagated the new label text into the panel's Size. Reads Size via
+    /// UpdatePosition and only then flips the panel to visible.
+    /// </summary>
+    private static void DeferredShowAndPosition()
+    {
+        if (_panel == null || CurrentOwner == null || !GodotObject.IsInstanceValid(CurrentOwner))
+            return;
         _panel.Visible = true;
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = true;
-
-        // Position immediately so there's no one-frame flicker before the follower runs.
         UpdatePosition();
     }
 
@@ -349,7 +405,7 @@ internal static class EncounterStatsHover
             ? EncounterTooltipHelper.NoDataText(characterLabel, filter.AscensionMin, filter.AscensionMax)
             : EncounterTooltipHelper.BuildEncounterStatsTextSingleRow(
                 combined, deathRateBaseline, dmgPctBaseline, dmgBaseline,
-                effectiveChar, filter.AscensionMin, filter.AscensionMax, categoryLabel);
+                effectiveChar, categoryLabel, filter);
 
         var encounterName = TruncateEncounterNameIfTooLong(EncounterCategory.FormatName(encounterId));
 
@@ -593,7 +649,16 @@ internal static class EncounterStatsHover
         label.Name                = "EncounterStatsLabel";
         label.BbcodeEnabled       = true;
         label.FitContent          = true;
-        label.AutowrapMode        = TextServer.AutowrapMode.Off;
+        // WordSmart wrap so the filter-context line (which can get long
+        // with all four segments) wraps inside the panel instead of
+        // overflowing the right border. The fixed-width monospace stat row
+        // above is shorter than the panel width so it never wraps. The
+        // CustomMinimumSize below pins the wrap width so Godot's
+        // FitContent+WordSmart doesn't need to guess on the first frame
+        // (which used to cause a one-frame height glitch that dropped the
+        // tooltip below the hover-tip stack).
+        label.AutowrapMode        = TextServer.AutowrapMode.WordSmart;
+        label.CustomMinimumSize   = new Vector2(TooltipHelper.TooltipWidth - 22f, 0);
         label.ScrollActive        = false;
         label.SelectionEnabled    = false;
         label.ShortcutKeysEnabled = false;
@@ -667,8 +732,12 @@ internal static class EncounterStatsHover
 
     private static AggregationFilter BuildFilter(string? character)
     {
-        // Use the central sanitised filter so corrupt cfg values can never block stats here.
-        var filter = SlayTheStatsConfig.BuildSafeFilter();
+        // In-combat tooltip uses the user's persisted DEFAULT filters, not
+        // the live bestiary pane state — matches how the in-run card / relic
+        // tooltips work (CardHoverShowPatch.BuildInRunFilter). Tweaking the
+        // bestiary filter pane mid-run shouldn't shift what the combat
+        // tooltip shows for the enemy you're hovering.
+        var filter = SlayTheStatsConfig.BuildSafeFilterFromDefaults();
         filter.Character = character;
         return filter;
     }

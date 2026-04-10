@@ -178,7 +178,7 @@ public static partial class CompendiumFilterPatch
 
         if (template != null)
         {
-            CreateAndAttachStyledRelicButton(collection, pane, template);
+            CreateAndAttachStyledFilterButton(collection, pane, template);
             // Unconditional (not gated on DebugMode) so we can verify the relic
             // patch fired even when the user enables debug mode mid-session.
             MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: styled button injected on _Ready");
@@ -199,7 +199,7 @@ public static partial class CompendiumFilterPatch
     /// Returns null when the card library hasn't been instantiated at all
     /// (typical when the user opens the Relic Collection page first).
     /// </summary>
-    private static NCardViewSortButton? ResolveSortButtonTemplate(Node fromNode)
+    internal static NCardViewSortButton? ResolveSortButtonTemplate(Node fromNode)
     {
         if (_sortButtonTemplate != null && GodotObject.IsInstanceValid(_sortButtonTemplate))
             return _sortButtonTemplate;
@@ -210,11 +210,14 @@ public static partial class CompendiumFilterPatch
     }
 
     /// <summary>
-    /// Builds a styled NCardViewSortButton clone, parents it to the relic
-    /// collection at the bottom-left position, and wires it to the given pane.
-    /// Caller has already verified <paramref name="template"/> is valid.
+    /// Builds a styled NCardViewSortButton clone, parents it to
+    /// <paramref name="parent"/> at the bottom-left anchor, and wires it to
+    /// <paramref name="pane"/>. Used by both the relic collection and bestiary
+    /// pages so the filter button looks identical across all the compendium
+    /// surfaces. Caller has already verified <paramref name="template"/> is
+    /// valid via <see cref="ResolveSortButtonTemplate"/>.
     /// </summary>
-    private static void CreateAndAttachStyledRelicButton(NRelicCollection collection, PanelContainer pane, NCardViewSortButton template)
+    internal static NCardViewSortButton CreateAndAttachStyledFilterButton(Node parent, PanelContainer pane, NCardViewSortButton template)
     {
         var button = CloneSortButton(template);
 
@@ -239,8 +242,9 @@ public static partial class CompendiumFilterPatch
         button.OffsetTop = -templateSize.Y - padY;
         button.OffsetBottom = -padY;
 
-        collection.AddChild(button);
+        parent.AddChild(button);
         WireSortButtonToPane(button, pane);
+        return button;
     }
 
     /// <summary>
@@ -287,7 +291,7 @@ public static partial class CompendiumFilterPatch
             existingNode.QueueFree();
         }
 
-        CreateAndAttachStyledRelicButton(collection, pane, template);
+        CreateAndAttachStyledFilterButton(collection, pane, template);
         MainFile.Logger.Info("[SlayTheStats] TryUpgradeRelicButton: replaced fallback button with styled clone");
     }
 
@@ -439,21 +443,6 @@ public static partial class CompendiumFilterPatch
     /// Duplicates an existing NCardViewSortButton to get the exact game style:
     /// textures, game fonts (Kreon), HSV shader material, tween animations, and SFX.
     /// </summary>
-    /// <summary>
-    /// Returns a freshly cloned SlayTheStats sort button if a template has been cached
-    /// (i.e. the card library or relic collection has been opened at least once this
-    /// session). Returns null otherwise — callers must provide their own fallback.
-    /// </summary>
-    internal static NCardViewSortButton? TryCloneTemplateButton()
-    {
-        if (_sortButtonTemplate == null || !GodotObject.IsInstanceValid(_sortButtonTemplate))
-            return null;
-        return CloneSortButton(_sortButtonTemplate);
-    }
-
-    internal static void WireExternalSortButtonToPane(NCardViewSortButton button, PanelContainer pane)
-        => WireSortButtonToPane(button, pane);
-
     private static NCardViewSortButton CloneSortButton(NCardViewSortButton template)
     {
         // Duplicate nodes + scripts but NOT signal connections — ConnectSignals()
@@ -1172,7 +1161,17 @@ public static partial class CompendiumFilterPatch
         public const int LowestSentinel = int.MinValue;
         public const int HighestSentinel = int.MaxValue;
         public const int MinExplicit = 0;
-        public const int MaxExplicit = 10;
+
+        /// <summary>
+        /// Explicit upper bound for the stepper — dynamic, derived from the
+        /// highest ascension actually present in the data. As runs start
+        /// landing on higher ascensions (extensions / mods), this grows
+        /// automatically. Falls back to 10 (current STS2 ceiling) on a
+        /// fresh install before any runs are parsed. Instance field (not
+        /// const) so each newly built stepper re-reads it — the pane is
+        /// rebuilt on every show, so stale values aren't an issue.
+        /// </summary>
+        public readonly int MaxExplicit;
 
         private int _value;
         private Label _display = null!;
@@ -1181,7 +1180,7 @@ public static partial class CompendiumFilterPatch
         public int Value
         {
             get => _value;
-            set { _value = value; if (_display != null) _display.Text = Format(value); }
+            set { _value = value; if (_display != null) _display.Text = Format(value, MaxExplicit); }
         }
 
         public Label DisplayLabel => _display;
@@ -1190,6 +1189,20 @@ public static partial class CompendiumFilterPatch
         {
             AddThemeConstantOverride("separation", 4);
             Alignment = AlignmentMode.Center;
+
+            // Read the data's actual ascension ceiling. Never lower than 10
+            // (the current STS2 ceiling) because an empty / single-run
+            // fresh install shouldn't stop the user from navigating up to
+            // the known max; only EXPANDS above 10 once extension/mod data
+            // arrives.
+            int dataMax = 10;
+            try
+            {
+                var ascs = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+                if (ascs.Count > 0) dataMax = Math.Max(10, ascs[^1]);
+            }
+            catch { /* keep fallback */ }
+            MaxExplicit = dataMax;
 
             // Label on the left, vertically-stacked ▲/▼ arrow buttons on the right.
             // Widened so "Lowest" / "Highest" labels fit without clipping at the
@@ -1218,6 +1231,17 @@ public static partial class CompendiumFilterPatch
             down.Pressed += () => Step(-1);
             arrows.AddChild(down);
 
+            // Clamp any out-of-range explicit value down to the current
+            // ceiling. Handles old persisted configs that stored e.g.
+            // AscensionMax = 20 when the actual data ceiling is 10 — without
+            // this, the stepper would display "A20" but clicking up from
+            // A10 would jump straight to Highest and the user couldn't get
+            // back above 10. Sentinels pass through untouched.
+            if (initial != LowestSentinel && initial != HighestSentinel)
+            {
+                if (initial > MaxExplicit) initial = MaxExplicit;
+                if (initial < MinExplicit) initial = MinExplicit;
+            }
             Value = initial;
         }
 
@@ -1245,11 +1269,17 @@ public static partial class CompendiumFilterPatch
             }
         }
 
-        public static string Format(int value)
+        public static string Format(int value, int maxExplicit = 10)
         {
             if (value == LowestSentinel)  return "Lowest";
             if (value == HighestSentinel) return "Highest";
-            return $"A{value}";
+            // Clamp any out-of-range explicit values displayed through the
+            // stepper Format helper — same reasoning as the stepper's
+            // constructor clamp. Sentinels fall through the branches above.
+            int clamped = value;
+            if (clamped > maxExplicit) clamped = maxExplicit;
+            if (clamped < MinExplicit) clamped = MinExplicit;
+            return $"A{clamped}";
         }
 
         private static Button MakeArrowButton(string glyph)

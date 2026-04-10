@@ -17,6 +17,20 @@ public class AggregationFilter
     public string? VersionMax { get; set; }
     public string? Profile { get; set; }
 
+    /// <summary>
+    /// Display-only raw config snapshot. Carries the sentinel strings
+    /// ("__lowest__" / "__highest__") and the raw ascension bounds straight
+    /// from SlayTheStatsConfig so the footer formatter can distinguish
+    /// "Lowest sentinel" from "Highest sentinel" and "explicit 0/20" from
+    /// "unbounded" when rendering. Set by the filter builders
+    /// (BuildCompendiumFilter / BuildInRunFilter / BuildSafeFilter /
+    /// BuildSafeFilterFromDefaults) so <see cref="CardHoverShowPatch.BuildFilterContext"/>
+    /// can produce the full context line without needing parallel raw
+    /// parameters on every call site. Does NOT affect matching behaviour
+    /// at all — the Matches() path ignores this field.
+    /// </summary>
+    public FilterDisplayRaw Display = new FilterDisplayRaw();
+
     /// <summary>Returns true if a RunContext passes all filters.</summary>
     public bool Matches(RunContext ctx)
     {
@@ -63,6 +77,27 @@ public class AggregationFilter
         }
         return 0;
     }
+}
+
+/// <summary>
+/// Raw config snapshot attached to an AggregationFilter purely for footer
+/// rendering. The filter's primary fields (AscensionMin/Max, VersionMin/Max,
+/// Profile) are post-sanitisation and lose sentinel info; these raw strings
+/// preserve it.
+/// </summary>
+public struct FilterDisplayRaw
+{
+    /// <summary>Raw ascension lower bound — can be SlayTheStatsConfig.AscensionLowest
+    /// (int.MinValue), AscensionHighest (int.MaxValue), or an explicit int in [0, 20].</summary>
+    public int RawAscMin;
+    /// <summary>Raw ascension upper bound — same sentinel scheme as RawAscMin.</summary>
+    public int RawAscMax;
+    /// <summary>Raw version lower bound — "__lowest__" / "__highest__" / "vX.Y.Z" / "".</summary>
+    public string RawVerMin;
+    /// <summary>Raw version upper bound — same scheme.</summary>
+    public string RawVerMax;
+    /// <summary>Raw profile — "" for all, profile name otherwise.</summary>
+    public string RawProfile;
 }
 
 public static class StatsAggregator
@@ -302,6 +337,11 @@ public static class StatsAggregator
             agg.PotionsUsedSum   += stat.PotionsUsedSum;
             agg.DmgPctSum        += stat.DmgPctSum;
             agg.DmgPctSqSum      += stat.DmgPctSqSum;
+            if (stat.DamageValues is { Count: > 0 })
+            {
+                agg.DamageValues ??= new List<int>();
+                agg.DamageValues.AddRange(stat.DamageValues);
+            }
         }
 
         return result;
@@ -350,6 +390,11 @@ public static class StatsAggregator
             agg.PotionsUsedSum   += stat.PotionsUsedSum;
             agg.DmgPctSum        += stat.DmgPctSum;
             agg.DmgPctSqSum      += stat.DmgPctSqSum;
+            if (stat.DamageValues is { Count: > 0 })
+            {
+                agg.DamageValues ??= new List<int>();
+                agg.DamageValues.AddRange(stat.DamageValues);
+            }
         }
 
         return result;

@@ -62,6 +62,17 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool InCombatEncounterTooltipDisabled { get; set; } = false;
 
     /// <summary>
+    /// GPU-friendly bestiary mode: when true, the bestiary monster preview uses
+    /// captured static sprites (baked ImageTextures) instead of a live Spine
+    /// SubViewport pipeline. First hover still does one burst of Spine render
+    /// to capture the image, then the SubViewport is freed and all subsequent
+    /// hovers display the cached static texture. Sacrifices idle animation for
+    /// a dramatic drop in GPU cost — recommended for players whose GPU
+    /// struggles with the live pipeline.
+    /// </summary>
+    public static bool BestiaryStaticSprites { get; set; } = false;
+
+    /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
     /// (the folder that contains the "steam" subfolder).
     /// Leave empty to use the platform default.
@@ -226,15 +237,42 @@ internal class SlayTheStatsConfig : SimpleModConfig
         { "", "__lowest__", "__highest__", "__none__", "any", "Any" };
 
     /// <summary>
-    /// Builds an AggregationFilter from the current static properties, defensively clamping
-    /// out-of-range values and sentinel strings so callers always get a sane filter.
+    /// Builds an AggregationFilter from the current LIVE static properties,
+    /// defensively clamping out-of-range values and ignoring sentinel strings
+    /// so callers always get a sane filter. Used by surfaces that should
+    /// reflect the user's in-session pane edits — currently the bestiary
+    /// page (so changing a filter on the pane re-renders the bestiary
+    /// instantly).
     /// </summary>
-    public static AggregationFilter BuildSafeFilter()
+    public static AggregationFilter BuildSafeFilter() =>
+        BuildSafeFilterCore(AscensionMin, AscensionMax, VersionMin, VersionMax, FilterProfile);
+
+    /// <summary>
+    /// Same as <see cref="BuildSafeFilter"/> but reads from the PERSISTED
+    /// defaults (<c>Default*</c> fields) rather than the live in-session
+    /// values. Used by surfaces that should NOT be affected by the user's
+    /// in-session pane edits — e.g. the in-combat encounter tooltip, which
+    /// matches how the in-run card / relic tooltips work
+    /// (<see cref="CardStatsTooltipPatch.BuildInRunFilter"/>). The user
+    /// changing a filter on the bestiary pane mid-run shouldn't change what
+    /// the combat tooltips show.
+    /// </summary>
+    public static AggregationFilter BuildSafeFilterFromDefaults() =>
+        BuildSafeFilterCore(DefaultAscensionMin, DefaultAscensionMax, DefaultVersionMin, DefaultVersionMax, DefaultFilterProfile);
+
+    private static AggregationFilter BuildSafeFilterCore(int ascMin, int ascMax, string versionMin, string versionMax, string profile)
     {
         var filter = new AggregationFilter();
 
-        int ascMin = AscensionMin;
-        int ascMax = AscensionMax;
+        // Stash the raw values verbatim for footer rendering before any
+        // sanitisation. FilterDisplayRaw preserves sentinel info that the
+        // matching-side fields lose after clamping.
+        filter.Display.RawAscMin   = ascMin;
+        filter.Display.RawAscMax   = ascMax;
+        filter.Display.RawVerMin   = versionMin ?? "";
+        filter.Display.RawVerMax   = versionMax ?? "";
+        filter.Display.RawProfile  = profile ?? "";
+
         // Clamp into [0, 20]; reset any garbage values to defaults.
         if (ascMin < 0 || ascMin > 20) ascMin = AscMinDefault;
         if (ascMax < 0 || ascMax > 20) ascMax = AscMaxDefault;
@@ -243,12 +281,12 @@ internal class SlayTheStatsConfig : SimpleModConfig
         if (ascMin > 0)  filter.AscensionMin = ascMin;
         if (ascMax < 20) filter.AscensionMax = ascMax;
 
-        if (!IsBadVersionSentinel(VersionMin))
-            filter.VersionMin = VersionMin;
-        if (!IsBadVersionSentinel(VersionMax))
-            filter.VersionMax = VersionMax;
-        if (!string.IsNullOrEmpty(FilterProfile))
-            filter.Profile = FilterProfile;
+        if (!IsBadVersionSentinel(versionMin))
+            filter.VersionMin = versionMin;
+        if (!IsBadVersionSentinel(versionMax))
+            filter.VersionMax = versionMax;
+        if (!string.IsNullOrEmpty(profile))
+            filter.Profile = profile;
 
         return filter;
     }
@@ -266,6 +304,26 @@ internal class SlayTheStatsConfig : SimpleModConfig
     }
 
     /// <summary>
+    /// Test whether a persisted version string is legitimately garbage (should
+    /// be wiped by <see cref="Sanitize"/>) vs a legitimate value to keep.
+    /// Critically, the "no bound" sentinels <see cref="VersionLowest"/> and
+    /// <see cref="VersionHighest"/> are NOT garbage — they're how the user
+    /// expresses "auto-track the lowest/highest version in the data". They
+    /// differ from <see cref="IsBadVersionSentinel"/>, which is the "should
+    /// this be treated as an unbounded filter?" test used during filter
+    /// construction and (correctly) includes the no-bound sentinels.
+    /// </summary>
+    private static bool IsGarbageVersionValue(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return true;
+        // Valid bound sentinels — keep as-is.
+        if (value == VersionLowest || value == VersionHighest) return false;
+        // A real version starts with 'v' followed by a digit (e.g. v0.98.3).
+        if (value.Length < 2 || value[0] != 'v' || !char.IsDigit(value[1])) return true;
+        return false;
+    }
+
+    /// <summary>
     /// Pulls the static filter properties back into a valid range so the next save writes
     /// sane values. Called once after BaseLib has loaded the config from disk.
     /// </summary>
@@ -274,7 +332,20 @@ internal class SlayTheStatsConfig : SimpleModConfig
         if (AscensionMin < 0 || AscensionMin > 20) AscensionMin = AscMinDefault;
         if (AscensionMax < 0 || AscensionMax > 20) AscensionMax = AscMaxDefault;
         if (AscensionMin > AscensionMax) { AscensionMin = AscMinDefault; AscensionMax = AscMaxDefault; }
-        if (IsBadVersionSentinel(VersionMin)) VersionMin = "";
-        if (IsBadVersionSentinel(VersionMax)) VersionMax = "";
+        // Reset genuinely broken values to the proper "no bound" sentinel, NOT
+        // to empty string — the filter pane dropdowns look up the selected
+        // index by matching the persisted value against their option list,
+        // and "" isn't in the list (Lowest / Highest are). Sanitizing to ""
+        // caused the dropdown to fall back to index 0 ("Lowest") regardless
+        // of the stored default, even though BuildSafeFilter still produced
+        // the right unbounded filter — so stats rendered correctly but the
+        // filter pane UI lied.
+        if (IsGarbageVersionValue(VersionMin)) VersionMin = VersionLowest;
+        if (IsGarbageVersionValue(VersionMax)) VersionMax = VersionHighest;
+        // Same story for the persisted *defaults*: if they were wiped by a
+        // previous build's buggy Sanitize, restore them to the appropriate
+        // bound so the dropdowns can find them.
+        if (IsGarbageVersionValue(DefaultVersionMin)) DefaultVersionMin = VersionLowest;
+        if (IsGarbageVersionValue(DefaultVersionMax)) DefaultVersionMax = VersionHighest;
     }
 }

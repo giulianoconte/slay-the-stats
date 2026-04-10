@@ -19,6 +19,58 @@ public class EncounterEvent
     [JsonPropertyName("potions_used_sum")]   public int PotionsUsedSum   { get; set; }
     [JsonPropertyName("dmg_pct_sum")]        public double DmgPctSum     { get; set; }
     [JsonPropertyName("dmg_pct_sq_sum")]     public double DmgPctSqSum   { get; set; }
+
+    /// <summary>
+    /// Per-fight absolute damage values, appended during run parsing. Used
+    /// to compute median and percentiles (p25/p75) at display time — the
+    /// sum/sq-sum fields above only give mean/variance. Persisted to the
+    /// JSON db; typically ~4 bytes × fights-per-context entries. Null-safe:
+    /// old serialised dbs that predate this field deserialise as null, and
+    /// display code falls back to the mean when the list is null/empty.
+    /// </summary>
+    [JsonPropertyName("damage_values")]
+    public List<int>? DamageValues { get; set; }
+
+    /// <summary>
+    /// Computes the median of <see cref="DamageValues"/>. Returns null if
+    /// the list is null or empty.
+    /// </summary>
+    public double? DamageMedian()
+    {
+        if (DamageValues == null || DamageValues.Count == 0) return null;
+        var sorted = DamageValues.OrderBy(v => v).ToList();
+        int n = sorted.Count;
+        return n % 2 == 1
+            ? sorted[n / 2]
+            : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+    }
+
+    /// <summary>
+    /// Computes the 25th and 75th percentiles of
+    /// <see cref="DamageValues"/>. Returns null if the list is null or has
+    /// fewer than 2 entries (percentiles are meaningless for a single
+    /// observation).
+    /// </summary>
+    public (double p25, double p75)? DamageIQR()
+    {
+        if (DamageValues == null || DamageValues.Count < 2) return null;
+        var sorted = DamageValues.OrderBy(v => v).ToList();
+        return (Percentile(sorted, 0.25), Percentile(sorted, 0.75));
+    }
+
+    /// <summary>
+    /// Linear-interpolation percentile on a pre-sorted list. Matches
+    /// numpy's default "linear" interpolation method.
+    /// </summary>
+    private static double Percentile(List<int> sorted, double p)
+    {
+        double rank = p * (sorted.Count - 1);
+        int lo = (int)Math.Floor(rank);
+        int hi = (int)Math.Ceiling(rank);
+        if (lo == hi) return sorted[lo];
+        double frac = rank - lo;
+        return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+    }
 }
 
 /// <summary>

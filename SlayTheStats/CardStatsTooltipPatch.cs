@@ -231,6 +231,14 @@ public static class CardHoverShowPatch
             VersionMin = IsVersionLowerBound(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
             VersionMax = IsVersionUpperBound(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
+            Display = new FilterDisplayRaw
+            {
+                RawAscMin  = SlayTheStatsConfig.AscensionMin,
+                RawAscMax  = SlayTheStatsConfig.AscensionMax,
+                RawVerMin  = SlayTheStatsConfig.VersionMin  ?? "",
+                RawVerMax  = SlayTheStatsConfig.VersionMax  ?? "",
+                RawProfile = SlayTheStatsConfig.FilterProfile ?? "",
+            },
         };
 
         // Character: derived from ClassFilter.
@@ -280,6 +288,14 @@ public static class CardHoverShowPatch
             VersionMin = IsVersionLowerBound(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
             VersionMax = IsVersionUpperBound(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultFilterProfile) ? null : SlayTheStatsConfig.DefaultFilterProfile,
+            Display = new FilterDisplayRaw
+            {
+                RawAscMin  = SlayTheStatsConfig.DefaultAscensionMin,
+                RawAscMax  = SlayTheStatsConfig.DefaultAscensionMax,
+                RawVerMin  = SlayTheStatsConfig.DefaultVersionMin  ?? "",
+                RawVerMax  = SlayTheStatsConfig.DefaultVersionMax  ?? "",
+                RawProfile = SlayTheStatsConfig.DefaultFilterProfile ?? "",
+            },
         };
 
         if (SlayTheStatsConfig.OnlyHighestWonAscension)
@@ -402,38 +418,205 @@ public static class CardHoverShowPatch
     }
 
     /// <summary>
-    /// Builds a comma-separated filter context string for the footer.
-    /// e.g. "A4-6, Defect, v0.100.0-v0.100.6, profile2"
+    /// Builds a filter context string for the footer. Reads the raw
+    /// (sentinel-preserving) config values off
+    /// <see cref="AggregationFilter.Display"/> so the formatter can
+    /// distinguish sentinels from explicit values — the filter's own fields
+    /// are post-sanitisation and lose that distinction.
+    ///
+    /// Format:
+    ///   <c>A2-10 · Ironclad · v0.5-v0.6 · profile1</c>
+    ///
+    /// Segments are separated by <c> · </c> (U+00B7 with surrounding
+    /// spaces). Some segments collapse or disappear per the per-field rules
+    /// below.
+    ///
+    /// <b>Ascension:</b>
+    /// <list type="bullet">
+    /// <item>low == high → <c>A&lt;val&gt;</c> (e.g. "A4")</item>
+    /// <item>high is Highest sentinel → <c>A&lt;low&gt;+</c> (e.g. "A2+")</item>
+    /// <item>otherwise → <c>A&lt;low&gt;-&lt;high&gt;</c> (e.g. "A2-10")</item>
+    /// </list>
+    ///
+    /// <b>Version:</b>
+    /// <list type="number">
+    /// <item>Both ends resolve to the current STS2 version (= data's highest): <c>current version</c></item>
+    /// <item>Low end is Highest sentinel: <c>&lt;high&gt;</c> (resolved high version, no "+" suffix)</item>
+    /// <item>High end is Lowest sentinel: <c>&lt;low&gt;</c> (resolved low version, no "≤" prefix)</item>
+    /// <item>Low end is Lowest sentinel and high end is Highest: segment omitted entirely</item>
+    /// <item>Low end is Lowest sentinel (but high concrete): <c>≤&lt;high&gt;</c></item>
+    /// <item>High end is Highest sentinel (but low concrete): <c>&lt;low&gt;+</c></item>
+    /// <item>low == high (both concrete): single version string</item>
+    /// <item>otherwise: <c>&lt;low&gt;-&lt;high&gt;</c></item>
+    /// </list>
+    ///
+    /// <b>Profile:</b> omitted when empty or "all".
     /// </summary>
     internal static string BuildFilterContext(string characterLabel, AggregationFilter filter)
     {
         var parts = new List<string>();
 
-        // Always include the ascension range, even when unfiltered ("A0-10").
-        parts.Add(FormatAscensionFooter(filter.AscensionMin, filter.AscensionMax));
+        // Ascension — always shown (the user didn't list any "omit" rule for asc).
+        parts.Add(FormatAscensionContextV2(filter.Display.RawAscMin, filter.Display.RawAscMax));
 
-        // When filtered to a single character, use the character's top-panel
-        // head sprite + name. Falls back to the text label for "All characters"
-        // or when the icon resource isn't available.
+        // Character — always shown.
         var effectiveChar = GetEffectiveCharacter(filter);
         parts.Add(effectiveChar != null ? GetCharacterDisplay(effectiveChar) : characterLabel);
 
-        if (filter.VersionMin != null || filter.VersionMax != null)
+        // Version — may be omitted entirely (both sentinels unbounded).
+        var verPart = FormatVersionContextV2(filter.Display.RawVerMin, filter.Display.RawVerMax);
+        if (verPart != null) parts.Add(verPart);
+
+        // Profile — omitted when empty / "all".
+        var profile = filter.Display.RawProfile;
+        if (!string.IsNullOrEmpty(profile) &&
+            !string.Equals(profile, "all", StringComparison.OrdinalIgnoreCase))
         {
-            var vMin = filter.VersionMin ?? "";
-            var vMax = filter.VersionMax ?? "";
-            if (vMin.Length > 0 && vMax.Length > 0)
-                parts.Add(vMin == vMax ? vMin : $"{vMin}-{vMax}");
-            else if (vMin.Length > 0)
-                parts.Add($"{vMin}+");
-            else
-                parts.Add($"≤{vMax}");
+            parts.Add(profile);
         }
 
-        if (filter.Profile != null)
-            parts.Add(filter.Profile);
+        // Interpunct separator with surrounding spaces.
+        return string.Join(" · ", parts);
+    }
 
-        return parts.Count > 0 ? string.Join(", ", parts) : "";
+    /// <summary>
+    /// Formats the ascension segment per the new footer rules. See the
+    /// Ascension bullet list on <see cref="BuildFilterContext"/>.
+    ///
+    /// The displayed high side is also clamped to the data's actual
+    /// ceiling: if the user's filter allows A0-20 but they've only played
+    /// up to A10, we show "A0-10" rather than the misleading "A0-20".
+    /// As their data expands into higher ascensions (game extensions or
+    /// mods) the displayed max grows with it automatically. The clamping
+    /// is display-only; the matching-side bounds on
+    /// <see cref="AggregationFilter"/> are unaffected.
+    /// </summary>
+    private static string FormatAscensionContextV2(int rawMin, int rawMax)
+    {
+        bool minIsLowest  = rawMin == SlayTheStatsConfig.AscensionLowest;
+        bool minIsHighest = rawMin == SlayTheStatsConfig.AscensionHighest;
+        bool maxIsLowest  = rawMax == SlayTheStatsConfig.AscensionLowest;
+        bool maxIsHighest = rawMax == SlayTheStatsConfig.AscensionHighest;
+
+        // Always look up the data's actual ascension range — needed both
+        // for sentinel resolution AND for the display-side clamp below.
+        // Falls back to A0-20 if the db has no runs (fresh install).
+        int dataMin = 0, dataMax = 20;
+        try
+        {
+            var ascs = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+            if (ascs.Count > 0) { dataMin = ascs[0]; dataMax = ascs[^1]; }
+        }
+        catch { /* keep defaults */ }
+
+        int resolvedMin = minIsLowest ? dataMin : (minIsHighest ? dataMax : rawMin);
+        int resolvedMax = maxIsHighest ? dataMax : (maxIsLowest ? dataMin : rawMax);
+
+        // Display-side clamp: don't show a max higher than what's actually
+        // in the data. Honors explicit lower maxes (if the user sets max=5
+        // and data goes to 10, show 5 — but never the other way around).
+        if (resolvedMax > dataMax) resolvedMax = dataMax;
+
+        // If the user's min is above the (possibly clamped) max, the range
+        // is degenerate (e.g. filter A11-20, data only A0-10 → displayed
+        // max clamped to 10, but min stays at 11). Show the min alone so
+        // the footer reflects the user's intent without rendering a
+        // nonsensical "A11-10".
+        if (resolvedMin > resolvedMax) return $"A{resolvedMin}";
+
+        // Rule: low == high → single value.
+        if (resolvedMin == resolvedMax) return $"A{resolvedMin}";
+
+        // Rule: high is Highest sentinel AND the clamp hasn't pulled it
+        // below the data's ceiling → "A<low>+". Once the clamp kicks in
+        // we prefer the explicit range so the user can see the actual
+        // high of their data.
+        if (maxIsHighest && resolvedMax == dataMax) return $"A{resolvedMin}+";
+
+        return $"A{resolvedMin}-{resolvedMax}";
+    }
+
+    /// <summary>
+    /// Formats the version segment per the new footer rules. Returns null
+    /// to skip the segment entirely (both ends unbounded sentinels).
+    /// See the Version numbered list on <see cref="BuildFilterContext"/>.
+    /// </summary>
+    private static string? FormatVersionContextV2(string rawMin, string rawMax)
+    {
+        string Lowest  = SlayTheStatsConfig.VersionLowest;   // "__lowest__"
+        string Highest = SlayTheStatsConfig.VersionHighest;  // "__highest__"
+
+        bool minIsLowest  = string.IsNullOrEmpty(rawMin) || rawMin == Lowest;
+        bool minIsHighest = rawMin == Highest;
+        bool maxIsLowest  = rawMax == Lowest;
+        bool maxIsHighest = string.IsNullOrEmpty(rawMax) || rawMax == Highest;
+
+        // Resolve sentinels to concrete versions from the data. Each side
+        // resolves independently: a "Lowest" sentinel becomes the data's
+        // low watermark, a "Highest" sentinel becomes the data's high
+        // watermark (regardless of whether it's on the min or max side).
+        // The highest concrete version in data is treated as "current STS2
+        // version" for rule 1.
+        string resolvedMin = "", resolvedMax = "";
+        if (minIsLowest || minIsHighest || maxIsLowest || maxIsHighest)
+        {
+            try
+            {
+                var versions = StatsAggregator.GetDistinctVersions(MainFile.Db);
+                if (versions.Count > 0)
+                {
+                    string dataLow  = versions[0];
+                    string dataHigh = versions[^1];
+                    if (minIsLowest)       resolvedMin = dataLow;
+                    else if (minIsHighest) resolvedMin = dataHigh;
+                    if (maxIsLowest)       resolvedMax = dataLow;
+                    else if (maxIsHighest) resolvedMax = dataHigh;
+                }
+            }
+            catch { /* resolvedMin/Max stay "" */ }
+        }
+        if (!minIsLowest && !minIsHighest) resolvedMin = rawMin;
+        if (!maxIsLowest && !maxIsHighest) resolvedMax = rawMax;
+
+        // Rule 4 (order-shifted to the front): both ends unbounded → no segment.
+        if (minIsLowest && maxIsHighest) return null;
+
+        // Rule 1: both resolve to the current version → "current version".
+        // Current version ≡ data's highest concrete version. Only meaningful
+        // when we actually have data.
+        string currentVer = "";
+        try
+        {
+            var versions = StatsAggregator.GetDistinctVersions(MainFile.Db);
+            if (versions.Count > 0) currentVer = versions[^1];
+        }
+        catch { }
+        if (!string.IsNullOrEmpty(currentVer) &&
+            resolvedMin == currentVer && resolvedMax == currentVer)
+        {
+            return "current version";
+        }
+
+        // Rule 2: low end is Highest sentinel → "<high>" (no "+" — the
+        // range is pinned at the high version).
+        if (minIsHighest) return resolvedMax;
+
+        // Rule 3: high end is Lowest sentinel → "<low>" (no "≤" — the
+        // range is pinned at the low version).
+        if (maxIsLowest) return resolvedMin;
+
+        // Rule 5: low end is Lowest (high concrete) → "≤<high>".
+        if (minIsLowest)
+        {
+            return $"\u2264{resolvedMax}";
+        }
+
+        // Rule 6: high end is Highest (low concrete) → "<low>+".
+        if (maxIsHighest) return $"{resolvedMin}+";
+
+        // Both concrete.
+        if (rawMin == rawMax) return rawMin;
+        return $"{rawMin}-{rawMax}";
     }
 
     /// <summary>
