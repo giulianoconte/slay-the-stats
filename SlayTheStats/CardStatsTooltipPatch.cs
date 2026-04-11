@@ -452,16 +452,21 @@ public static class CardHoverShowPatch
     ///
     /// <b>Profile:</b> omitted when empty or "all".
     /// </summary>
-    internal static string BuildFilterContext(string characterLabel, AggregationFilter filter)
+    internal static string BuildFilterContext(string characterLabel, AggregationFilter filter, bool includeCharacter = true)
     {
         var parts = new List<string>();
 
         // Ascension — always shown (the user didn't list any "omit" rule for asc).
         parts.Add(FormatAscensionContextV2(filter.Display.RawAscMin, filter.Display.RawAscMax));
 
-        // Character — always shown.
-        var effectiveChar = GetEffectiveCharacter(filter);
-        parts.Add(effectiveChar != null ? GetCharacterDisplay(effectiveChar) : characterLabel);
+        // Character — omitted entirely when includeCharacter is false (the focused
+        // bestiary view shows the character context per-row via icons, so the footer
+        // can drop the redundant segment).
+        if (includeCharacter)
+        {
+            var effectiveChar = GetEffectiveCharacter(filter);
+            parts.Add(effectiveChar != null ? GetCharacterDisplay(effectiveChar) : characterLabel);
+        }
 
         // Version — may be omitted entirely (both sentinels unbounded).
         var verPart = FormatVersionContextV2(filter.Display.RawVerMin, filter.Display.RawVerMax);

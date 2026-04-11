@@ -385,13 +385,32 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         outerVbox.AddChild(new HSeparator());
 
+        // ── Main content: left list | separator | right detail ──
+        // contentSplit is created early (right after the title HSep) so the VSeparator
+        // inside it extends from just below the title all the way to the bottom of the
+        // page. The biome/sort/score tab rows live inside leftSection now (instead of
+        // being siblings of contentSplit in outerVbox), so the right panel can start at
+        // the top — giving the stats table and monster preview much more vertical room.
+        var contentSplit = new HBoxContainer();
+        contentSplit.AddThemeConstantOverride("separation", 16);
+        contentSplit.SizeFlagsVertical = SizeFlags.ExpandFill;
+        outerVbox.AddChild(contentSplit);
+
+        // Left: top settings (biome/sort/score) + sticky stats-column header + scrollable list.
+        var leftSection = new VBoxContainer();
+        leftSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        leftSection.SizeFlagsVertical = SizeFlags.ExpandFill;
+        leftSection.SizeFlagsStretchRatio = 1.4f;
+        leftSection.AddThemeConstantOverride("separation", 4);
+        contentSplit.AddChild(leftSection);
+
         // ── Biome tabs ──
         // The SlayTheStats filter button is NOT inserted here — it's placed at the
         // bottom-left of the submenu (matching NRelicCollection's anchored position) so
         // every compendium page shows the button in the same on-screen spot.
         _biomeTabRow = new HBoxContainer();
         _biomeTabRow.AddThemeConstantOverride("separation", 8);
-        outerVbox.AddChild(_biomeTabRow);
+        leftSection.AddChild(_biomeTabRow);
 
         // ── Sort tabs ──
         var sortRowOuter = new HBoxContainer();
@@ -406,7 +425,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _sortTabRow = new HBoxContainer();
         _sortTabRow.AddThemeConstantOverride("separation", 4);
         sortRowOuter.AddChild(_sortTabRow);
-        outerVbox.AddChild(sortRowOuter);
+        leftSection.AddChild(sortRowOuter);
 
         // ── Sort character tabs ──
         var sortCharOuter = new HBoxContainer();
@@ -421,23 +440,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _sortCharRow = new HBoxContainer();
         _sortCharRow.AddThemeConstantOverride("separation", 4);
         sortCharOuter.AddChild(_sortCharRow);
-        outerVbox.AddChild(sortCharOuter);
+        leftSection.AddChild(sortCharOuter);
 
-        outerVbox.AddChild(new HSeparator());
-
-        // ── Main content: left list | separator | right detail ──
-        var contentSplit = new HBoxContainer();
-        contentSplit.AddThemeConstantOverride("separation", 16);
-        contentSplit.SizeFlagsVertical = SizeFlags.ExpandFill;
-        outerVbox.AddChild(contentSplit);
-
-        // Left: sticky stats-column header on top + scrollable encounter list below.
-        var leftSection = new VBoxContainer();
-        leftSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        leftSection.SizeFlagsVertical = SizeFlags.ExpandFill;
-        leftSection.SizeFlagsStretchRatio = 1.4f;
-        leftSection.AddThemeConstantOverride("separation", 4);
-        contentSplit.AddChild(leftSection);
+        // Separator between the top settings and the encounter list. Lives inside
+        // leftSection (not outerVbox) so it doesn't span across the right panel —
+        // the vertical divider runs uninterrupted from the title HSep down to the bottom.
+        leftSection.AddChild(new HSeparator());
 
         // Sticky stats-column header — labels whichever stat the right-hand stat column is
         // currently displaying so the column is never mysterious. Wrapped in a margin
@@ -1915,8 +1923,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Derive the biome from the first encounter in this category (all share the same biome
         // when viewing a specific biome tab; for synthetic tabs like "act:1" or "all:", use null).
         string? catBiome = null;
+        int catAct = 0;
         if (encounterIds.Count > 0 && MainFile.Db.EncounterMeta.TryGetValue(encounterIds[0], out var firstMeta))
+        {
             catBiome = firstMeta.Biome;
+            catAct = firstMeta.Act;
+        }
 
         string statsText;
 
@@ -1935,22 +1947,26 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 Display = filter.Display,
             };
 
-            var poolBiomeStat = !string.IsNullOrEmpty(catBiome)
-                ? StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category, catBiome)
-                : StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category);
-            var poolAllStat = StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category);
-            var allCharsPoolStat = !string.IsNullOrEmpty(catBiome)
-                ? StatsAggregator.AggregateEncounterPool(MainFile.Db, filter, category, catBiome)
-                : StatsAggregator.AggregateEncounterPool(MainFile.Db, filter, category);
+            // All pool aggregations are encounter-weighted so each encounter counts equally
+            // regardless of how often the player has fought it.
+            var poolBiome = !string.IsNullOrEmpty(catBiome)
+                ? StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, charFilter, category, catBiome)
+                : StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, charFilter, category);
+
+            var poolAll = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, charFilter, category);
+
+            var allCharsPool = !string.IsNullOrEmpty(catBiome)
+                ? StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, catBiome)
+                : StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category);
 
             var biomeLabel = !string.IsNullOrEmpty(catBiome) ? FormatBiomeName(catBiome) : null;
             var charLabel = FormatCharacterLabel(_sortCharacter);
 
             statsText = EncounterTooltipHelper.BuildCategoryStatsTextFocused(
-                poolBiomeStat, poolAllStat, allCharsPoolStat,
-                biomeLabel, categoryLabel, filter);
+                poolBiome, poolAll, allCharsPool,
+                _sortCharacter, biomeLabel, categoryLabel, filter);
 
-            SetStatsTitle($"{charLabel} — {categoryLabel}");
+            SetStatsTitle($"{categoryLabel} Stats");
         }
         else
         {
@@ -2043,31 +2059,36 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 Display = filter.Display,
             };
 
-            // Row 1: this encounter, this character
+            // Row 1: this encounter, this character (single encounter — fight-weighted)
             var charStats = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
             var encounterStat = charStats.TryGetValue(_sortCharacter, out var cs) ? cs : new EncounterEvent();
 
-            // Row 2: biome+category pool, this character — uses encounter's actual biome, not selected tab
-            EncounterEvent? poolBiomeStat = !string.IsNullOrEmpty(encBiome)
-                ? StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category, encBiome)
-                : null;
+            // Row 2: act+category pool — encounter-weighted across all encounters in the
+            // same category within the encounter's act (e.g., Act 1 includes Overgrowth +
+            // Underdocks). Each encounter counts equally regardless of fight frequency.
+            int encAct = meta?.Act ?? 0;
+            PoolMetrics? poolAct = encAct > 0
+                ? StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, charFilter, category, $"act:{encAct}")
+                : (PoolMetrics?)null;
 
-            // Row 3: category pool all biomes, this character
-            var poolAllStat = StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category);
+            // Row 3: all-acts category pool — encounter-weighted, always shown
+            var poolAll = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, charFilter, category);
 
-            // Row 4: this encounter, all characters (no character filter)
-            var allCharsStat = new EncounterEvent();
-            foreach (var stat in charStats.Values)
-                EncounterTooltipHelper.Accumulate(allCharsStat, stat);
+            // Row 4: all characters vs this encounter — character-weighted aggregation.
+            // Each character contributes one observation (their median, p25, p75, etc.) and
+            // the percentile metrics use median-of-medians across characters; the rest
+            // average across characters. Same encounter-weighted spirit as the pool rows
+            // but applied to a single encounter type across characters.
+            var allCharsMetrics = StatsAggregator.AggregateMetricsFromEvents(charStats.Values);
 
             var charLabel = FormatCharacterLabel(_sortCharacter);
-            var biomeLabel = !string.IsNullOrEmpty(encBiome) ? FormatBiomeName(encBiome) : null;
+            var actLabel = encAct > 0 ? $"Act {encAct}" : null;
 
             statsText = EncounterTooltipHelper.BuildEncounterStatsTextFocused(
-                encounterStat, poolBiomeStat, poolAllStat, allCharsStat,
-                encounterName, biomeLabel, "All Biomes", categoryLabel, filter);
+                encounterStat, poolAct, poolAll, allCharsMetrics,
+                encounterName, _sortCharacter, actLabel, categoryLabel, filter);
 
-            SetStatsTitle($"{charLabel} vs {encounterName}");
+            SetStatsTitle($"{encounterName} Stats");
             _statsLabel.Text = statsText;
             return;
         }

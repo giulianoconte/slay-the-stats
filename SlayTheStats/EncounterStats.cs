@@ -74,6 +74,26 @@ public class EncounterEvent
 }
 
 /// <summary>
+/// Encounter-weighted aggregate of a pool of encounters. Each metric is the average
+/// of per-encounter values, so every encounter type contributes equally regardless of
+/// how often the player has fought it. Total Fought and Died are still summed across
+/// encounters (for the N column and Deaths cell display). Computed by
+/// <see cref="StatsAggregator.AggregateEncounterPoolWeighted"/>.
+/// </summary>
+public struct PoolMetrics
+{
+    public int Fought;
+    public int Died;
+    public double Median;
+    public (double p25, double p75)? IQR;
+    public double AvgTurns;
+    public double AvgPots;
+    public double AvgDmgPct;  // 0–100, used for damage-cell color baseline
+    public double DeathRate;  // 0–100, used for deaths-cell color baseline
+    public double Iqrc;       // (p75-p25)/median, used for mid-50% color baseline
+}
+
+/// <summary>
 /// Metadata about an encounter type, keyed by encounter ID (not per-context).
 /// Populated on first occurrence during run parsing.
 /// </summary>

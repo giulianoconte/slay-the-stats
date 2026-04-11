@@ -116,143 +116,254 @@ public static class EncounterTooltipHelper
         return sb.ToString();
     }
 
+    // Section colors for focused-character view — subtle warm/cool tints on neutral grey.
+    // Slightly nudged toward orange (baseline) and teal (pool) so the sub-label and its data
+    // row are visually grouped without dominating the table.
+    private const string BaselineSectionColor = "#a89888";  // subtle warm grey — biome pool baseline
+    private const string PoolSectionColor     = "#8898a8";  // subtle cool grey — all-acts category pool
+    private const string AllCharsSectionColor = "#989898";  // pure neutral grey — cross-character
+    // Highlight colour for the focused encounter row's sub-label — gold/amber matching
+    // the bestiary title and other in-game header text.
+    private const string EncounterRowLabelColor = "#eabe51";
+
+    // Horizontal separator between sections in focused mode. 51 box-drawing chars span the
+    // data row content width (with the new wider columns). Dim colour so it doesn't compete.
+    private static readonly string SectionSeparator =
+        $"  [color=#505050]{new string('─', 51)}[/color]";
+
+    // Two-line column header for focused-character views with descriptive labels.
+    //   Line 1:          median   middle 50%
+    //   Line 2:  Fought  damage   damage range  turns  potions  deaths
+    // Column widths: Fought(6) | damage(6) | range(12) | turns(5) | potions(7) | deaths(7)
+    // Two-space separators between columns for breathing room.
+    private static string FocusedColumnHeader()
+    {
+        var sb = new StringBuilder();
+        sb.Append($"          {"median",6}   {"middle 50%",12}\n");
+        sb.Append($"  {"Fought",6}  {"damage",6}  {"damage range",12}  {"turns",5}  {"potions",7}  {"deaths",7}\n");
+        return sb.ToString();
+    }
+
+    /// <summary>Returns just the inline character icon BBCode at a given size, without the
+    /// trailing name. Returns empty string when the character has no recognised icon.</summary>
+    private static string CharacterIcon(string characterId, int sizePx)
+    {
+        var name = characterId.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+            ? characterId.Substring("CHARACTER.".Length)
+            : characterId;
+        var path = $"res://images/ui/top_panel/character_icon_{name.ToLowerInvariant()}.png";
+        return Godot.ResourceLoader.Exists(path)
+            ? $"[img={sizePx}x{sizePx}]{path}[/img] "
+            : "";
+    }
+
+    // Cache the resolved Prismatic Gem icon path so we don't probe the resource loader
+    // every time the all-chars row renders. Null = not yet probed; "" = no icon found.
+    private static string? _allCharsIconPath;
+
+    /// <summary>Returns inline BBCode for the Prismatic Gem relic icon — used as the
+    /// "all characters" symbol on row 4. Tries the unpacked PNG path first, then the
+    /// atlas .tres resource as a fallback. Result is cached for the session. Returns
+    /// empty string if neither path resolves.</summary>
+    private static string AllCharsIcon(int sizePx)
+    {
+        if (_allCharsIconPath == null)
+        {
+            // Per RelicModel.BigIconPath: res://images/relics/{IconBaseName}.png
+            // and PackedIconPath: res://images/atlases/relic_atlas.sprites/{IconBaseName}.tres
+            // IconBaseName = Id.Entry.ToLowerInvariant() = "prismaticgem".
+            var candidates = new[]
+            {
+                "res://images/relics/prismaticgem.png",
+                "res://images/packed/atlases/relic_atlas.sprites/prismaticgem.tres",
+                "res://images/atlases/relic_atlas.sprites/prismaticgem.tres",
+            };
+            _allCharsIconPath = "";
+            foreach (var path in candidates)
+            {
+                if (Godot.ResourceLoader.Exists(path))
+                {
+                    _allCharsIconPath = path;
+                    break;
+                }
+            }
+        }
+
+        return _allCharsIconPath.Length > 0
+            ? $"[img={sizePx}x{sizePx}]{_allCharsIconPath}[/img] "
+            : "";
+    }
+
     /// <summary>
     /// Builds encounter stats for a focused single-character view. Section-based layout
-    /// with descriptive sub-labels on their own lines between data rows:
+    /// with descriptive sub-labels and color-coded sections:
     ///
+    ///   Title: "Ironclad Encounter Stats"
+    ///   [sub-label]         vs Turret Operator
     ///   [header]            N   Dmg   Mid 50% Turns  Pots  Deaths
     ///   [data — colored]    8    23     12-31   4.2   0.4     1/8
-    ///   [sub-label]         (baseline) Hive Elite
-    ///   [data — neutral]   42    18      9-25   3.8   0.3    4/42
-    ///   [sub-label]         All Elite
-    ///   [data — neutral]   97    15      7-22   3.5   0.2   8/97
+    ///   [sub-label warm]    vs All Hive Elite encounters (baseline)
+    ///   [data — warm]      42    18      9-25   3.8   0.3    4/42
+    ///   [sub-label cool]    vs All act 2 Elite encounters
+    ///   [data — cool]      97    15      7-22   3.5   0.2   8/97
     ///   [separator]
-    ///   [sub-label]         All chars vs Soul Nexus
-    ///   [data — neutral]   24    19     10-28   3.9   0.3    3/24
+    ///   [sub-label grey]    All characters vs Turret Operator
+    ///   [data — grey]      24    19     10-28   3.9   0.3    3/24
     ///
-    /// Title (set by caller via SetStatsTitle): "Defect vs Soul Nexus".
-    /// Row 1 colored against row 2 (biome+category pool). Biome is always the encounter's
-    /// actual biome from metadata — not the selected biome tab.
+    /// Biome is always the encounter's actual biome from metadata — not the selected tab.
+    /// Row 3 (act pool) is skipped when it would be identical to row 2 (single-biome acts).
     /// </summary>
     internal static string BuildEncounterStatsTextFocused(
         EncounterEvent encounterStat,
-        EncounterEvent? poolBiomeStat,
-        EncounterEvent poolAllStat,
-        EncounterEvent allCharsStat,
+        PoolMetrics? poolAct,
+        PoolMetrics poolAll,
+        PoolMetrics allCharsMetrics,
         string encounterName,
-        string? biomePoolLabel,
-        string allPoolLabel,
+        string characterId,
+        string? actLabel,
         string categoryLabel,
         AggregationFilter filter)
     {
         var sb = new StringBuilder();
+        var charIcon = CharacterIcon(characterId, 22);
+        var catLower = categoryLabel.ToLowerInvariant();
 
-        // Column header — no label column, just a small indent.
-        sb.Append($"  {"N",4} {"Dmg",5} {"Mid 50%",9} {"Turns",5} {"Pots",5} {"Deaths",7}\n");
+        // 2-line column header + separator
+        sb.Append(FocusedColumnHeader());
+        AppendSectionSeparator(sb);
 
-        // Derive baselines for row 1 coloration from the pool row (biome pool if present, else all pool).
-        var baselineSource = poolBiomeStat is { Fought: > 0 } ? poolBiomeStat : poolAllStat;
-        var (dmgPctBase, deathRateBase, iqrcBase) = DeriveBaselines(baselineSource);
+        // Derive coloration baselines from the encounter-weighted act pool (preferred)
+        // or fall back to the all-pool when there's no act data.
+        var baselineSource = poolAct is { Fought: > 0 } ? poolAct.Value : poolAll;
+        var (medianBase, iqrcBase, deathRateBase, turnsBase, potsBase) = DeriveBaselines(baselineSource);
 
-        // Row 1: this encounter, this character — colored
+        // Row 1: this encounter, this character — sub-label highlighted in gold,
+        // data row colored against the encounter-weighted baseline
+        sb.Append(SubLabel($"{charIcon}vs {encounterName}", EncounterRowLabelColor));
+        sb.Append('\n');
         if (encounterStat.Fought > 0)
-            sb.Append(FormatDataRow(encounterStat, deathRateBase, dmgPctBase, iqrcBase));
+            sb.Append(FormatDataRow(encounterStat, medianBase, iqrcBase, deathRateBase, turnsBase, potsBase));
         else
             sb.Append(FormatEmptyDataRow());
         sb.Append('\n');
 
-        // Row 2: biome+category pool (skipped when encounter has no biome)
-        if (poolBiomeStat != null && biomePoolLabel != null)
+        // Row 2: act+category pool (baseline) — encounter-weighted across all encounters
+        // in the same category within the encounter's act (so Act 1 includes both
+        // Overgrowth and Underdocks for example). Neutral data cells.
+        if (poolAct.HasValue && actLabel != null)
         {
-            sb.Append(SubLabel($"(baseline) {biomePoolLabel} {categoryLabel}"));
+            AppendSectionSeparator(sb);
+            sb.Append(SubLabel($"{charIcon}vs {actLabel} {catLower} encounters (baseline)", BaselineSectionColor));
             sb.Append('\n');
-            if (poolBiomeStat.Fought > 0)
-                sb.Append(FormatNeutralDataRow(poolBiomeStat));
-            else
-                sb.Append(FormatEmptyDataRow());
+            sb.Append(poolAct.Value.Fought > 0
+                ? FormatPoolDataRow(poolAct.Value, TooltipHelper.NeutralShade)
+                : FormatEmptySectionDataRow(TooltipHelper.NeutralShade));
             sb.Append('\n');
         }
 
-        // Row 3: category pool all biomes
-        sb.Append(SubLabel($"All {categoryLabel}"));
+        // Row 3: all-acts category pool — encounter-weighted. Always shown.
+        AppendSectionSeparator(sb);
+        sb.Append(SubLabel($"{charIcon}vs all {catLower} encounters", PoolSectionColor));
         sb.Append('\n');
-        if (poolAllStat.Fought > 0)
-            sb.Append(FormatNeutralDataRow(poolAllStat));
-        else
-            sb.Append(FormatEmptyDataRow());
-
-        // Separator + Row 4: all chars for this encounter
-        sb.Append("\n\n");
-        sb.Append(SubLabel($"All chars vs {encounterName}"));
+        sb.Append(poolAll.Fought > 0
+            ? FormatPoolDataRow(poolAll, TooltipHelper.NeutralShade)
+            : FormatEmptySectionDataRow(TooltipHelper.NeutralShade));
         sb.Append('\n');
-        if (allCharsStat.Fought > 0)
-            sb.Append(FormatNeutralDataRow(allCharsStat));
-        else
-            sb.Append(FormatEmptyDataRow());
 
-        // Footer — filter context only (baselines are visible as rows).
-        var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter);
+        // Row 4: all chars vs this encounter — character-weighted (each character is one
+        // observation, median taken across characters for the percentile metrics). The
+        // Prismatic Gem icon represents "all characters" (the relic that gives access
+        // to every color in STS).
+        var allCharsIcon = AllCharsIcon(22);
+        AppendSectionSeparatorWithExtraSpace(sb);
+        sb.Append(SubLabel($"{allCharsIcon}All vs {encounterName}", AllCharsSectionColor));
+        sb.Append('\n');
+        sb.Append(allCharsMetrics.Fought > 0
+            ? FormatPoolDataRow(allCharsMetrics, AllCharsSectionColor)
+            : FormatEmptySectionDataRow(AllCharsSectionColor));
+
+        // Footer — character is omitted (each row already shows its character context).
+        var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
         if (filterCtx.Length > 0)
             sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
 
         return sb.ToString();
     }
 
+    /// <summary>Appends a horizontal section separator on its own line, no extra blank
+    /// lines (the line height of the separator itself provides the visual breathing room).</summary>
+    private static void AppendSectionSeparator(StringBuilder sb)
+    {
+        sb.Append(SectionSeparator);
+        sb.Append('\n');
+    }
+
+    /// <summary>Appends a section separator with one extra blank line above for slightly
+    /// more visual breathing room. Used before the all-chars section since it's a different
+    /// reference axis (not part of the zoom-out progression).</summary>
+    private static void AppendSectionSeparatorWithExtraSpace(StringBuilder sb)
+    {
+        sb.Append('\n');                  // extra blank line above
+        sb.Append(SectionSeparator);
+        sb.Append('\n');
+    }
+
     /// <summary>
-    /// Builds category-level stats for a focused single-character view. Same section-based
-    /// layout as the encounter view but without the top encounter row and with the bottom
-    /// row showing all-characters for the category instead of a specific encounter:
-    ///
-    ///   [header]            N   Dmg   Mid 50% Turns  Pots  Deaths
-    ///   [data — neutral]   42    18      9-25   3.8   0.3    4/42
-    ///   [sub-label]         All Elite
-    ///   [data — neutral]   97    15      7-22   3.5   0.2   8/97
-    ///   [separator]
-    ///   [sub-label]         All chars — Hive Elite
-    ///   [data — neutral]   84    17     10-24   3.7   0.3    6/84
-    ///
-    /// Title (set by caller): "Defect — Hive Elite".
+    /// Builds category-level stats for a focused single-character view. Same section
+    /// layout as encounter view but without the encounter row; bottom row is all-chars
+    /// for the category pool instead of a specific encounter.
     /// </summary>
     internal static string BuildCategoryStatsTextFocused(
-        EncounterEvent poolBiomeStat,
-        EncounterEvent poolAllStat,
-        EncounterEvent allCharsPoolStat,
-        string? biomePoolLabel,
+        PoolMetrics poolBiome,
+        PoolMetrics poolAll,
+        PoolMetrics allCharsPool,
+        string characterId,
+        string? biomeLabel,
         string categoryLabel,
         AggregationFilter filter)
     {
         var sb = new StringBuilder();
+        var charIcon = CharacterIcon(characterId, 22);
+        var catLower = categoryLabel.ToLowerInvariant();
 
-        sb.Append($"  {"N",4} {"Dmg",5} {"Mid 50%",9} {"Turns",5} {"Pots",5} {"Deaths",7}\n");
+        // 2-line column header + separator
+        sb.Append(FocusedColumnHeader());
+        AppendSectionSeparator(sb);
 
-        // Row 1: biome+category pool, this character
-        if (poolBiomeStat.Fought > 0)
-            sb.Append(FormatNeutralDataRow(poolBiomeStat));
-        else
-            sb.Append(FormatEmptyDataRow());
+        // Row 1: biome+category pool, this character — encounter-weighted, neutral data
+        if (biomeLabel != null)
+        {
+            sb.Append(SubLabel($"{charIcon}vs {biomeLabel} {catLower} encounters (baseline)", BaselineSectionColor));
+            sb.Append('\n');
+        }
+        sb.Append(poolBiome.Fought > 0
+            ? FormatPoolDataRow(poolBiome, TooltipHelper.NeutralShade)
+            : FormatEmptySectionDataRow(TooltipHelper.NeutralShade));
         sb.Append('\n');
 
-        // Row 2: all-biome category pool, this character
-        sb.Append(SubLabel($"All {categoryLabel}"));
+        // Row 2: all-acts category pool, this character — encounter-weighted, neutral data
+        AppendSectionSeparator(sb);
+        sb.Append(SubLabel($"{charIcon}vs all {catLower} encounters", PoolSectionColor));
         sb.Append('\n');
-        if (poolAllStat.Fought > 0)
-            sb.Append(FormatNeutralDataRow(poolAllStat));
-        else
-            sb.Append(FormatEmptyDataRow());
-
-        // Separator + Row 3: all chars for this category+biome
-        var allCharsLabel = biomePoolLabel != null
-            ? $"All chars — {biomePoolLabel} {categoryLabel}"
-            : $"All chars — {categoryLabel}";
-        sb.Append("\n\n");
-        sb.Append(SubLabel(allCharsLabel));
+        sb.Append(poolAll.Fought > 0
+            ? FormatPoolDataRow(poolAll, TooltipHelper.NeutralShade)
+            : FormatEmptySectionDataRow(TooltipHelper.NeutralShade));
         sb.Append('\n');
-        if (allCharsPoolStat.Fought > 0)
-            sb.Append(FormatNeutralDataRow(allCharsPoolStat));
-        else
-            sb.Append(FormatEmptyDataRow());
 
-        var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter);
+        // Row 3: all chars for this category+biome — encounter-weighted, separated with extra space
+        var allCharsIcon = AllCharsIcon(22);
+        var allCharsLabel = biomeLabel != null
+            ? $"{allCharsIcon}All vs {biomeLabel} {catLower} encounters"
+            : $"{allCharsIcon}All vs {catLower} encounters";
+        AppendSectionSeparatorWithExtraSpace(sb);
+        sb.Append(SubLabel(allCharsLabel, AllCharsSectionColor));
+        sb.Append('\n');
+        sb.Append(allCharsPool.Fought > 0
+            ? FormatPoolDataRow(allCharsPool, AllCharsSectionColor)
+            : FormatEmptySectionDataRow(AllCharsSectionColor));
+
+        // Footer — character omitted (each row shows its character context inline).
+        var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
         if (filterCtx.Length > 0)
             sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
 
@@ -260,34 +371,68 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>
-    /// Derives coloration baselines from an EncounterEvent (used as the reference pool
-    /// row for coloring the focused encounter row).
+    /// Derives coloration baselines from an encounter-weighted PoolMetrics. Used as
+    /// the reference for coloring the focused encounter row. The median and IQRC
+    /// baselines are derived from the median-aggregated pool values (so a row showing
+    /// "median 23" is colored against the median of per-encounter medians, not the mean
+    /// of per-encounter avg dmg%). The other baselines stay mean-aggregated.
     /// </summary>
-    private static (double dmgPctBaseline, double deathRateBaseline, double iqrcBaseline) DeriveBaselines(EncounterEvent stat)
+    private static (double medianBase, double iqrcBase, double deathRateBase, double turnsBase, double potsBase) DeriveBaselines(PoolMetrics m)
     {
-        if (stat.Fought == 0) return (20.0, 10.0, 1.0);
-        double dmgPct = stat.DmgPctSum / stat.Fought * 100.0;
-        double deathRate = 100.0 * stat.Died / stat.Fought;
-        double iqrc = 1.0;
-        var median = stat.DamageMedian();
-        var iqr = stat.DamageIQR();
-        if (median != null && iqr != null && median.Value > 0)
-            iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
-        return (dmgPct, deathRate, iqrc);
+        if (m.Fought == 0) return (0, 1.0, 10.0, 0, 0);
+        double iqrcBase = 1.0;
+        if (m.IQR.HasValue && m.Median > 0)
+            iqrcBase = (m.IQR.Value.p75 - m.IQR.Value.p25) / m.Median;
+        return (m.Median, iqrcBase, m.DeathRate, m.AvgTurns, m.AvgPots);
     }
 
-    /// <summary>Sub-label in smaller, dimmer text — displayed on its own line between data rows.</summary>
-    private static string SubLabel(string text)
-        => $"[font_size=14][color=#787878]{text}[/color][/font_size]";
+    /// <summary>
+    /// ColBad variant for metrics whose absolute scale is much smaller than 0–100
+    /// (turns, potions, raw median damage). Expresses the value as a percentage of the
+    /// baseline (100 = matches baseline, &gt;100 = above) so the existing significance
+    /// thresholds in <see cref="TooltipHelper.ColWR"/> trigger meaningfully on small
+    /// absolute differences. Falls back to neutral grey when the baseline is zero.
+    /// </summary>
+    private static string ColBadRelative(string text, double value, double baseline, int n)
+    {
+        if (baseline <= 0) return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
+        double pctOfBaseline = value / baseline * 100.0;
+        return ColBad(text, pctOfBaseline, n, 100.0);
+    }
 
-    /// <summary>Data row with coloration (no label column). Used for the focused encounter row.</summary>
-    private static string FormatDataRow(EncounterEvent stat, double deathRateBaseline, double dmgPctBaseline, double iqrcBaseline)
+    /// <summary>Data row from an encounter-weighted PoolMetrics in a section color.
+    /// Each metric is already an average across per-encounter values.</summary>
+    private static string FormatPoolDataRow(PoolMetrics m, string color)
+    {
+        int n = m.Fought;
+        string fIqr = m.IQR.HasValue
+            ? $"{m.IQR.Value.p25:F0}-{m.IQR.Value.p75:F0}"
+            : "-";
+        var fDmg    = $"{m.Median:F0}";
+        var fTurns  = $"{m.AvgTurns:F1}";
+        var fPots   = $"{m.AvgPots:F1}";
+        var fDeaths = $"{m.Died}/{n}";
+        var pad     = new string(' ', Math.Max(0, 7 - fDeaths.Length));
+
+        return $"  [color={color}]{n,6}  {fDmg,6}  {fIqr,12}  {fTurns,5}  {fPots,7}  {pad}{fDeaths}[/color]";
+    }
+
+    /// <summary>Sub-label in Kreon font with optional section color. Null color uses default dim grey.
+    /// Proportional font (not monospace) since the sub-labels don't need to align with column data.</summary>
+    private static string SubLabel(string text, string? color)
+        => $"[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=15][color={color ?? "#787878"}]{text}[/color][/font_size][/font]";
+
+    /// <summary>Data row with coloration (no label column). Used for the focused encounter row.
+    /// Column widths: Fought(6) | dmg(6) | IQR(12) | Turns(5) | Pots(7) | Deaths(7).
+    /// Two-space separators between columns. All metric cells are colored against the
+    /// pool baselines via ColBadRelative (high = bad, low = good).</summary>
+    private static string FormatDataRow(EncounterEvent stat,
+        double medianBase, double iqrcBase, double deathRateBase, double turnsBase, double potsBase)
     {
         int n = stat.Fought;
         double deathRate = 100.0 * stat.Died / n;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
         double avgPots   = (double)stat.PotionsUsedSum / n;
-        double avgDmgPct = stat.DmgPctSum / n * 100.0;
         double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
         var iqr = stat.DamageIQR();
         string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
@@ -296,18 +441,19 @@ public static class EncounterTooltipHelper
         var fTurns = $"{avgTurns:F1}";
         var fPots  = $"{avgPots:F1}";
 
-        var cN      = TooltipHelper.ColN($"{n,4}", n);
-        var cDmg    = ColBad($"{fDmg,5}", avgDmgPct, n, dmgPctBaseline);
-        var cIqr    = FormatIqrCell(fIqr, iqr, dmgMedian, n, iqrcBaseline);
-        var cTurns  = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
-        var cPots   = $"[color={TooltipHelper.NeutralShade}]{fPots,5}[/color]";
-        var cDeaths = FormatDeathsCell(stat.Died, n, deathRate, deathRateBaseline);
+        var cN      = TooltipHelper.ColN($"{n,6}", n);
+        var cDmg    = ColBadRelative($"{fDmg,6}", dmgMedian, medianBase, n);
+        var cIqr    = FormatIqrCell(fIqr, iqr, dmgMedian, n, iqrcBase, width: 12);
+        var cTurns  = ColBadRelative($"{fTurns,5}", avgTurns, turnsBase, n);
+        var cPots   = ColBadRelative($"{fPots,7}", avgPots, potsBase, n);
+        var cDeaths = FormatDeathsCell(stat.Died, n, deathRate, deathRateBase);
 
-        return $"  {cN} {cDmg} {cIqr} {cTurns} {cPots} {cDeaths}";
+        return $"  {cN}  {cDmg}  {cIqr}  {cTurns}  {cPots}  {cDeaths}";
     }
 
-    /// <summary>Data row with all neutral grey (no label column). Used for context rows.</summary>
-    private static string FormatNeutralDataRow(EncounterEvent stat)
+    /// <summary>Data row in a section color (no label column). Used for context/pool rows.
+    /// Column widths: Fought(6) | dmg(6) | IQR(12) | Turns(5) | Pots(7) | Deaths(7).</summary>
+    private static string FormatSectionDataRow(EncounterEvent stat, string color)
     {
         int n = stat.Fought;
         double avgTurns = (double)stat.TurnsTakenSum / n;
@@ -321,16 +467,16 @@ public static class EncounterTooltipHelper
         var fDeaths = $"{stat.Died}/{n}";
         var pad     = new string(' ', Math.Max(0, 7 - fDeaths.Length));
 
-        var c = $"[color={TooltipHelper.NeutralShade}]";
-        return $"  {c}{n,4}[/color] {c}{fDmg,5}[/color] {c}{fIqr,9}[/color] {c}{fTurns,5}[/color] {c}{fPots,5}[/color] {c}{pad}{fDeaths}[/color]";
+        return $"  [color={color}]{n,6}  {fDmg,6}  {fIqr,12}  {fTurns,5}  {fPots,7}  {pad}{fDeaths}[/color]";
     }
 
-    /// <summary>Empty data row with dashes (no label column).</summary>
+    /// <summary>Empty data row with dashes in a section color.</summary>
+    private static string FormatEmptySectionDataRow(string color)
+        => $"  [color={color}]{"-",6}  {"-",6}  {"-",12}  {"-",5}  {"-",7}  {"-",7}[/color]";
+
+    /// <summary>Empty data row with dashes (no label column, default neutral).</summary>
     private static string FormatEmptyDataRow()
-    {
-        var c = $"[color={TooltipHelper.NeutralShade}]";
-        return $"  {c}{"-",4}[/color] {c}{"-",5}[/color] {c}{"-",9}[/color] {c}{"-",5}[/color] {c}{"-",5}[/color] {c}{"-",7}[/color]";
-    }
+        => FormatEmptySectionDataRow(TooltipHelper.NeutralShade);
 
     /// <summary>
     /// Builds encounter stats text with a single row (no character breakdown).
@@ -477,15 +623,15 @@ public static class EncounterTooltipHelper
     /// High IQRC (swingy encounter) → orange/red. Low IQRC (consistent) → teal/green.
     /// Falls back to neutral grey when there's not enough data for IQR or when median is zero.
     /// </summary>
-    private static string FormatIqrCell(string formattedIqr, (double p25, double p75)? iqr, double? median, int n, double iqrcBaseline)
+    private static string FormatIqrCell(string formattedIqr, (double p25, double p75)? iqr, double? median, int n, double iqrcBaseline, int width = 9)
     {
         if (!iqr.HasValue || median == null || median.Value <= 0)
-            return $"[color={TooltipHelper.NeutralShade}]{formattedIqr,9}[/color]";
+            return $"[color={TooltipHelper.NeutralShade}]{formattedIqr.PadLeft(width)}[/color]";
 
         double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
         // Scale IQRC to percentage-like range for ColBad (which uses tanh significance).
         // Multiply by 100 so the deviation from baseline has similar magnitude to dmg%/death%.
-        return ColBad($"{formattedIqr,9}", iqrc * 100, n, iqrcBaseline * 100);
+        return ColBad(formattedIqr.PadLeft(width), iqrc * 100, n, iqrcBaseline * 100);
     }
 
     /// <summary>

@@ -401,6 +401,128 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Encounter-weighted pool aggregation. Computes each matching encounter's per-fight
+    /// statistics independently, then averages those per-encounter values across encounters
+    /// so each encounter type contributes equally regardless of how often the player has
+    /// fought it. Matches the "uniform spawn" assumption of STS2 encounter pools and the
+    /// player's mental model of "how does this encounter compare to its peers". Total
+    /// Fought and Died are still summed across encounters (for the N column and Deaths
+    /// cell display).
+    /// </summary>
+    public static PoolMetrics AggregateEncounterPoolWeighted(
+        StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
+    {
+        var perEncounter = new List<EncounterEvent>();
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
+
+            // Aggregate this single encounter's matching contexts into one EncounterEvent.
+            var encEvent = new EncounterEvent();
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+
+                encEvent.Fought          += stat.Fought;
+                encEvent.Died            += stat.Died;
+                encEvent.TurnsTakenSum   += stat.TurnsTakenSum;
+                encEvent.PotionsUsedSum  += stat.PotionsUsedSum;
+                encEvent.DamageTakenSum  += stat.DamageTakenSum;
+                encEvent.DmgPctSum       += stat.DmgPctSum;
+                if (stat.DamageValues is { Count: > 0 })
+                {
+                    encEvent.DamageValues ??= new List<int>();
+                    encEvent.DamageValues.AddRange(stat.DamageValues);
+                }
+            }
+
+            if (encEvent.Fought > 0) perEncounter.Add(encEvent);
+        }
+
+        return AggregateMetricsFromEvents(perEncounter);
+    }
+
+    /// <summary>
+    /// Generic encounter-weighted metrics aggregation. Each EncounterEvent in the input
+    /// contributes one observation per metric: per-encounter median, p25, p75, avg turns,
+    /// avg potions, dmg%, death rate, IQRC. Percentile-based metrics (median, p25, p75)
+    /// aggregate via median-of-values; mean-based metrics aggregate via average.
+    ///
+    /// Used both for pool aggregations across multiple encounter types (each event = one
+    /// encounter type) and for cross-character aggregations of a single encounter (each
+    /// event = one character's stats for that encounter). The aggregation logic is
+    /// identical — only the meaning of "one observation" changes.
+    /// </summary>
+    public static PoolMetrics AggregateMetricsFromEvents(IEnumerable<EncounterEvent> events)
+    {
+        int totalFought = 0, totalDied = 0;
+        var medians      = new List<double>();
+        var p25s         = new List<double>();
+        var p75s         = new List<double>();
+        var avgTurnsList = new List<double>();
+        var avgPotsList  = new List<double>();
+        var avgDmgPcts   = new List<double>();
+        var deathRates   = new List<double>();
+        var iqrcs        = new List<double>();
+
+        foreach (var e in events)
+        {
+            if (e.Fought == 0) continue;
+
+            totalFought += e.Fought;
+            totalDied   += e.Died;
+
+            var median = e.DamageMedian();
+            if (median.HasValue) medians.Add(median.Value);
+
+            var iqr = e.DamageIQR();
+            if (iqr.HasValue)
+            {
+                p25s.Add(iqr.Value.p25);
+                p75s.Add(iqr.Value.p75);
+                if (median.HasValue && median.Value > 0)
+                    iqrcs.Add((iqr.Value.p75 - iqr.Value.p25) / median.Value);
+            }
+
+            avgTurnsList.Add((double)e.TurnsTakenSum / e.Fought);
+            avgPotsList .Add((double)e.PotionsUsedSum / e.Fought);
+            avgDmgPcts  .Add(e.DmgPctSum / e.Fought * 100.0);
+            deathRates  .Add(100.0 * e.Died / e.Fought);
+        }
+
+        return new PoolMetrics
+        {
+            Fought    = totalFought,
+            Died      = totalDied,
+            Median    = MedianOf(medians),
+            IQR       = (p25s.Count > 0)
+                          ? ((double p25, double p75)?)(MedianOf(p25s), MedianOf(p75s))
+                          : null,
+            AvgTurns  = avgTurnsList.Count > 0 ? avgTurnsList.Average() : 0,
+            AvgPots   = avgPotsList .Count > 0 ? avgPotsList .Average() : 0,
+            AvgDmgPct = avgDmgPcts  .Count > 0 ? avgDmgPcts  .Average() : 0,
+            DeathRate = deathRates  .Count > 0 ? deathRates  .Average() : 0,
+            Iqrc      = iqrcs       .Count > 0 ? iqrcs       .Average() : 1.0,
+        };
+    }
+
+    /// <summary>Median of a list of doubles. Returns 0 for an empty list. For even-length
+    /// lists, returns the average of the two middle values.</summary>
+    private static double MedianOf(List<double> values)
+    {
+        if (values.Count == 0) return 0;
+        var sorted = values.OrderBy(v => v).ToList();
+        int n = sorted.Count;
+        return n % 2 == 1
+            ? sorted[n / 2]
+            : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+    }
+
+    /// <summary>
     /// Aggregates all encounters matching a category and biome under the given filter
     /// into a single <see cref="EncounterEvent"/>. Used for pool-level context rows
     /// (e.g. "all elites in Hive for Defect"). Returns an event with Fought=0 if
