@@ -108,7 +108,7 @@ public class StatsAggregatorEncounterTests
         db.EncounterMeta["ENCOUNTER.B_WEAK"] = new EncounterMeta { Category = "weak" };
 
         var filter = new AggregationFilter { GameMode = "standard" };
-        var baseline = StatsAggregator.GetEncounterDmgPctBaseline(db, filter, "weak", 1);
+        var baseline = StatsAggregator.GetEncounterDmgPctBaseline(db, filter, "weak");
 
         // (1.0 + 0.9) / (4 + 6) * 100 = 19.0
         Assert.Equal(19.0, baseline, 1);
@@ -130,7 +130,7 @@ public class StatsAggregatorEncounterTests
         db.EncounterMeta["ENCOUNTER.B_ELITE"] = new EncounterMeta { Category = "elite" };
 
         var filter = new AggregationFilter { GameMode = "standard" };
-        var baseline = StatsAggregator.GetEncounterDeathRateBaseline(db, filter, "elite", 1);
+        var baseline = StatsAggregator.GetEncounterDeathRateBaseline(db, filter, "elite");
 
         // (3 + 1) / (10 + 10) * 100 = 20.0
         Assert.Equal(20.0, baseline, 1);
@@ -154,11 +154,11 @@ public class StatsAggregatorEncounterTests
         var filter = new AggregationFilter { GameMode = "standard" };
 
         // Only weak encounters
-        var weakBaseline = StatsAggregator.GetEncounterDmgPctBaseline(db, filter, "weak", 1);
+        var weakBaseline = StatsAggregator.GetEncounterDmgPctBaseline(db, filter, "weak");
         Assert.Equal(20.0, weakBaseline, 1); // 2.0/10 * 100
 
         // Only elite encounters
-        var eliteBaseline = StatsAggregator.GetEncounterDmgPctBaseline(db, filter, "elite", 1);
+        var eliteBaseline = StatsAggregator.GetEncounterDmgPctBaseline(db, filter, "elite");
         Assert.Equal(30.0, eliteBaseline, 1); // 1.5/5 * 100
     }
 }

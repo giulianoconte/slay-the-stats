@@ -964,11 +964,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyKreonFont(body);
         body.Text = string.Join('\n', new[]
         {
-            "[b][color=#efc851]Dmg[/color][/b] — average damage taken in this fight. Tints orange when above the category baseline, teal when below.",
-            "[b][color=#efc851]Var[/color][/b] — variance of damage taken. High = swingy / inconsistent.",
+            "[b][color=#efc851]N[/color][/b] — times fought. Color intensity grows with sample size.",
+            "[b][color=#efc851]Dmg[/color][/b] — median damage taken in this fight. Tints orange when above the category baseline, teal when below.",
+            "[b][color=#efc851]Mid 50%[/color][/b] — interquartile range (p25–p75) of damage taken. Shows the spread of the middle half of fights. Tints orange when swingier than the category baseline, teal when more consistent.",
             "[b][color=#efc851]Turns[/color][/b] — average turns the fight lasts.",
             "[b][color=#efc851]Pots[/color][/b] — average potions used per fight.",
-            "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total times fought. Color intensity grows with sample size.",
+            "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total times fought.",
             "",
             "[i][color=#9c9c9c]Click ? again to dismiss.[/color][/i]",
         });
@@ -1070,7 +1071,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var catEncounters = encounters
                 .Where(e => EncounterCategory.Derive(e) == category)
                 .ToList();
-            catEncounters = SortEncounters(catEncounters, _sortMode, _sortDescending, filter, _sortCharacter, _sortBySignificance);
+            catEncounters = SortEncounters(catEncounters, _sortMode, _sortDescending, filter, _sortCharacter, _sortBySignificance, _selectedBiome);
 
             if (catEncounters.Count == 0) continue;
 
@@ -1170,7 +1171,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
             foreach (var encId in catEncounters)
             {
-                var entry = BuildEncounterEntry(encId, _sortMode, filter, _sortCharacter, category, bundle);
+                var entry = BuildEncounterEntry(encId, _sortMode, filter, _sortCharacter, category, bundle, _selectedBiome);
                 _rowsByEncounter[encId] = entry;
                 _encounterList.AddChild(entry);
             }
@@ -1583,7 +1584,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         bool descending,
         AggregationFilter filter,
         string? sortCharacter,
-        bool bySignificance)
+        bool bySignificance,
+        string? biome = null)
     {
         if (mode == EncounterSortMode.Name)
         {
@@ -1599,7 +1601,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // (optionally restricted to a specific character) and sort. Encounters with no data fall
         // to the bottom but remain alphabetically grouped among themselves.
         var scored = encounters
-            .Select(id => (id, score: EncounterSorting.Score(id, mode, filter, sortCharacter, bySignificance)))
+            .Select(id => (id, score: EncounterSorting.Score(id, mode, filter, sortCharacter, bySignificance, biome)))
             .ToList();
 
         IOrderedEnumerable<(string id, double? score)> sorted =
@@ -1714,7 +1716,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         AggregationFilter filter,
         string? sortCharacter,
         string category,
-        CategoryHoverBundle bundle)
+        CategoryHoverBundle bundle,
+        string? biome = null)
     {
         // Wrap each row in a PanelContainer so we can flip a highlight stylebox on hover/select.
         var wrap = new PanelContainer();
@@ -1803,7 +1806,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyKreonFont(statLabel);
         ApplyTextShadow(statLabel);
         var displayMode = sortMode == EncounterSortMode.Name ? EncounterSortMode.MedianDamage : sortMode;
-        statLabel.Text = $"[right][color=#a8a39a]{EncounterSorting.FormatScore(encounterId, displayMode, filter, sortCharacter)}[/color][/right]";
+        statLabel.Text = $"[right][color=#a8a39a]{EncounterSorting.FormatScore(encounterId, displayMode, filter, sortCharacter, biome)}[/color][/right]";
         row.AddChild(statLabel);
 
         // Right pad so the stat column doesn't kiss the panel edge.
@@ -1907,46 +1910,82 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_statsLabel == null) return;
 
         var filter = BuildFilter();
+        var categoryLabel = EncounterCategory.FormatCategory(category);
 
-        // Aggregate per-character across all encounters in this category
-        var combined = new Dictionary<string, EncounterEvent>();
-        foreach (var encId in encounterIds)
+        // Derive the biome from the first encounter in this category (all share the same biome
+        // when viewing a specific biome tab; for synthetic tabs like "act:1" or "all:", use null).
+        string? catBiome = null;
+        if (encounterIds.Count > 0 && MainFile.Db.EncounterMeta.TryGetValue(encounterIds[0], out var firstMeta))
+            catBiome = firstMeta.Biome;
+
+        string statsText;
+
+        if (_sortCharacter != null)
         {
-            if (!MainFile.Db.Encounters.TryGetValue(encId, out var contextMap)) continue;
-
-            var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
-            foreach (var (charId, stat) in perChar)
+            // Focused single-character category view: biome pool → all pool → all chars
+            var charFilter = new AggregationFilter
             {
-                if (!combined.TryGetValue(charId, out var agg))
+                Character = _sortCharacter,
+                GameMode = filter.GameMode,
+                AscensionMin = filter.AscensionMin,
+                AscensionMax = filter.AscensionMax,
+                VersionMin = filter.VersionMin,
+                VersionMax = filter.VersionMax,
+                Profile = filter.Profile,
+                Display = filter.Display,
+            };
+
+            var poolBiomeStat = !string.IsNullOrEmpty(catBiome)
+                ? StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category, catBiome)
+                : StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category);
+            var poolAllStat = StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category);
+            var allCharsPoolStat = !string.IsNullOrEmpty(catBiome)
+                ? StatsAggregator.AggregateEncounterPool(MainFile.Db, filter, category, catBiome)
+                : StatsAggregator.AggregateEncounterPool(MainFile.Db, filter, category);
+
+            var biomeLabel = !string.IsNullOrEmpty(catBiome) ? FormatBiomeName(catBiome) : null;
+            var charLabel = FormatCharacterLabel(_sortCharacter);
+
+            statsText = EncounterTooltipHelper.BuildCategoryStatsTextFocused(
+                poolBiomeStat, poolAllStat, allCharsPoolStat,
+                biomeLabel, categoryLabel, filter);
+
+            SetStatsTitle($"{charLabel} — {categoryLabel}");
+        }
+        else
+        {
+            // All-characters view: per-character rows + All baseline
+            var combined = new Dictionary<string, EncounterEvent>();
+            foreach (var encId in encounterIds)
+            {
+                if (!MainFile.Db.Encounters.TryGetValue(encId, out var contextMap)) continue;
+
+                var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
+                foreach (var (charId, stat) in perChar)
                 {
-                    agg = new EncounterEvent();
-                    combined[charId] = agg;
+                    if (!combined.TryGetValue(charId, out var agg))
+                    {
+                        agg = new EncounterEvent();
+                        combined[charId] = agg;
+                    }
+                    EncounterTooltipHelper.Accumulate(agg, stat);
                 }
-                agg.Fought           += stat.Fought;
-                agg.Died             += stat.Died;
-                agg.WonRun           += stat.WonRun;
-                agg.TurnsTakenSum    += stat.TurnsTakenSum;
-                agg.DamageTakenSum   += stat.DamageTakenSum;
-                agg.DamageTakenSqSum += stat.DamageTakenSqSum;
-                agg.HpEnteringSum    += stat.HpEnteringSum;
-                agg.MaxHpSum         += stat.MaxHpSum;
-                agg.PotionsUsedSum   += stat.PotionsUsedSum;
-                agg.DmgPctSum        += stat.DmgPctSum;
-                agg.DmgPctSqSum      += stat.DmgPctSqSum;
             }
+
+            // Baselines use the encounter's actual biome (category biome), not the selected tab
+            double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, catBiome);
+            double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, catBiome);
+            double iqrcBaseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, catBiome);
+
+            statsText = EncounterTooltipHelper.BuildEncounterStatsText(
+                combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
+                filter.AscensionMin, filter.AscensionMax, categoryLabel,
+                filter: filter);
+
+            var biomeName = _selectedBiome != null ? FormatBiomeName(_selectedBiome) : "";
+            SetStatsTitle($"All {categoryLabel} — {biomeName}");
         }
 
-        var categoryLabel = EncounterCategory.FormatCategory(category);
-        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
-        double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category);
-
-        var statsText = EncounterTooltipHelper.BuildEncounterStatsText(
-            combined, deathRateBaseline, dmgPctBaseline,
-            filter.AscensionMin, filter.AscensionMax, categoryLabel,
-            filter: filter);
-
-        var biomeName = _selectedBiome != null ? FormatBiomeName(_selectedBiome) : "";
-        SetStatsTitle($"All {categoryLabel} Encounters — {biomeName}");
         _statsLabel.Text = statsText;
 
         // Clear the monster preview area when hovering a category (no specific monsters to show)
@@ -1975,28 +2014,106 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         var filter = BuildFilter();
-        var charStats = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
 
         string? category = null;
+        string? encBiome = null;
         if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
+        {
             category = meta.Category;
+            encBiome = meta.Biome;
+        }
 
         var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
-
-        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
-        double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category);
+        var encounterName = EncounterCategory.FormatName(encounterId);
 
         string statsText;
-        if (charStats.Count == 0)
-            statsText = EncounterTooltipHelper.NoDataText(null, filter.AscensionMin, filter.AscensionMax);
+
+        if (_sortCharacter != null)
+        {
+            // Focused single-character view: section-based layout
+            var charFilter = new AggregationFilter
+            {
+                Character = _sortCharacter,
+                GameMode = filter.GameMode,
+                AscensionMin = filter.AscensionMin,
+                AscensionMax = filter.AscensionMax,
+                VersionMin = filter.VersionMin,
+                VersionMax = filter.VersionMax,
+                Profile = filter.Profile,
+                Display = filter.Display,
+            };
+
+            // Row 1: this encounter, this character
+            var charStats = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
+            var encounterStat = charStats.TryGetValue(_sortCharacter, out var cs) ? cs : new EncounterEvent();
+
+            // Row 2: biome+category pool, this character — uses encounter's actual biome, not selected tab
+            EncounterEvent? poolBiomeStat = !string.IsNullOrEmpty(encBiome)
+                ? StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category, encBiome)
+                : null;
+
+            // Row 3: category pool all biomes, this character
+            var poolAllStat = StatsAggregator.AggregateEncounterPool(MainFile.Db, charFilter, category);
+
+            // Row 4: this encounter, all characters (no character filter)
+            var allCharsStat = new EncounterEvent();
+            foreach (var stat in charStats.Values)
+                EncounterTooltipHelper.Accumulate(allCharsStat, stat);
+
+            var charLabel = FormatCharacterLabel(_sortCharacter);
+            var biomeLabel = !string.IsNullOrEmpty(encBiome) ? FormatBiomeName(encBiome) : null;
+
+            statsText = EncounterTooltipHelper.BuildEncounterStatsTextFocused(
+                encounterStat, poolBiomeStat, poolAllStat, allCharsStat,
+                encounterName, biomeLabel, "All Biomes", categoryLabel, filter);
+
+            SetStatsTitle($"{charLabel} vs {encounterName}");
+            _statsLabel.Text = statsText;
+            return;
+        }
         else
-            statsText = EncounterTooltipHelper.BuildEncounterStatsText(
-                charStats, deathRateBaseline, dmgPctBaseline,
-                filter.AscensionMin, filter.AscensionMax, categoryLabel,
-                filter: filter);
+        {
+            // All-characters view: one row per character + All baseline
+            // Baselines use encounter's actual biome so tab selection doesn't affect data
+            var charStats = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
+
+            double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, encBiome);
+            double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, encBiome);
+            double iqrcBaseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, encBiome);
+
+            if (charStats.Count == 0)
+                statsText = EncounterTooltipHelper.NoDataText(null, filter.AscensionMin, filter.AscensionMax);
+            else
+                statsText = EncounterTooltipHelper.BuildEncounterStatsText(
+                    charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
+                    filter.AscensionMin, filter.AscensionMax, categoryLabel,
+                    filter: filter);
+        }
 
         SetStatsTitle(EncounterCategory.FormatName(encounterId));
         _statsLabel.Text = statsText;
+    }
+
+    /// <summary>
+    /// Converts a character ID to a short display label for table rows.
+    /// "CHARACTER.IRONCLAD" → "Ironclad", "CHARACTER.NECROBINDER" → "Necrobinder".
+    /// </summary>
+    private static string FormatCharacterLabel(string characterId)
+    {
+        foreach (var (id, label) in EncounterTooltipHelper.CanonicalCharacters)
+        {
+            if (id == characterId) return label;
+        }
+        // Modded/unknown character — strip prefix and title-case
+        var dotIdx = characterId.IndexOf('.');
+        var name = dotIdx >= 0 ? characterId[(dotIdx + 1)..] : characterId;
+        var words = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; i++)
+        {
+            if (words[i].Length > 0)
+                words[i] = char.ToUpper(words[i][0]) + words[i][1..].ToLower();
+        }
+        return string.Join(' ', words);
     }
 
     private void SetStatsTitle(string title)
@@ -2937,7 +3054,7 @@ internal static class EncounterSorting
     /// surface above low-N noise. Name/Seen ignore the flag because the concept doesn't
     /// apply (Name is alphabetic; Seen already IS the sample size).
     /// </summary>
-    public static double? Score(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter, bool bySignificance = false)
+    public static double? Score(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter, bool bySignificance = false, string? biome = null)
     {
         if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap)) return null;
 
@@ -2998,20 +3115,21 @@ internal static class EncounterSorting
         {
             case EncounterSortMode.DeathRate:
             {
-                double p0 = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
+                double p0 = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, biome);
                 double se = Math.Sqrt(Math.Max(1e-9, p0 * (1 - p0) / fought));
                 return (raw - p0) / se;
             }
             case EncounterSortMode.MedianDamage:
             {
-                double mu0 = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category);
+                double mu0 = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
                 double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, mu0) / fought));
                 return (raw - mu0) / se;
             }
             case EncounterSortMode.IQR:
             {
-                // IQR spread has no single baseline — rescale by √n.
-                return raw * Math.Sqrt(fought);
+                double iqrcBase = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, biome);
+                double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, iqrcBase) / fought));
+                return (raw - iqrcBase) / se;
             }
         }
         return raw;
@@ -3020,9 +3138,9 @@ internal static class EncounterSorting
     /// <summary>
     /// Formats the per-row stat displayed alongside an encounter name in the bestiary list.
     /// </summary>
-    public static string FormatScore(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter)
+    public static string FormatScore(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter, string? biome = null)
     {
-        var score = Score(encounterId, mode, filter, sortCharacter);
+        var score = Score(encounterId, mode, filter, sortCharacter, biome: biome);
         if (score == null) return "—";
         return mode switch
         {

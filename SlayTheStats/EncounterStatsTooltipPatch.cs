@@ -375,36 +375,29 @@ internal static class EncounterStatsHover
         var actStats = StatsAggregator.AggregateEncountersByAct(contextMap, filter);
 
         string? category = null;
+        string? biome = null;
         if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
+        {
             category = meta.Category;
+            biome = meta.Biome;
+        }
 
         var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
         var characterLabel = effectiveChar != null ? FormatCharacterName(effectiveChar) : "All";
 
-        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category);
-        double dmgPctBaseline    = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category);
-        double dmgBaseline       = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category);
+        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, biome);
+        double dmgPctBaseline    = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, biome);
+        double iqrcBaseline      = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, biome);
+        double dmgBaseline       = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
 
         var combined = new EncounterEvent();
         foreach (var stat in actStats.Values)
-        {
-            combined.Fought           += stat.Fought;
-            combined.Died             += stat.Died;
-            combined.WonRun           += stat.WonRun;
-            combined.TurnsTakenSum    += stat.TurnsTakenSum;
-            combined.DamageTakenSum   += stat.DamageTakenSum;
-            combined.DamageTakenSqSum += stat.DamageTakenSqSum;
-            combined.HpEnteringSum    += stat.HpEnteringSum;
-            combined.MaxHpSum         += stat.MaxHpSum;
-            combined.PotionsUsedSum   += stat.PotionsUsedSum;
-            combined.DmgPctSum        += stat.DmgPctSum;
-            combined.DmgPctSqSum      += stat.DmgPctSqSum;
-        }
+            EncounterTooltipHelper.Accumulate(combined, stat);
 
         string statsText = combined.Fought == 0
             ? EncounterTooltipHelper.NoDataText(characterLabel, filter.AscensionMin, filter.AscensionMax)
             : EncounterTooltipHelper.BuildEncounterStatsTextSingleRow(
-                combined, deathRateBaseline, dmgPctBaseline, dmgBaseline,
+                combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline, dmgBaseline,
                 effectiveChar, categoryLabel, filter);
 
         var encounterName = TruncateEncounterNameIfTooLong(EncounterCategory.FormatName(encounterId));

@@ -401,10 +401,69 @@ public static class StatsAggregator
     }
 
     /// <summary>
-    /// Computes average Dmg% across all encounters matching the filter in a given category and act.
-    /// Used as baseline for coloring encounter stats. Falls back to 20.0 if no data.
+    /// Aggregates all encounters matching a category and biome under the given filter
+    /// into a single <see cref="EncounterEvent"/>. Used for pool-level context rows
+    /// (e.g. "all elites in Hive for Defect"). Returns an event with Fought=0 if
+    /// no matching data exists.
     /// </summary>
-    public static double GetEncounterDmgPctBaseline(StatsDb db, AggregationFilter filter, string? category = null, int? act = null)
+    public static EncounterEvent AggregateEncounterPool(
+        StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
+    {
+        var result = new EncounterEvent();
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
+
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+
+                result.Fought           += stat.Fought;
+                result.Died             += stat.Died;
+                result.WonRun           += stat.WonRun;
+                result.TurnsTakenSum    += stat.TurnsTakenSum;
+                result.DamageTakenSum   += stat.DamageTakenSum;
+                result.DamageTakenSqSum += stat.DamageTakenSqSum;
+                result.HpEnteringSum    += stat.HpEnteringSum;
+                result.MaxHpSum         += stat.MaxHpSum;
+                result.PotionsUsedSum   += stat.PotionsUsedSum;
+                result.DmgPctSum        += stat.DmgPctSum;
+                result.DmgPctSqSum      += stat.DmgPctSqSum;
+                if (stat.DamageValues is { Count: > 0 })
+                {
+                    result.DamageValues ??= new List<int>();
+                    result.DamageValues.AddRange(stat.DamageValues);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns true if the given encounter matches the biome key. Biome keys follow the
+    /// bestiary's convention: null or "all:" = all encounters, "act:N" = encounters in
+    /// that act, otherwise matches the encounter's biome string exactly.
+    /// </summary>
+    private static bool MatchesBiome(StatsDb db, string encId, string? biome)
+    {
+        if (string.IsNullOrEmpty(biome) || biome == "all:") return true;
+        if (!db.EncounterMeta.TryGetValue(encId, out var meta)) return false;
+        if (biome.StartsWith("act:") && int.TryParse(biome[4..], out var act))
+            return meta.Act == act;
+        return meta.Biome == biome;
+    }
+
+    /// <summary>
+    /// Computes average Dmg% across all encounters matching the filter in a given
+    /// category and biome. Used as baseline for coloring encounter stats.
+    /// Falls back to 20.0 if no data.
+    /// </summary>
+    public static double GetEncounterDmgPctBaseline(StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
     {
         double totalDmgPct = 0;
         int totalFought = 0;
@@ -413,12 +472,12 @@ public static class StatsAggregator
         {
             if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
                 continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
 
             foreach (var (key, stat) in contextMap)
             {
                 var ctx = RunContext.Parse(key);
                 if (!filter.Matches(ctx)) continue;
-                if (act != null && ctx.Act != act) continue;
 
                 totalFought += stat.Fought;
                 totalDmgPct += stat.DmgPctSum;
@@ -430,11 +489,11 @@ public static class StatsAggregator
 
     /// <summary>
     /// Computes average absolute damage taken across all encounters matching the filter
-    /// in a given category and act. Used by the in-combat tooltip footer where the
+    /// in a given category and biome. Used by the in-combat tooltip footer where the
     /// player has a single character and absolute damage is more meaningful than the
     /// %-of-max-HP variant. Falls back to 0 if no data.
     /// </summary>
-    public static double GetEncounterDmgBaseline(StatsDb db, AggregationFilter filter, string? category = null, int? act = null)
+    public static double GetEncounterDmgBaseline(StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
     {
         long totalDmg = 0;
         int totalFought = 0;
@@ -443,12 +502,12 @@ public static class StatsAggregator
         {
             if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
                 continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
 
             foreach (var (key, stat) in contextMap)
             {
                 var ctx = RunContext.Parse(key);
                 if (!filter.Matches(ctx)) continue;
-                if (act != null && ctx.Act != act) continue;
 
                 totalFought += stat.Fought;
                 totalDmg += stat.DamageTakenSum;
@@ -459,10 +518,10 @@ public static class StatsAggregator
     }
 
     /// <summary>
-    /// Computes average death rate across all encounters matching the filter in a given category and act.
-    /// Falls back to 10.0 if no data.
+    /// Computes average death rate across all encounters matching the filter in a given
+    /// category and biome. Falls back to 10.0 if no data.
     /// </summary>
-    public static double GetEncounterDeathRateBaseline(StatsDb db, AggregationFilter filter, string? category = null, int? act = null)
+    public static double GetEncounterDeathRateBaseline(StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
     {
         int totalFought = 0, totalDied = 0;
 
@@ -470,12 +529,12 @@ public static class StatsAggregator
         {
             if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
                 continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
 
             foreach (var (key, stat) in contextMap)
             {
                 var ctx = RunContext.Parse(key);
                 if (!filter.Matches(ctx)) continue;
-                if (act != null && ctx.Act != act) continue;
 
                 totalFought += stat.Fought;
                 totalDied += stat.Died;
@@ -483,6 +542,52 @@ public static class StatsAggregator
         }
 
         return totalFought == 0 ? 10.0 : 100.0 * totalDied / totalFought;
+    }
+
+    /// <summary>
+    /// Computes the pooled IQR coefficient (IQRC = IQR / median) across all encounters
+    /// matching the filter in a given category and biome. For each encounter, aggregates
+    /// all DamageValues across matching contexts, computes that encounter's IQRC, then
+    /// averages across encounters (weighted equally, skipping encounters with insufficient
+    /// data for a meaningful IQR). Falls back to 1.0 if no qualifying encounters.
+    /// </summary>
+    public static double GetEncounterIqrcBaseline(StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
+    {
+        double totalIqrc = 0;
+        int count = 0;
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
+
+            // Aggregate DamageValues across all matching contexts for this encounter
+            List<int>? merged = null;
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+                if (stat.DamageValues is { Count: > 0 })
+                {
+                    merged ??= new List<int>();
+                    merged.AddRange(stat.DamageValues);
+                }
+            }
+
+            if (merged == null || merged.Count < 4) continue; // need enough data for meaningful IQR
+
+            // Compute this encounter's IQRC
+            var tempEvent = new EncounterEvent { DamageValues = merged };
+            var median = tempEvent.DamageMedian();
+            var iqr = tempEvent.DamageIQR();
+            if (median == null || iqr == null || median.Value <= 0) continue;
+
+            totalIqrc += (iqr.Value.p75 - iqr.Value.p25) / median.Value;
+            count++;
+        }
+
+        return count == 0 ? 1.0 : totalIqrc / count;
     }
 
     /// <summary>
