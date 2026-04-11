@@ -1777,6 +1777,7 @@ public static partial class CompendiumFilterPatch
         btn.AddThemeColorOverride("font_hover_color", Gold);
         btn.AddThemeColorOverride("font_focus_color", Gold);
         ApplyGameFont(btn, 19);
+        ApplyDropdownStyle(btn);
         for (int i = 0; i < labels.Count; i++)
             btn.AddItem(labels[i], i);
         SelectVersionValue(btn, values, selected);
@@ -1831,11 +1832,43 @@ public static partial class CompendiumFilterPatch
         btn.AddThemeColorOverride("font_hover_color", Gold);
         btn.AddThemeColorOverride("font_focus_color", Gold);
         ApplyGameFont(btn, 19);
+        ApplyDropdownStyle(btn);
         btn.AddItem("Any", 0);
         for (int i = 0; i < items.Count; i++)
             btn.AddItem(items[i], i + 1);
         SelectOptionByText(btn, selected);
         return btn;
+    }
+
+    /// <summary>Applies a visible bordered background to an OptionButton dropdown so it
+    /// stands out against the dark filter pane / tooltip background. Slightly brighter
+    /// than the surrounding pane with a warm border that matches the action buttons.</summary>
+    private static void ApplyDropdownStyle(OptionButton btn)
+    {
+        var normal = new StyleBoxFlat();
+        normal.BgColor = new Color(0.18f, 0.15f, 0.12f, 0.85f);
+        normal.SetBorderWidthAll(1);
+        normal.BorderColor = new Color(0.55f, 0.45f, 0.30f, 0.7f);
+        normal.SetCornerRadiusAll(3);
+        normal.ContentMarginLeft = 8;
+        normal.ContentMarginRight = 8;
+        normal.ContentMarginTop = 4;
+        normal.ContentMarginBottom = 4;
+        btn.AddThemeStyleboxOverride("normal", normal);
+
+        var hover = (StyleBoxFlat)normal.Duplicate();
+        hover.BgColor = new Color(0.24f, 0.20f, 0.16f, 0.92f);
+        hover.BorderColor = new Color(0.75f, 0.62f, 0.40f, 0.85f);
+        btn.AddThemeStyleboxOverride("hover", hover);
+
+        var pressed = (StyleBoxFlat)normal.Duplicate();
+        pressed.BgColor = new Color(0.12f, 0.10f, 0.08f, 0.95f);
+        btn.AddThemeStyleboxOverride("pressed", pressed);
+
+        var focus = (StyleBoxFlat)normal.Duplicate();
+        focus.BorderColor = new Color(0.85f, 0.70f, 0.45f, 1f);
+        focus.SetBorderWidthAll(2);
+        btn.AddThemeStyleboxOverride("focus", focus);
     }
 
     private static SpinBox MakeSpinBox(int min, int max, int value)
