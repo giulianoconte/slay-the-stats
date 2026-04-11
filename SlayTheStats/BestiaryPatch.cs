@@ -279,6 +279,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private string? _pendingHoverEncounterId;
     private string? _selectedBiome;
     private string? _hoveredEncounterId;
+    /// <summary>When non-null, a row has been click-locked — hover events no longer
+    /// update the stats panel / preview, and unhover no longer clears them. Click a
+    /// different row to switch the lock; click anywhere that isn't an encounter row
+    /// to release it. Cleared automatically when filters/biome/sort changes wipe
+    /// the list.</summary>
+    private string? _lockedEncounterId;
     private EncounterSortMode _sortMode = EncounterSortMode.Name;
     // Default direction: A→Z for Name; high→low for stat-based modes (set on mode-change).
     private bool _sortDescending = false;
@@ -372,6 +378,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         var outerVbox = new VBoxContainer();
         outerVbox.AddThemeConstantOverride("separation", 10);
+        // Catch-all for click-to-unlock: left clicks that fall through every
+        // interactive child (encounter rows AcceptEvent on their own click to
+        // switch locks, so only "empty" clicks — gaps, panels, backgrounds —
+        // reach us here) release the pinned row.
+        outerVbox.MouseFilter = MouseFilterEnum.Stop;
+        outerVbox.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                ClearLockedEncounter();
+        };
         margin.AddChild(outerVbox);
 
         // ── Title ──
@@ -557,6 +573,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _encounterList.GrowVertical   = Control.GrowDirection.End;
         _encounterList.GrowHorizontal = Control.GrowDirection.End;
         _encounterList.AddThemeConstantOverride("separation", 0);
+        // Catch clicks in the gaps between rows (empty list background) for the
+        // click-to-unlock behaviour. Rows themselves call AcceptEvent so clicks on
+        // a row never reach this handler — only empty-space clicks do.
+        _encounterList.MouseFilter = MouseFilterEnum.Stop;
+        _encounterList.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                ClearLockedEncounter();
+        };
         bestiaryClipper.AddChild(_encounterList);
 
         leftSection.AddChild(bestiaryScroll);
@@ -581,9 +606,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         rightPanel.AddThemeConstantOverride("separation", 8);
         contentSplit.AddChild(rightPanel);
 
-        // Stats label — wrapped in a fixed-height container so the divider below it doesn't move
+        // Stats label — wrapped in a fixed-height container so the divider below it
+        // doesn't move, and the preview area below is the same height regardless of
+        // which table (focused / category / all-chars) is currently being rendered.
+        // The minimum is the natural height of the tallest case (focused single-
+        // character view, with tightened line_separation and no row-4 extra gap),
+        // so the preview area always ends up the same size it had under the focused
+        // mode before the fixed-height lock was introduced. Shorter modes (all-chars,
+        // category) fit inside this slab and leave empty space at the bottom.
         var statsBox = new MarginContainer();
-        statsBox.CustomMinimumSize = new Vector2(0, 240);
+        statsBox.CustomMinimumSize = new Vector2(0, 360);
         statsBox.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         rightPanel.AddChild(statsBox);
 
@@ -625,12 +657,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsLabel.FitContent = true;
         _statsLabel.ScrollActive = false;
         _statsLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        _statsLabel.SizeFlagsVertical = SizeFlags.ExpandFill;
+        // ShrinkBegin so the label takes only what its content asks for; the outer
+        // statsBox's CustomMinimumSize pins the whole stats area to a constant
+        // height so preview-area height is identical across modes.
+        _statsLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         _statsLabel.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
         _statsLabel.AddThemeFontSizeOverride("normal_font_size", 18);
         _statsLabel.AddThemeFontSizeOverride("bold_font_size", 18);
-        // Explicit line separation prevents bold rows from getting taller line height than regular rows
-        _statsLabel.AddThemeConstantOverride("line_separation", 0);
+        // Negative line separation pulls rows closer together — the focused-view
+        // table has a lot of separator lines and sub-labels, and the default line
+        // spacing leaves them feeling airy. -6 px tightens the gap between every
+        // line (data, separator, sub-label) without letting the mono-font glyphs
+        // overlap. Also prevents bold rows from getting taller line height than
+        // regular rows (the original reason this override existed).
+        _statsLabel.AddThemeConstantOverride("line_separation", -6);
         _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
 
         TooltipHelper.TryLoadModFonts();
@@ -645,14 +685,40 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         rightPanel.AddChild(new HSeparator());
 
-        // Render area — fills remaining vertical space
+        // Clicks on the right-hand stats / preview area also release a locked row
+        // so the user can visit the right panel without the lock feeling sticky.
+        // statsBox catches clicks on the stats label background; the render area
+        // gets its own handler below.
+        statsBox.MouseFilter = MouseFilterEnum.Stop;
+        statsBox.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                ClearLockedEncounter();
+        };
+
+        // Render area — takes all vertical slack below the fixed-height stats label.
+        // Since _statsLabel is ShrinkBegin + CustomMinimumSize.Y = 510, the preview
+        // height is just (rightPanel height − 510 − title/separator). No explicit
+        // CustomMinimumSize here so it can flex with the window size while still
+        // being consistent across modes (stats area height is the same regardless
+        // of which table is rendered).
         _renderArea = new PanelContainer();
         _renderArea.SizeFlagsVertical = SizeFlags.ExpandFill;
         _renderArea.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _renderArea.MouseFilter = MouseFilterEnum.Stop;
+        _renderArea.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                ClearLockedEncounter();
+        };
         var renderStyle = new StyleBoxFlat();
-        renderStyle.BgColor = new Color(0.04f, 0.05f, 0.07f, 1f);
+        // Match the rest of the bestiary chrome — same dark slate-blue hue as the
+        // encounter list / category panels (0.10, 0.11, 0.15) so the preview area
+        // reads as part of the same surface. Slightly darker than the list panels
+        // (0.85α there) to give the rendered creature a stage to sit on.
+        renderStyle.BgColor = new Color(0.08f, 0.09f, 0.12f, 1f);
         renderStyle.SetBorderWidthAll(1);
-        renderStyle.BorderColor = new Color(0.20f, 0.22f, 0.28f, 0.5f);
+        renderStyle.BorderColor = new Color(0.22f, 0.20f, 0.16f, 0.6f);
         renderStyle.SetCornerRadiusAll(4);
         ((PanelContainer)_renderArea).AddThemeStyleboxOverride("panel", renderStyle);
         rightPanel.AddChild(_renderArea);
@@ -1057,6 +1123,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
         SetStatsTitle("");
         _hoveredEncounterId = null;
+        // Rebuilding the list means any previously locked row's wrapper is being
+        // destroyed — release the lock so we don't keep a stale id pinned.
+        _lockedEncounterId = null;
 
         RebuildBiomeTabs();
         RebuildSortTabs();
@@ -1268,6 +1337,24 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         var displayMode = _sortMode == EncounterSortMode.Name ? EncounterSortMode.MedianDamage : _sortMode;
+
+        // Left-side "Encounter" label so the list structure is self-documenting (the
+        // right-side stat header was the only column header before). Same Kreon font /
+        // size / muted-gold tint as the stat header for symmetry.
+        // Plain Label (not RichTextLabel) so it reports a real minimum width from its
+        // text content — with RichTextLabel + FitContent + no CustomMinimumSize Godot
+        // collapses to a 0-wide thin vertical line, which is the regression we hit
+        // the first time. The spacer to its right still ExpandFills to push the stat
+        // header to the right edge.
+        var encounterHeader = new Label();
+        encounterHeader.Text = "Encounter";
+        encounterHeader.MouseFilter = MouseFilterEnum.Ignore;
+        encounterHeader.AddThemeColorOverride("font_color", new Color(0.604f, 0.580f, 0.518f, 1f));
+        encounterHeader.AddThemeFontSizeOverride("font_size", 14);
+        ApplyKreonFont(encounterHeader);
+        ApplyTextShadow(encounterHeader);
+        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) });
+        _statsColumnHeaderRow.AddChild(encounterHeader);
 
         var spacer = new Control();
         spacer.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -1708,6 +1795,24 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// Empty stylebox configured with the same content margins as the highlight, so a row's
     /// inner layout doesn't shift when we swap between hovered/unhovered states.
     /// </summary>
+    /// <summary>Recursively set MouseFilter.Ignore on every descendant of the given
+    /// row wrapper (but not the wrapper itself) so clicks always land on wrap and
+    /// reach its GuiInput handler. Used by encounter rows to make the entire row
+    /// area click-lockable without the lead spacer / right pad / inner labels
+    /// silently absorbing events.</summary>
+    private static void MakeRowChildrenClickTransparent(Control wrap)
+    {
+        foreach (var child in wrap.GetChildren())
+            SetMouseFilterIgnoreRecursive(child);
+    }
+
+    private static void SetMouseFilterIgnoreRecursive(Node node)
+    {
+        if (node is Control c) c.MouseFilter = Control.MouseFilterEnum.Ignore;
+        foreach (var child in node.GetChildren())
+            SetMouseFilterIgnoreRecursive(child);
+    }
+
     private static StyleBoxEmpty MakeRowEmptyStyle()
     {
         var s = new StyleBoxEmpty();
@@ -1814,27 +1919,56 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyKreonFont(statLabel);
         ApplyTextShadow(statLabel);
         var displayMode = sortMode == EncounterSortMode.Name ? EncounterSortMode.MedianDamage : sortMode;
-        statLabel.Text = $"[right][color=#a8a39a]{EncounterSorting.FormatScore(encounterId, displayMode, filter, sortCharacter, biome)}[/color][/right]";
+        // FormatScoreColored embeds its own color tags via TooltipHelper.ColWR — for
+        // Name/Seen modes (no good/bad direction) it falls back to plain text, which we
+        // wrap in the existing dim grey here.
+        var scoreText = EncounterSorting.FormatScoreColored(encounterId, displayMode, filter, sortCharacter, biome);
+        var hasBbcodeColor = scoreText.Contains("[color=");
+        statLabel.Text = hasBbcodeColor
+            ? $"[right]{scoreText}[/right]"
+            : $"[right][color=#a8a39a]{scoreText}[/color][/right]";
         row.AddChild(statLabel);
 
         // Right pad so the stat column doesn't kiss the panel edge.
         row.AddChild(new Control { CustomMinimumSize = new Vector2(StatColumnRightPadPx, 0) });
 
         var capturedCategory = category;
+        var capturedEncId = encounterId;
         wrap.MouseEntered += () =>
         {
             wrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
             // Hovering an encounter row → highlight the category header icon AND this row's
             // own icon (selective: not every row in the category).
-            HighlightCategory(capturedCategory, true, encounterId);
-            OnEncounterHover(encounterId);
+            HighlightCategory(capturedCategory, true, capturedEncId);
+            OnEncounterHover(capturedEncId);
         };
         wrap.MouseExited += () =>
         {
             wrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
-            HighlightCategory(capturedCategory, false, encounterId);
+            HighlightCategory(capturedCategory, false, capturedEncId);
             OnEncounterUnhover();
         };
+        wrap.GuiInput += (InputEvent ev) =>
+        {
+            // Left-click pins this row as the display target. AcceptEvent stops
+            // the click from propagating to outerVbox's catch-all unlock handler,
+            // so clicking a different locked row switches the lock atomically.
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+            {
+                LockEncounter(capturedEncId);
+                wrap.AcceptEvent();
+            }
+        };
+
+        // Force every visual descendant of the row to MouseFilter.Ignore so the
+        // hit test walks past them and lands on `wrap` itself. Without this,
+        // children like the lead spacer / right-pad spacer / boss icon wrapper
+        // (all default MouseFilter.Stop) catch clicks on most of the row area
+        // and silently absorb them — wrap.GuiInput never fires and the lock
+        // behaviour gets wonky depending on which pixel the user happens to
+        // click. Hover highlighting still works because MouseEntered/MouseExited
+        // on `wrap` test against its full rect regardless of descendant filters.
+        MakeRowChildrenClickTransparent(wrap);
 
         return wrap;
     }
@@ -1844,6 +1978,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void OnEncounterHover(string encounterId)
     {
         _hoveredEncounterId = encounterId;
+        // If another row is click-locked, hover doesn't change the displayed stats
+        // or preview — the user explicitly pinned a row and hover feedback is
+        // suspended until they click elsewhere.
+        if (_lockedEncounterId != null) return;
         UpdateStatsPanel(encounterId);
         ScheduleMonsterPreviewRender(encounterId);
     }
@@ -1920,15 +2058,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var filter = BuildFilter();
         var categoryLabel = EncounterCategory.FormatCategory(category);
 
-        // Derive the biome from the first encounter in this category (all share the same biome
-        // when viewing a specific biome tab; for synthetic tabs like "act:1" or "all:", use null).
-        string? catBiome = null;
-        int catAct = 0;
-        if (encounterIds.Count > 0 && MainFile.Db.EncounterMeta.TryGetValue(encounterIds[0], out var firstMeta))
-        {
-            catBiome = firstMeta.Biome;
-            catAct = firstMeta.Act;
-        }
+        // Scope the category aggregation to whatever the user has filtered the encounter
+        // list to: a specific biome ("BIOME.OVERGROWTH"), a synthetic act key ("act:1"
+        // → MatchesBiome filters by act), or all encounters (null when "all:" or unset).
+        // Previously this read firstMeta.Biome, which collapsed an "Act 1" view down to
+        // whichever biome happened to come first in the encounter list — making the act
+        // tab silently equivalent to a single biome tab.
+        string? catBiome = _selectedBiome;
+        if (string.IsNullOrEmpty(catBiome) || catBiome == AllBiomeKey)
+            catBiome = null;
 
         string statsText;
 
@@ -2011,11 +2149,47 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void OnEncounterUnhover()
     {
         _hoveredEncounterId = null;
+        // A locked row stays pinned on unhover — the user's click intent wins over
+        // the pointer leaving the row. Filters/biome/sort changes call
+        // ClearLockedEncounter explicitly to release the lock.
+        if (_lockedEncounterId != null) return;
         CancelPendingRender();
         SetStatsTitle("");
         if (_statsLabel != null)
             _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
         ClearMonsterPreview();
+    }
+
+    /// <summary>Pin an encounter row as the current display target. Subsequent
+    /// hover/unhover events are suppressed until the lock is released (by clicking
+    /// another row to switch the lock, or clicking an empty area to clear it).</summary>
+    private void LockEncounter(string encounterId)
+    {
+        _lockedEncounterId = encounterId;
+        _hoveredEncounterId = encounterId;
+        UpdateStatsPanel(encounterId);
+        ScheduleMonsterPreviewRender(encounterId);
+    }
+
+    /// <summary>Release a pinned row. If the user is currently hovering a row the
+    /// stats panel / preview snap back to the hovered row; otherwise the "hover an
+    /// encounter to see stats" placeholder returns.</summary>
+    private void ClearLockedEncounter()
+    {
+        if (_lockedEncounterId == null) return;
+        _lockedEncounterId = null;
+        if (_hoveredEncounterId != null)
+        {
+            UpdateStatsPanel(_hoveredEncounterId);
+            ScheduleMonsterPreviewRender(_hoveredEncounterId);
+        }
+        else
+        {
+            SetStatsTitle("");
+            if (_statsLabel != null)
+                _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
+            ClearMonsterPreview();
+        }
     }
 
     private void UpdateStatsPanel(string encounterId)
@@ -2086,7 +2260,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
             statsText = EncounterTooltipHelper.BuildEncounterStatsTextFocused(
                 encounterStat, poolAct, poolAll, allCharsMetrics,
-                encounterName, _sortCharacter, actLabel, categoryLabel, filter);
+                encounterName, _sortCharacter, actLabel, categoryLabel, filter,
+                category);
 
             SetStatsTitle($"{encounterName} Stats");
             _statsLabel.Text = statsText;
@@ -2272,7 +2447,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var viewport = new SubViewport
         {
             Name = "MonsterPreviewViewport",
-            TransparentBg = true,
+            // Solid (non-transparent) background. Transparent SubViewports break
+            // particle effects and additive-blend sprites that some creatures rely
+            // on (Queen's minion lantern glows, Ceremonial Beast sparkles) — the
+            // particles end up drawing as black squares because their additive
+            // contribution composites against an alpha=0 buffer. A solid background
+            // colour matched to the render area's panel lets those effects
+            // composite correctly; a full-size ColorRect child below renders the
+            // same colour so the area reads as one continuous surface.
+            TransparentBg = false,
             RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
             // Baseline canvas size matched to the render area's aspect — may grow
             // below if content overflows (grown in both dims to keep aspect).
@@ -2280,6 +2463,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         };
         ((Node)this).AddChild(viewport);
         _previewViewport = viewport;
+
+        // Background fill inside the viewport — the first child so it renders at
+        // the back and every creature / particle composites over it. Colour matches
+        // _renderArea's StyleBoxFlat BgColor (0.08, 0.09, 0.12) so the TextureRect
+        // that displays the viewport texture reads as one continuous surface with
+        // the bestiary chrome.
+        var bgFill = new ColorRect
+        {
+            Name = "PreviewBgFill",
+            Color = new Color(0.08f, 0.09f, 0.12f, 1f),
+            Size = new Vector2(viewport.Size.X, viewport.Size.Y),
+            Position = Vector2.Zero,
+        };
+        viewport.AddChild(bgFill);
 
         // First pass: instantiate, wire up the Spine animator, set skin, start the
         // idle loop, and measure each monster's pixel-space bounds. Mirrors the
@@ -2428,7 +2625,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         int vpW = Math.Max(baselineW, Mathf.CeilToInt(neededW));
         int vpH = Math.Max(baselineH, Mathf.CeilToInt(neededH));
         if (vpW != baselineW || vpH != baselineH)
+        {
             viewport.Size = new Vector2I(vpW, vpH);
+            bgFill.Size = new Vector2(vpW, vpH);
+        }
 
         // Second pass: position each NCreatureVisuals using its bounds RECT (not
         // just size), so monsters whose origin isn't at the visible centre of
@@ -3171,6 +3371,85 @@ internal static class EncounterSorting
             EncounterSortMode.IQR          => $"{score.Value:0}",
             _ => "—",
         };
+    }
+
+    /// <summary>
+    /// Formats the per-row stat with significance coloration matching the focused-view
+    /// data cells: high = bad (orange/red), low = good (teal/green), against the
+    /// act-pool baseline for the encounter's category. Falls back to neutral grey for
+    /// Name/Seen modes (no good/bad direction) and when there's no data. Returns BBCode.
+    /// </summary>
+    public static string FormatScoreColored(string encounterId, EncounterSortMode mode, AggregationFilter filter, string? sortCharacter, string? biome = null)
+    {
+        var raw = FormatScore(encounterId, mode, filter, sortCharacter, biome: biome);
+        if (raw == "—" || mode == EncounterSortMode.Name || mode == EncounterSortMode.Seen)
+            return raw;
+
+        var score = Score(encounterId, mode, filter, sortCharacter, biome: biome);
+        if (score == null) return raw;
+
+        // Need the encounter's fought count for the n weighting in significance.
+        if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap)) return raw;
+        var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
+        int fought = 0;
+        if (sortCharacter != null)
+        {
+            if (perChar.TryGetValue(sortCharacter, out var s)) fought = s.Fought;
+        }
+        else
+        {
+            foreach (var s in perChar.Values) fought += s.Fought;
+        }
+        if (fought == 0) return raw;
+
+        string? category = null;
+        if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
+            category = meta.Category;
+
+        // Pick the matching baseline per mode and compute (value/baseline*100) so the
+        // existing ColWR significance pipeline (calibrated for 0-100 scales) triggers
+        // meaningfully on small absolute differences. ColBad direction = high is bad.
+        double value, baseline;
+        switch (mode)
+        {
+            case EncounterSortMode.MedianDamage:
+                value = score.Value;
+                baseline = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
+                break;
+            case EncounterSortMode.DeathRate:
+                // Score returns died/fought (fraction); baseline is in percent.
+                value = score.Value * 100.0;
+                baseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, biome);
+                break;
+            case EncounterSortMode.IQR:
+                // Score returns absolute (p75 - p25); IQRC baseline is unitless. Compute
+                // this encounter's IQRC and compare against the IQRC baseline.
+                EncounterEvent combined = new();
+                if (sortCharacter != null && perChar.TryGetValue(sortCharacter, out var only)) combined = only;
+                else
+                {
+                    foreach (var s in perChar.Values)
+                    {
+                        if (s.DamageValues != null)
+                        {
+                            combined.DamageValues ??= new List<int>();
+                            combined.DamageValues.AddRange(s.DamageValues);
+                        }
+                    }
+                }
+                var med = combined.DamageMedian();
+                if (!med.HasValue || med.Value <= 0) return raw;
+                value = score.Value / med.Value;
+                baseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, biome);
+                break;
+            default:
+                return raw;
+        }
+        if (baseline <= 0) return raw;
+        double pctOfBaseline = value / baseline * 100.0;
+        // ColBad direction (high = bad): swap the deviation around the baseline before
+        // handing to ColWR (which uses high = good).
+        return TooltipHelper.ColWR(raw, 100.0 + (100.0 - pctOfBaseline), fought, 100.0);
     }
 }
 
