@@ -285,6 +285,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// to release it. Cleared automatically when filters/biome/sort changes wipe
     /// the list.</summary>
     private string? _lockedEncounterId;
+    /// <summary>The PanelContainer of the currently locked row, so we can apply
+    /// / remove the locked-row highlight style independently of hover.</summary>
+    private PanelContainer? _lockedRowWrap;
+    /// <summary>Locked category (mutually exclusive with _lockedEncounterId).
+    /// When set, category hover stats are pinned.</summary>
+    private string? _lockedCategory;
+    private List<string>? _lockedCategoryEncIds;
+    private PanelContainer? _lockedCategoryWrap;
     private EncounterSortMode _sortMode = EncounterSortMode.Name;
     // Default direction: A→Z for Name; high→low for stat-based modes (set on mode-change).
     private bool _sortDescending = false;
@@ -340,6 +348,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         AnchorBottom = 1f;
     }
 
+    /// <summary>Global input handler. Right-click anywhere on the bestiary page
+    /// unconditionally clears any row/category lock — no other action.</summary>
+    public override void _Input(InputEvent ev)
+    {
+        if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Right)
+        {
+            if (_lockedEncounterId != null || _lockedCategory != null)
+            {
+                ClearLockedEncounter();
+                GetViewport().SetInputAsHandled();
+            }
+        }
+    }
+
     public override void _Ready()
     {
         BuildUI();
@@ -374,6 +396,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         margin.AddThemeConstantOverride("margin_right", 40);
         margin.AddThemeConstantOverride("margin_top", 24);
         margin.AddThemeConstantOverride("margin_bottom", 24);
+        // Clicks in the margin padding area (left 200px, etc.) that don't hit
+        // any child control land here → unlock.
+        margin.MouseFilter = MouseFilterEnum.Stop;
+        margin.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                ClearLockedEncounter();
+        };
         AddChild(margin);
 
         var outerVbox = new VBoxContainer();
@@ -416,7 +446,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var leftSection = new VBoxContainer();
         leftSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         leftSection.SizeFlagsVertical = SizeFlags.ExpandFill;
-        leftSection.SizeFlagsStretchRatio = 1.4f;
+        // Stretch ratio tuned so the right-hand table + preview pane gets most
+        // of the horizontal budget: encounter list is compact (icons + names)
+        // while the stats table wants room for descriptors, 6 data columns, and
+        // a sensible-sized monster preview underneath.
+        leftSection.SizeFlagsStretchRatio = 0.85f;
         leftSection.AddThemeConstantOverride("separation", 4);
         contentSplit.AddChild(leftSection);
 
@@ -542,7 +576,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             // Shrink the grabber so it sits smaller than the track. Pivot at center so the
             // shrink happens symmetrically inside the track column.
             handle.PivotOffset = handle.Size / 2f;
-            handle.Scale = new Vector2(0.55f, 0.85f);
+            handle.Scale = new Vector2(0.50f, 0.78f);
         }).CallDeferred();
 
         _bestiaryScrollContainer = bestiaryScroll;
@@ -602,7 +636,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var rightPanel = new VBoxContainer();
         rightPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         rightPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
-        rightPanel.SizeFlagsStretchRatio = 1.0f;
+        rightPanel.SizeFlagsStretchRatio = 1.25f;
         rightPanel.AddThemeConstantOverride("separation", 8);
         contentSplit.AddChild(rightPanel);
 
@@ -1126,6 +1160,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Rebuilding the list means any previously locked row's wrapper is being
         // destroyed — release the lock so we don't keep a stale id pinned.
         _lockedEncounterId = null;
+        _lockedRowWrap = null;
+        _lockedCategory = null;
+        _lockedCategoryEncIds = null;
+        _lockedCategoryWrap = null;
 
         RebuildBiomeTabs();
         RebuildSortTabs();
@@ -1174,18 +1212,31 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             catRow.Alignment = BoxContainer.AlignmentMode.Center;
             catWrap.AddChild(catRow);
 
-            // Collapse arrow indicator
+            // Collapse arrow indicator — wrapped in an opaque PanelContainer so the
+            // row's highlight background doesn't bleed under the arrow. The arrow
+            // area is functionally separate from the highlighted body (click on
+            // arrow → collapse/expand, click on body → lock stats).
             var arrowLabel = new Label();
             arrowLabel.Text = collapsed ? "▶" : "▼";
             arrowLabel.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.55f, 0.9f));
             arrowLabel.AddThemeFontSizeOverride("font_size", 13);
-            arrowLabel.CustomMinimumSize = new Vector2(14, 0);
             arrowLabel.MouseFilter = MouseFilterEnum.Ignore;
             arrowLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             arrowLabel.VerticalAlignment = VerticalAlignment.Center;
+            arrowLabel.HorizontalAlignment = HorizontalAlignment.Center;
             ApplyKreonFont(arrowLabel);
             ApplyTextShadow(arrowLabel);
-            catRow.AddChild(arrowLabel);
+
+            var arrowBg = new PanelContainer();
+            arrowBg.CustomMinimumSize = new Vector2(20, 0);
+            arrowBg.MouseFilter = MouseFilterEnum.Ignore;
+            arrowBg.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            var arrowStyle = new StyleBoxFlat();
+            arrowStyle.BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
+            arrowStyle.SetCornerRadiusAll(3);
+            arrowBg.AddThemeStyleboxOverride("panel", arrowStyle);
+            arrowBg.AddChild(arrowLabel);
+            catRow.AddChild(arrowBg);
 
             // Build the category icon inside a hover wrapper so we can scale + outline it.
             var catSize = EncounterIcons.CategoryIconSize(category);
@@ -1218,22 +1269,53 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             void ApplyCategoryHover()
             {
                 if (!GodotObject.IsInstanceValid(catWrap)) return;
-                catWrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
+                var style = (_lockedCategory == capturedCategory)
+                    ? (StyleBox)s_rowLockedStyle
+                    : s_rowHighlightStyle;
+                catWrap.AddThemeStyleboxOverride("panel", style);
                 HighlightCategory(capturedCategory, true);
                 OnCategoryHover(capturedCategory, capturedEncIds);
             }
             catWrap.MouseEntered += ApplyCategoryHover;
             catWrap.MouseExited += () =>
             {
-                catWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+                var fallback = (_lockedCategory == capturedCategory)
+                    ? (StyleBox)s_rowLockedStyle
+                    : MakeRowEmptyStyle();
+                catWrap.AddThemeStyleboxOverride("panel", fallback);
                 HighlightCategory(capturedCategory, false);
                 OnEncounterUnhover();
             };
             catWrap.GuiInput += (InputEvent ev) =>
             {
                 if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                {
+                    const float ArrowThreshold = 50f;
+                    if (mb.Position.X < ArrowThreshold)
+                    {
+                        ToggleCategoryCollapse(capturedCategory);
+                    }
+                    else if (_lockedCategory == capturedCategory)
+                    {
+                        ClearLockedEncounter();
+                        catWrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
+                    }
+                    else
+                    {
+                        LockCategory(capturedCategory, capturedEncIds, catWrap);
+                    }
+                    catWrap.AcceptEvent();
+                }
+                // Double-click toggles collapse/expand regardless of click position.
+                if (ev is InputEventMouseButton db && db.DoubleClick && db.ButtonIndex == MouseButton.Left)
+                {
                     ToggleCategoryCollapse(capturedCategory);
+                    catWrap.AcceptEvent();
+                }
             };
+
+            // Make children click-transparent so catWrap.GuiInput handles all clicks.
+            MakeRowChildrenClickTransparent(catWrap);
 
             _encounterList.AddChild(catWrap);
 
@@ -1353,7 +1435,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         encounterHeader.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(encounterHeader);
         ApplyTextShadow(encounterHeader);
-        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(12, 0) });
+        // Left margin matches the encounter rows below: 14px lead spacer + 62px icon
+        // column + 8px HBox separation = 84px before the name label starts. The header
+        // row itself has separation=6, so subtract that from the spacer.
+        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(78, 0) });
         _statsColumnHeaderRow.AddChild(encounterHeader);
 
         var spacer = new Control();
@@ -1474,6 +1559,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private void ToggleCategoryCollapse(string category)
     {
+        SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
         if (!_collapsedCategories.Add(category))
             _collapsedCategories.Remove(category);
         // The mouse is still over the (now-replaced) header; let RefreshEncounterList
@@ -1771,18 +1857,32 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     // Both styles use IDENTICAL content margins so swapping them on hover never moves layout.
     // The only visual difference is the highlight's background color and left accent border.
-    private const int RowMarginLeftPx   = 4;
-    private const int RowMarginRightPx  = 4;
-    private const int RowMarginTopPx    = 1;
-    private const int RowMarginBottomPx = 1;
+    private const int RowMarginLeftPx   = 0;
+    private const int RowMarginRightPx  = 0;
+    private const int RowMarginTopPx    = 0;
+    private const int RowMarginBottomPx = 0;
 
     private static readonly StyleBoxFlat s_rowHighlightStyle = MakeRowHighlightStyle();
+    private static readonly StyleBoxFlat s_rowLockedStyle = MakeRowLockedStyle();
     private static StyleBoxFlat MakeRowHighlightStyle()
     {
         var s = new StyleBoxFlat();
         s.BgColor      = new Color(0.918f, 0.745f, 0.318f, 0.18f);
         s.BorderColor  = new Color(0.918f, 0.745f, 0.318f, 0.55f);
-        s.BorderWidthLeft   = 0; // border drawn via stylebox border affects content margins; keep 0
+        s.BorderWidthLeft   = 0;
+        s.SetCornerRadiusAll(2);
+        s.ContentMarginLeft   = RowMarginLeftPx;
+        s.ContentMarginRight  = RowMarginRightPx;
+        s.ContentMarginTop    = RowMarginTopPx;
+        s.ContentMarginBottom = RowMarginBottomPx;
+        return s;
+    }
+    private static StyleBoxFlat MakeRowLockedStyle()
+    {
+        var s = new StyleBoxFlat();
+        s.BgColor      = new Color(0.85f, 0.85f, 0.85f, 0.12f);
+        s.BorderColor  = new Color(0.85f, 0.85f, 0.85f, 0.35f);
+        s.BorderWidthLeft   = 0;
         s.SetCornerRadiusAll(2);
         s.ContentMarginLeft   = RowMarginLeftPx;
         s.ContentMarginRight  = RowMarginRightPx;
@@ -1915,6 +2015,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statLabel.CustomMinimumSize = new Vector2(StatColumnWidthPx, 0);
         statLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         statLabel.MouseFilter = MouseFilterEnum.Ignore;
+        // ClipContents off so the text shadow (3px right / 2px down) isn't
+        // clipped at the label's right edge — the shadow would otherwise get
+        // cut off past the last glyph.
+        statLabel.ClipContents = false;
         statLabel.AddThemeFontSizeOverride("normal_font_size", 15);
         ApplyKreonFont(statLabel);
         ApplyTextShadow(statLabel);
@@ -1936,26 +2040,46 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var capturedEncId = encounterId;
         wrap.MouseEntered += () =>
         {
-            wrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
-            // Hovering an encounter row → highlight the category header icon AND this row's
-            // own icon (selective: not every row in the category).
+            // If THIS row is locked, keep locked (white) style — don't override
+            // with hover (yellow). For any other row, show hover.
+            var style = (_lockedEncounterId == capturedEncId)
+                ? (StyleBox)s_rowLockedStyle
+                : s_rowHighlightStyle;
+            wrap.AddThemeStyleboxOverride("panel", style);
             HighlightCategory(capturedCategory, true, capturedEncId);
             OnEncounterHover(capturedEncId);
         };
         wrap.MouseExited += () =>
         {
-            wrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+            // If THIS row is locked, keep locked style. Otherwise clear.
+            var fallback = (_lockedEncounterId == capturedEncId)
+                ? (StyleBox)s_rowLockedStyle
+                : MakeRowEmptyStyle();
+            wrap.AddThemeStyleboxOverride("panel", fallback);
             HighlightCategory(capturedCategory, false, capturedEncId);
             OnEncounterUnhover();
         };
         wrap.GuiInput += (InputEvent ev) =>
         {
-            // Left-click pins this row as the display target. AcceptEvent stops
-            // the click from propagating to outerVbox's catch-all unlock handler,
-            // so clicking a different locked row switches the lock atomically.
             if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
             {
-                LockEncounter(capturedEncId);
+                if (_lockedEncounterId == capturedEncId)
+                {
+                    // Toggle unlock — mouse is still over this row, so
+                    // immediately show hover highlight instead of empty.
+                    ClearLockedEncounter();
+                    wrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
+                }
+                else
+                {
+                    LockEncounter(capturedEncId, wrap);
+                }
+                wrap.AcceptEvent();
+            }
+            // Double-click on an encounter row collapses its parent category.
+            if (ev is InputEventMouseButton db && db.DoubleClick && db.ButtonIndex == MouseButton.Left)
+            {
+                ToggleCategoryCollapse(capturedCategory);
                 wrap.AcceptEvent();
             }
         };
@@ -1978,10 +2102,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void OnEncounterHover(string encounterId)
     {
         _hoveredEncounterId = encounterId;
-        // If another row is click-locked, hover doesn't change the displayed stats
-        // or preview — the user explicitly pinned a row and hover feedback is
-        // suspended until they click elsewhere.
-        if (_lockedEncounterId != null) return;
+        // If any row (encounter or category) is click-locked, hover doesn't change
+        // the displayed stats or preview.
+        if (_lockedEncounterId != null || _lockedCategory != null) return;
         UpdateStatsPanel(encounterId);
         ScheduleMonsterPreviewRender(encounterId);
     }
@@ -2054,6 +2177,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void OnCategoryHover(string category, List<string> encounterIds)
     {
         if (_statsLabel == null) return;
+        // Don't override a locked display (encounter or category).
+        if (_lockedEncounterId != null || _lockedCategory != null) return;
 
         var filter = BuildFilter();
         var categoryLabel = EncounterCategory.FormatCategory(category);
@@ -2104,7 +2229,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 poolBiome, poolAll, allCharsPool,
                 _sortCharacter, biomeLabel, categoryLabel, filter);
 
-            SetStatsTitle($"{categoryLabel} Stats");
+            var scopePrefix = biomeLabel ?? "All";
+            SetStatsTitle($"{scopePrefix} {categoryLabel} Encounter Stats");
         }
         else
         {
@@ -2136,8 +2262,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 filter.AscensionMin, filter.AscensionMax, categoryLabel,
                 filter: filter);
 
-            var biomeName = _selectedBiome != null ? FormatBiomeName(_selectedBiome) : "";
-            SetStatsTitle($"All {categoryLabel} — {biomeName}");
+            var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : "All";
+            SetStatsTitle($"{biomeName} {categoryLabel} Encounter Stats");
         }
 
         _statsLabel.Text = statsText;
@@ -2152,7 +2278,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // A locked row stays pinned on unhover — the user's click intent wins over
         // the pointer leaving the row. Filters/biome/sort changes call
         // ClearLockedEncounter explicitly to release the lock.
-        if (_lockedEncounterId != null) return;
+        if (_lockedEncounterId != null || _lockedCategory != null) return;
         CancelPendingRender();
         SetStatsTitle("");
         if (_statsLabel != null)
@@ -2163,21 +2289,91 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <summary>Pin an encounter row as the current display target. Subsequent
     /// hover/unhover events are suppressed until the lock is released (by clicking
     /// another row to switch the lock, or clicking an empty area to clear it).</summary>
-    private void LockEncounter(string encounterId)
+    private void LockEncounter(string encounterId, PanelContainer wrap)
     {
+        SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+        // Clear any existing category lock.
+        if (_lockedCategoryWrap != null && GodotObject.IsInstanceValid(_lockedCategoryWrap))
+            _lockedCategoryWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+        _lockedCategory = null;
+        _lockedCategoryEncIds = null;
+        _lockedCategoryWrap = null;
+
+        // Clear the old locked encounter row's highlight if it's a different row.
+        if (_lockedRowWrap != null && _lockedRowWrap != wrap &&
+            GodotObject.IsInstanceValid(_lockedRowWrap))
+        {
+            _lockedRowWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+        }
+
         _lockedEncounterId = encounterId;
+        _lockedRowWrap = wrap;
         _hoveredEncounterId = encounterId;
+        // The mouse is still over the row we just clicked, so keep the hover
+        // (yellow) highlight active — the locked (white) style shows once the
+        // mouse leaves.
         UpdateStatsPanel(encounterId);
         ScheduleMonsterPreviewRender(encounterId);
     }
 
-    /// <summary>Release a pinned row. If the user is currently hovering a row the
-    /// stats panel / preview snap back to the hovered row; otherwise the "hover an
-    /// encounter to see stats" placeholder returns.</summary>
+    /// <summary>Lock a category row's hover stats. Mutually exclusive with encounter lock.</summary>
+    private void LockCategory(string category, List<string> encounterIds, PanelContainer catWrap)
+    {
+        SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+        // Clear any existing encounter lock first.
+        if (_lockedRowWrap != null && GodotObject.IsInstanceValid(_lockedRowWrap))
+            _lockedRowWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+        _lockedEncounterId = null;
+        _lockedRowWrap = null;
+
+        // Clear a previous category lock if switching.
+        if (_lockedCategoryWrap != null && _lockedCategoryWrap != catWrap &&
+            GodotObject.IsInstanceValid(_lockedCategoryWrap))
+            _lockedCategoryWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+
+        _lockedCategory = category;
+        _lockedCategoryEncIds = encounterIds;
+        _lockedCategoryWrap = catWrap;
+
+        // Force the category hover stats to display.
+        OnCategoryHoverForced(category, encounterIds);
+    }
+
+    /// <summary>Force-display category hover stats, bypassing the lock guard.
+    /// Used by LockCategory to update the display on the frame the lock is set.</summary>
+    private void OnCategoryHoverForced(string category, List<string> encounterIds)
+    {
+        // Temporarily clear the lock flag so OnCategoryHover doesn't early-return.
+        var savedCat = _lockedCategory;
+        var savedEnc = _lockedEncounterId;
+        _lockedCategory = null;
+        _lockedEncounterId = null;
+        OnCategoryHover(category, encounterIds);
+        _lockedCategory = savedCat;
+        _lockedEncounterId = savedEnc;
+    }
+
+    /// <summary>Release any pinned row (encounter or category). If the user is
+    /// currently hovering a row the stats panel / preview snap back to the hovered
+    /// row; otherwise the placeholder returns.</summary>
     private void ClearLockedEncounter()
     {
-        if (_lockedEncounterId == null) return;
+        bool hadLock = _lockedEncounterId != null || _lockedCategory != null;
+        if (!hadLock) return;
+        SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+
+        // Revert locked row/category highlight to empty.
+        if (_lockedRowWrap != null && GodotObject.IsInstanceValid(_lockedRowWrap))
+            _lockedRowWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+        if (_lockedCategoryWrap != null && GodotObject.IsInstanceValid(_lockedCategoryWrap))
+            _lockedCategoryWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+
         _lockedEncounterId = null;
+        _lockedRowWrap = null;
+        _lockedCategory = null;
+        _lockedCategoryEncIds = null;
+        _lockedCategoryWrap = null;
+
         if (_hoveredEncounterId != null)
         {
             UpdateStatsPanel(_hoveredEncounterId);
@@ -2286,7 +2482,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                     filter: filter);
         }
 
-        SetStatsTitle(EncounterCategory.FormatName(encounterId));
+        SetStatsTitle($"{EncounterCategory.FormatName(encounterId)} Stats");
         _statsLabel.Text = statsText;
     }
 
