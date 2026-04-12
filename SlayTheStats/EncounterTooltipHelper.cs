@@ -4,19 +4,20 @@ namespace SlayTheStats;
 
 /// <summary>
 /// Generates encounter stats text with rows per character.
-/// Columns (bestiary multi-row): N | Dmg | Mid 50% | Turns | Pots | Deaths
-/// Columns (in-combat single-row): N | Dmg | Mid 50% | Turns | Deaths   ← drops Pots so the
-/// table fits within the normal hover-tip width (the in-combat tooltip uses
-/// TooltipHelper.TooltipWidth, not EncounterTooltipWidth, after this trim).
+///
+/// All-characters view (bestiary): [table=8] layout with Dmg%, Mid 50% (of Dmg%),
+/// Spread (of Dmg%), Turns, Pots, Deaths. Damage values are normalized by the
+/// character's starting max HP so cross-character rows are comparable.
+///
+/// In-combat single-row: N | Dmg | Mid 50% | Turns | Deaths (raw damage, no Dmg% —
+/// single-character context where HP normalization isn't needed).
 ///
 /// Coloration:
-///   Dmg      — ColBad(avgDmgPct, dmgPctBaseline, n=Fought) so high-damage encounters
-///              tint orange/red and low-damage ones tint teal/green.
-///   Mid 50%  — ColBad(iqrc, iqrcBaseline, n=Fought) so swingy encounters (high IQRC)
-///              tint orange/red and consistent ones tint teal/green. IQRC = IQR / median.
-///   Deaths   — Numerator (died) is colored by ColBad(deathRate, deathRateBaseline, n)
-///              so the cell visualises both the rate AND the confidence (denominator).
-///   N, Turns, Pots — neutral (no good/bad direction; just informational).
+///   Dmg/Dmg% — ColBad against dmgPct baseline. High = orange/red, low = teal/green.
+///   Mid 50%  — neutral (informational range).
+///   Spread   — ColBad(iqrc, iqrcBaseline). High IQRC = swingy = orange/red.
+///   Deaths   — Numerator colored by ColBad(deathRate, deathRateBaseline, n).
+///   N, Turns, Pots — neutral.
 /// </summary>
 public static class EncounterTooltipHelper
 {
@@ -43,6 +44,152 @@ public static class EncounterTooltipHelper
     /// compendium card/relic stat tables.</param>
     /// <param name="characterLabel">Character label fed to BuildFilterContext when the
     /// bestiary doesn't filter to a single character (defaults to "All chars").</param>
+    /// <summary>Holds the three parts of the all-characters stats table: a sticky
+    /// header row, scrollable character rows, and a sticky baseline (All) row.
+    /// Each part is a self-contained [table=8] so it can be assigned to a separate
+    /// RichTextLabel for independent positioning.</summary>
+    internal struct AllCharsTableParts
+    {
+        public string Header;
+        public string CharacterRows;
+        public string BaselineRow;
+        public string Footer;
+    }
+
+    internal static AllCharsTableParts BuildEncounterStatsTextParts(
+        Dictionary<string, EncounterEvent> charStats,
+        double deathRateBaseline,
+        double dmgPctBaseline,
+        double iqrcBaseline,
+        int? ascensionMin,
+        int? ascensionMax,
+        string categoryLabel,
+        AggregationFilter? filter = null,
+        string? characterLabel = null)
+    {
+        var startingHps = MainFile.Db.CharacterStartingHp;
+
+        // --- Pass 1: collect per-character metrics to compute the All (baseline) row ---
+        // We need the baseline values before we can color the per-character rows.
+        var perCharMetrics = new List<AllCharsPerCharMetrics>();
+        // Parallel list of (charId, stat, startingHp, descriptor) for characters with data,
+        // preserving canonical order + modded characters.
+        var charEntries = new List<(string charId, EncounterEvent stat, int startingHp, string descriptor)>();
+        // Characters with no data — shown as empty rows.
+        var emptyEntries = new List<string>(); // descriptor strings
+        int totalFought = 0;
+        int totalDied = 0;
+
+        var rendered = new HashSet<string>();
+        foreach (var (charId, label) in CharacterOrder)
+        {
+            rendered.Add(charId);
+            var icon = CharacterIcon(charId, 30);
+            var descriptor = $"{icon}{KreonBoldFontTag}{label}[/font]";
+            if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
+            {
+                int startingHp = startingHps.GetValueOrDefault(charId, 0);
+                CollectPerCharMetrics(perCharMetrics, stat, startingHp);
+                charEntries.Add((charId, stat, startingHp, descriptor));
+                totalFought += stat.Fought;
+                totalDied += stat.Died;
+            }
+            else
+            {
+                emptyEntries.Add(descriptor);
+            }
+        }
+
+        foreach (var (charId, stat) in charStats.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            if (rendered.Contains(charId)) continue;
+            if (stat.Fought == 0) continue;
+            var icon = CharacterIcon(charId, 30);
+            var label = FormatUnknownCharLabel(charId);
+            int startingHp = startingHps.GetValueOrDefault(charId, 0);
+            CollectPerCharMetrics(perCharMetrics, stat, startingHp);
+            charEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/font]"));
+            totalFought += stat.Fought;
+            totalDied += stat.Died;
+        }
+
+        // Compute the All row baselines from per-character metrics.
+        var allBaseline = ComputeAllRowBaselines(perCharMetrics);
+
+        // --- Header table ---
+        var hdr = new StringBuilder();
+        hdr.Append("[table=8]");
+        AppendDescriptorCell(hdr, " ", isHeader: true);
+        AppendHeaderCell(hdr, "Fought", NormalCellPadding);
+        AppendHeaderCell(hdr, "Dmg%",    TightCellPadding);
+        AppendHeaderCell(hdr, "Mid 50%", TightCellPadding);
+        AppendHeaderCell(hdr, "Spread",  NormalCellPadding);
+        AppendHeaderCell(hdr, "Turns",   TightCellPadding);
+        AppendHeaderCell(hdr, "Potions", TightCellPadding);
+        AppendHeaderCell(hdr, "Deaths",  TightCellPadding);
+        hdr.Append("[/table]");
+
+        // --- Pass 2: render character rows colored against All baselines ---
+        var body = new StringBuilder();
+        body.Append("[table=8]");
+
+        foreach (var (charId, stat, startingHp, descriptor) in charEntries)
+        {
+            AppendDescriptorCell(body, descriptor);
+            AppendAllCharsDataCells(body, stat, startingHp, allBaseline);
+        }
+
+        foreach (var descriptor in emptyEntries)
+        {
+            AppendDescriptorCell(body, descriptor);
+            AppendEmptyDataCells(body);
+        }
+
+        // DEBUG: 20 fake character rows to test scrollable layout. Remove before release.
+        for (int i = 1; i <= 20; i++)
+        {
+            // Cycle through real character entries for plausible data
+            if (charEntries.Count > 0)
+            {
+                var (_, stat, startingHp, _) = charEntries[i % charEntries.Count];
+                var fakeDesc = $"{KreonBoldFontTag}Fake Char {i}[/font]";
+                AppendDescriptorCell(body, fakeDesc);
+                AppendAllCharsDataCells(body, stat, startingHp, allBaseline);
+            }
+        }
+
+        body.Append("[/table]");
+
+        // --- Baseline (All) row table ---
+        var baseline = new StringBuilder();
+        baseline.Append("[table=8]");
+        var allIcon = AllCharsIcon(22);
+        AppendDescriptorCell(baseline, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)");
+        if (perCharMetrics.Count > 0)
+            AppendAllRowFromPerCharMetrics(baseline, perCharMetrics, totalFought, totalDied);
+        else
+            AppendEmptyDataCells(baseline);
+        baseline.Append("[/table]");
+
+        // --- Footer ---
+        var footer = new StringBuilder();
+        var filterCtx = filter != null
+            ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
+            : "";
+        if (filterCtx.Length > 0)
+            footer.Append($"[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+
+        return new AllCharsTableParts
+        {
+            Header = hdr.ToString(),
+            CharacterRows = body.ToString(),
+            BaselineRow = baseline.ToString(),
+            Footer = footer.ToString(),
+        };
+    }
+
+    /// <summary>Convenience wrapper that concatenates all parts into a single string.
+    /// Used by callers that don't need scrollable layout (e.g. category hover).</summary>
     internal static string BuildEncounterStatsText(
         Dictionary<string, EncounterEvent> charStats,
         double deathRateBaseline,
@@ -54,65 +201,14 @@ public static class EncounterTooltipHelper
         AggregationFilter? filter = null,
         string? characterLabel = null)
     {
+        var parts = BuildEncounterStatsTextParts(charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
+            ascensionMin, ascensionMax, categoryLabel, filter, characterLabel);
         var sb = new StringBuilder();
-
-        // Header — column widths align with FormatRow.
-        //   Label(11)  N(4)  Dmg(5)  Mid50%(9)  Turns(5)  Pots(5)  Deaths(7)
-        // "Dmg" = median damage. "Mid 50%" = IQR (p25-p75).
-        sb.Append("                 N   Dmg   Mid 50% Turns  Pots  Deaths\n");
-
-        var total = new EncounterEvent();
-
-        // Render known characters in canonical order
-        var rendered = new HashSet<string>();
-        foreach (var (charId, label) in CharacterOrder)
-        {
-            rendered.Add(charId);
-            if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
-            {
-                Accumulate(total, stat);
-                sb.Append(FormatRow($"{label,-11}", stat, deathRateBaseline, dmgPctBaseline, iqrcBaseline));
-            }
-            else
-            {
-                sb.Append(FormatEmptyRow($"{label,-11}"));
-            }
-            sb.Append('\n');
-        }
-
-        // Append any unknown characters with stats (modded or new in-game characters)
-        // sorted alphabetically by ID for stable ordering
-        foreach (var (charId, stat) in charStats.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-        {
-            if (rendered.Contains(charId)) continue;
-            if (stat.Fought == 0) continue;
-            Accumulate(total, stat);
-            var label = FormatUnknownCharLabel(charId);
-            sb.Append(FormatRow($"{label,-11}", stat, deathRateBaseline, dmgPctBaseline, iqrcBaseline));
-            sb.Append('\n');
-        }
-
-        // All row — always shown.
-        if (total.Fought > 0)
-            sb.Append(FormatRow($"{"All",-11}", total, deathRateBaseline, dmgPctBaseline, iqrcBaseline));
-        else
-            sb.Append(FormatEmptyRow($"{"All",-11}"));
-
-        // Footer — line 1 is the category dmg% baseline; line 2 is the
-        // filter context line (asc · char · version · profile) produced by
-        // the shared CardHoverShowPatch.BuildFilterContext. The filter is
-        // always provided by bestiary callers, so the context line always
-        // renders; per-surface rules in BuildFilterContext collapse or
-        // omit segments as appropriate.
-        var baselineDmg = $"{Math.Round(dmgPctBaseline):F0}%";
-        var filterCtx = filter != null
-            ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
-            : "";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline {categoryLabel.ToLowerInvariant()} pool dmg%: {baselineDmg}");
-        if (filterCtx.Length > 0)
-            sb.Append($"\n{filterCtx}");
-        sb.Append("[/color][/font_size][/font]");
-
+        sb.Append(parts.Header);
+        sb.Append(parts.CharacterRows);
+        sb.Append(parts.BaselineRow);
+        if (parts.Footer.Length > 0)
+            sb.Append($"\n{parts.Footer}");
         return sb.ToString();
     }
 
@@ -335,6 +431,209 @@ public static class EncounterTooltipHelper
         double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
         string text = $"{iqrc * 100:F0}%";
         return ColBad(text, iqrc * 100, n, iqrcBaseline * 100);
+    }
+
+    /// <summary>Computes median of dmg% values: each raw DamageValues entry divided by
+    /// startingHp, expressed as 0–100. Returns null if DamageValues is null/empty or
+    /// startingHp is zero.</summary>
+    private static double? DmgPctMedian(EncounterEvent stat, int startingHp)
+    {
+        if (startingHp <= 0 || stat.DamageValues == null || stat.DamageValues.Count == 0) return null;
+        // Dividing by a positive constant preserves order, so median(x/c) = median(x)/c.
+        double rawMedian = stat.DamageMedian() ?? 0;
+        return rawMedian / startingHp * 100.0;
+    }
+
+    /// <summary>Computes IQR of dmg% values: p25 and p75 of raw damage divided by
+    /// startingHp, expressed as 0–100. Returns null if insufficient data or startingHp
+    /// is zero.</summary>
+    private static (double p25, double p75)? DmgPctIQR(EncounterEvent stat, int startingHp)
+    {
+        if (startingHp <= 0) return null;
+        var raw = stat.DamageIQR();
+        if (!raw.HasValue) return null;
+        return (raw.Value.p25 / startingHp * 100.0, raw.Value.p75 / startingHp * 100.0);
+    }
+
+    /// <summary>Per-character metrics collected during the character loop, used to build
+    /// the character-weighted All row. Percentile metrics (dmgPct median/IQR) use
+    /// median-of-medians; mean metrics (turns, pots, death rate) use mean-of-means.</summary>
+    private struct AllCharsPerCharMetrics
+    {
+        public double DmgPctMedian;
+        public double? IqrP25;
+        public double? IqrP75;
+        public double AvgTurns;
+        public double AvgPots;
+        public double DeathRate;
+    }
+
+    /// <summary>Computes per-character metrics and adds them to the list for the All row.</summary>
+    private static void CollectPerCharMetrics(List<AllCharsPerCharMetrics> list, EncounterEvent stat, int startingHp)
+    {
+        if (stat.Fought <= 0) return;
+        int n = stat.Fought;
+        double? dmgPct = DmgPctMedian(stat, startingHp);
+        var iqrPct = DmgPctIQR(stat, startingHp);
+
+        list.Add(new AllCharsPerCharMetrics
+        {
+            DmgPctMedian = dmgPct ?? (stat.DmgPctSum / n * 100.0),
+            IqrP25 = iqrPct?.p25,
+            IqrP75 = iqrPct?.p75,
+            AvgTurns = (double)stat.TurnsTakenSum / n,
+            AvgPots = (double)stat.PotionsUsedSum / n,
+            DeathRate = 100.0 * stat.Died / n,
+        });
+    }
+
+    /// <summary>Median of a list of doubles. Returns 0 if empty.</summary>
+    private static double MedianOfDoubles(List<double> values)
+    {
+        if (values.Count == 0) return 0;
+        values.Sort();
+        int n = values.Count;
+        return n % 2 == 1
+            ? values[n / 2]
+            : (values[n / 2 - 1] + values[n / 2]) / 2.0;
+    }
+
+    /// <summary>Renders the All (baseline) row from per-character metrics. Percentile
+    /// damage columns use median-of-medians (each character contributes equally).
+    /// Mean columns (turns, pots, death rate) use mean-of-means.</summary>
+    private static void AppendAllRowFromPerCharMetrics(StringBuilder sb,
+        List<AllCharsPerCharMetrics> metrics, int totalFought, int totalDied)
+    {
+        int charCount = metrics.Count;
+        string color = ContextRowDataColor;
+        var P = new ColumnPaddings();
+
+        // Median-of-medians for dmg%
+        double allDmgPct = MedianOfDoubles(metrics.Select(m => m.DmgPctMedian).ToList());
+
+        // Median-of-p25s and median-of-p75s for IQR
+        var p25s = metrics.Where(m => m.IqrP25.HasValue).Select(m => m.IqrP25!.Value).ToList();
+        var p75s = metrics.Where(m => m.IqrP75.HasValue).Select(m => m.IqrP75!.Value).ToList();
+        (double p25, double p75)? allIqr = p25s.Count > 0 && p75s.Count > 0
+            ? (MedianOfDoubles(p25s), MedianOfDoubles(p75s))
+            : null;
+
+        // Mean-of-means for turns, pots, death rate
+        double allTurns    = metrics.Average(m => m.AvgTurns);
+        double allPots     = metrics.Average(m => m.AvgPots);
+
+        string fDmgPct  = $"{allDmgPct:F0}%";
+        string fIqr     = allIqr.HasValue ? $"{allIqr.Value.p25:F0}-{allIqr.Value.p75:F0}%" : "-";
+        string fSpread  = FormatSpreadValue(allIqr, allDmgPct);
+        string fTurns   = $"{allTurns:F1}";
+        string fPots    = $"{allPots:F1}";
+        string fDeaths  = $"{totalDied}/{totalFought}";
+
+        sb.Append($"[cell {P.Fought}][right][color={color}]{totalFought}[/color][/right][/cell]");
+        sb.Append($"[cell {P.Dmg}][right][color={color}]{fDmgPct}[/color][/right][/cell]");
+        sb.Append($"[cell {P.Mid50}][right][color={color}]{fIqr}[/color][/right][/cell]");
+        sb.Append($"[cell {P.Spread}][right][color={color}]{fSpread}[/color][/right][/cell]");
+        sb.Append($"[cell {P.Turns}][right][color={color}]{fTurns}[/color][/right][/cell]");
+        sb.Append($"[cell {P.Pots}][right][color={color}]{fPots}[/color][/right][/cell]");
+        sb.Append($"[cell {P.Deaths}][right][color={color}]{fDeaths}[/color][/right][/cell]");
+    }
+
+    /// <summary>Baselines derived from the All row's character-weighted values.
+    /// Used to color per-character rows by significance against the cross-character average.</summary>
+    private struct AllRowBaselines
+    {
+        public double DmgPct;       // median-of-medians dmg%
+        public double Iqrc;         // IQRC computed from median-of-median IQR / median dmg%
+        public double AvgTurns;     // mean-of-means turns
+        public double AvgPots;      // mean-of-means potions
+        public double DeathRate;    // mean-of-means death rate (0–100)
+    }
+
+    /// <summary>Computes the All row baseline values from per-character metrics.</summary>
+    private static AllRowBaselines ComputeAllRowBaselines(List<AllCharsPerCharMetrics> metrics)
+    {
+        if (metrics.Count == 0)
+            return new AllRowBaselines { DmgPct = 20, Iqrc = 1.0, AvgTurns = 3, AvgPots = 0.3, DeathRate = 10 };
+
+        double dmgPct = MedianOfDoubles(metrics.Select(m => m.DmgPctMedian).ToList());
+
+        var p25s = metrics.Where(m => m.IqrP25.HasValue).Select(m => m.IqrP25!.Value).ToList();
+        var p75s = metrics.Where(m => m.IqrP75.HasValue).Select(m => m.IqrP75!.Value).ToList();
+        double iqrc = 1.0;
+        if (p25s.Count > 0 && p75s.Count > 0 && dmgPct > 0)
+        {
+            double medP25 = MedianOfDoubles(p25s);
+            double medP75 = MedianOfDoubles(p75s);
+            iqrc = (medP75 - medP25) / dmgPct;
+        }
+
+        return new AllRowBaselines
+        {
+            DmgPct = dmgPct,
+            Iqrc = iqrc,
+            AvgTurns = metrics.Average(m => m.AvgTurns),
+            AvgPots = metrics.Average(m => m.AvgPots),
+            DeathRate = metrics.Average(m => m.DeathRate),
+        };
+    }
+
+    /// <summary>Data cells for a per-character row in the all-characters table. Shows
+    /// dmg% (damage / starting max HP) for the three damage columns. All columns are
+    /// colored against the All row baselines (high dmg/spread/turns/pots/deaths = bad).</summary>
+    private static void AppendAllCharsDataCells(StringBuilder sb, EncounterEvent stat, int startingHp,
+        AllRowBaselines baselines)
+    {
+        int n = stat.Fought;
+        var P = new ColumnPaddings();
+        if (n == 0 || startingHp <= 0)
+        {
+            AppendEmptyDataCells(sb);
+            return;
+        }
+
+        double deathRate = 100.0 * stat.Died / n;
+        double avgTurns  = (double)stat.TurnsTakenSum / n;
+        double avgPots   = (double)stat.PotionsUsedSum / n;
+
+        double? dmgPct = DmgPctMedian(stat, startingHp);
+        var iqrPct = DmgPctIQR(stat, startingHp);
+
+        // Fall back to mean dmg% if per-fight values not tracked
+        double displayDmgPct = dmgPct ?? (stat.DmgPctSum / n * 100.0);
+
+        string fDmgPct = $"{displayDmgPct:F0}%";
+        string fIqr = iqrPct.HasValue ? $"{iqrPct.Value.p25:F0}-{iqrPct.Value.p75:F0}%" : "-";
+        string fTurns = $"{avgTurns:F1}";
+        string fPots  = $"{avgPots:F1}";
+
+        var cN      = TooltipHelper.ColN($"{n}", n);
+        var cDmg    = ColBad(fDmgPct, displayDmgPct, n, baselines.DmgPct);
+        var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
+        var cSpread = FormatSpreadCell(iqrPct, displayDmgPct, n, baselines.Iqrc);
+        var cTurns  = ColBadRelative(fTurns, avgTurns, baselines.AvgTurns, n);
+        var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n);
+        var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, baselines.DeathRate);
+
+        sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
+        sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
+        sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
+        sb.Append($"[cell {P.Spread}][right]{cSpread}[/right][/cell]");
+        sb.Append($"[cell {P.Turns}][right]{cTurns}[/right][/cell]");
+        sb.Append($"[cell {P.Pots}][right]{cPots}[/right][/cell]");
+        sb.Append($"[cell {P.Deaths}][right]{cDeaths}[/right][/cell]");
+    }
+
+    /// <summary>Appends a full row of empty "-" data cells for the [table=8] layout.</summary>
+    private static void AppendEmptyDataCells(StringBuilder sb)
+    {
+        var P = new ColumnPaddings();
+        sb.Append(EmptyDataCell(P.Fought));
+        sb.Append(EmptyDataCell(P.Dmg));
+        sb.Append(EmptyDataCell(P.Mid50));
+        sb.Append(EmptyDataCell(P.Spread));
+        sb.Append(EmptyDataCell(P.Turns));
+        sb.Append(EmptyDataCell(P.Pots));
+        sb.Append(EmptyDataCell(P.Deaths));
     }
 
     /// <summary>FormatDeathsCell variant for the new table layout — no padding,

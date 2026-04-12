@@ -238,6 +238,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private VBoxContainer? _encounterList;
     private RichTextLabel? _statsLabel;
     private RichTextLabel? _statsTitleLabel;
+    // Split labels for the scrollable all-characters table. When in all-chars mode,
+    // _statsLabel is hidden and these three take over. _statsHeaderLabel and
+    // _statsBaselineLabel stay pinned; _statsCharRowsLabel scrolls inside _statsCharRowsClipper.
+    private RichTextLabel? _statsHeaderLabel;
+    private RichTextLabel? _statsCharRowsLabel;
+    private RichTextLabel? _statsBaselineLabel;
+    private RichTextLabel? _statsFooterLabel;
+    private Control? _statsCharRowsClipper;
     private NScrollableContainer? _bestiaryScrollContainer;
     private MarginContainer? _headerMarginContainer;
     private Control? _renderArea;
@@ -685,37 +693,44 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _legendButton = BuildLegendButton();
         titleRow.AddChild(_legendButton);
 
-        // Stats label uses the monospace font (the table is the only Kreon-exempt UI element).
-        _statsLabel = new RichTextLabel();
-        _statsLabel.BbcodeEnabled = true;
-        _statsLabel.FitContent = true;
-        _statsLabel.ScrollActive = false;
-        _statsLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        // ShrinkBegin so the label takes only what its content asks for; the outer
-        // statsBox's CustomMinimumSize pins the whole stats area to a constant
-        // height so preview-area height is identical across modes.
-        _statsLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
-        _statsLabel.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
-        _statsLabel.AddThemeFontSizeOverride("normal_font_size", 18);
-        _statsLabel.AddThemeFontSizeOverride("bold_font_size", 18);
-        // Negative line separation pulls rows closer together — the focused-view
-        // table has a lot of separator lines and sub-labels, and the default line
-        // spacing leaves them feeling airy. -6 px tightens the gap between every
-        // line (data, separator, sub-label) without letting the mono-font glyphs
-        // overlap. Also prevents bold rows from getting taller line height than
-        // regular rows (the original reason this override existed).
-        _statsLabel.AddThemeConstantOverride("line_separation", -6);
-        _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
-
+        // Stats label — used for focused-character and category views (non-scrollable).
         TooltipHelper.TryLoadModFonts();
-        var monoFont = TooltipHelper.GetMonoFont();
-        if (monoFont != null)
-        {
-            _statsLabel.AddThemeFontOverride("normal_font", monoFont);
-            var boldFont = TooltipHelper.GetMonoBoldFont();
-            if (boldFont != null) _statsLabel.AddThemeFontOverride("bold_font", boldFont);
-        }
+        _statsLabel = CreateStatsRichTextLabel();
+        _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
         statsVbox.AddChild(_statsLabel);
+
+        // All-characters scrollable layout: header (sticky) + character rows (scrollable) + baseline (sticky) + footer.
+        // These are hidden until the all-chars view is active.
+        _statsHeaderLabel = CreateStatsRichTextLabel();
+        _statsHeaderLabel.Visible = false;
+        statsVbox.AddChild(_statsHeaderLabel);
+
+        // Scrollable character rows: a clipped container holding the rows label.
+        // Uses the same pattern as the encounter list: the label lives inside a
+        // clipped Control that doesn't propagate the label's full height upward.
+        // FitContent is OFF so the label doesn't force a minimum size; instead we
+        // set the label's width to match the clipper and let it grow tall naturally.
+        _statsCharRowsClipper = new Control();
+        _statsCharRowsClipper.ClipContents = true;
+        _statsCharRowsClipper.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _statsCharRowsClipper.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _statsCharRowsClipper.MouseFilter = MouseFilterEnum.Stop;
+        _statsCharRowsClipper.Visible = false;
+        _statsCharRowsClipper.GuiInput += OnStatsCharRowsGuiInput;
+        statsVbox.AddChild(_statsCharRowsClipper);
+
+        _statsCharRowsLabel = CreateStatsRichTextLabel();
+        _statsCharRowsLabel.FitContent = false;  // prevent min-size propagation
+        _statsCharRowsLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        _statsCharRowsClipper.AddChild(_statsCharRowsLabel);
+
+        _statsBaselineLabel = CreateStatsRichTextLabel();
+        _statsBaselineLabel.Visible = false;
+        statsVbox.AddChild(_statsBaselineLabel);
+
+        _statsFooterLabel = CreateStatsRichTextLabel();
+        _statsFooterLabel.Visible = false;
+        statsVbox.AddChild(_statsFooterLabel);
 
         rightPanel.AddChild(new HSeparator());
 
@@ -978,6 +993,32 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             MainFile.Logger.Info("[SlayTheStats] Bestiary tutorial shown");
     }
 
+    // ───────────────────────── Stats label factory ─────────────────────────
+
+    /// <summary>Creates a RichTextLabel with the standard stats-table theme overrides
+    /// (mono font, line separation, BBCode, etc.). All stats labels share these settings.</summary>
+    private static RichTextLabel CreateStatsRichTextLabel()
+    {
+        var label = new RichTextLabel();
+        label.BbcodeEnabled = true;
+        label.FitContent = true;
+        label.ScrollActive = false;
+        label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        label.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        label.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+        label.AddThemeFontSizeOverride("normal_font_size", 18);
+        label.AddThemeFontSizeOverride("bold_font_size", 18);
+        label.AddThemeConstantOverride("line_separation", -6);
+        var monoFont = TooltipHelper.GetMonoFont();
+        if (monoFont != null)
+        {
+            label.AddThemeFontOverride("normal_font", monoFont);
+            var boldFont = TooltipHelper.GetMonoBoldFont();
+            if (boldFont != null) label.AddThemeFontOverride("bold_font", boldFont);
+        }
+        return label;
+    }
+
     // ───────────────────────── Column legend popup ─────────────────────────
 
     private Button BuildLegendButton()
@@ -1153,8 +1194,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _highlightTween?.Kill();
         _highlightTween = null;
 
-        if (_statsLabel != null)
-            _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
+        ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
         SetStatsTitle("");
         _hoveredEncounterId = null;
         // Rebuilding the list means any previously locked row's wrapper is being
@@ -2257,16 +2297,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, catBiome);
             double iqrcBaseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, catBiome);
 
-            statsText = EncounterTooltipHelper.BuildEncounterStatsText(
+            var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : "All";
+            SetStatsTitle($"{biomeName} {categoryLabel} Encounter Stats");
+
+            var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
                 combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                 filter.AscensionMin, filter.AscensionMax, categoryLabel,
                 filter: filter);
+            ShowAllCharsStats(parts);
 
-            var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : "All";
-            SetStatsTitle($"{biomeName} {categoryLabel} Encounter Stats");
+            ClearMonsterPreview();
+            return;
         }
 
-        _statsLabel.Text = statsText;
+        ShowSingleLabelStats(statsText);
 
         // Clear the monster preview area when hovering a category (no specific monsters to show)
         ClearMonsterPreview();
@@ -2281,8 +2325,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_lockedEncounterId != null || _lockedCategory != null) return;
         CancelPendingRender();
         SetStatsTitle("");
-        if (_statsLabel != null)
-            _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
+        ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
         ClearMonsterPreview();
     }
 
@@ -2382,8 +2425,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         else
         {
             SetStatsTitle("");
-            if (_statsLabel != null)
-                _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
+            ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
             ClearMonsterPreview();
         }
     }
@@ -2395,7 +2437,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap))
         {
             SetStatsTitle(EncounterCategory.FormatName(encounterId));
-            _statsLabel.Text = "[color=#606060]No data[/color]";
+            ShowSingleLabelStats("[color=#606060]No data[/color]");
             return;
         }
 
@@ -2460,7 +2502,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 category);
 
             SetStatsTitle($"{encounterName} Stats");
-            _statsLabel.Text = statsText;
+            ShowSingleLabelStats(statsText);
             return;
         }
         else
@@ -2473,17 +2515,25 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, encBiome);
             double iqrcBaseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, encBiome);
 
+            SetStatsTitle($"{EncounterCategory.FormatName(encounterId)} Stats");
+
             if (charStats.Count == 0)
-                statsText = EncounterTooltipHelper.NoDataText(null, filter.AscensionMin, filter.AscensionMax);
+            {
+                ShowSingleLabelStats(EncounterTooltipHelper.NoDataText(null, filter.AscensionMin, filter.AscensionMax));
+            }
             else
-                statsText = EncounterTooltipHelper.BuildEncounterStatsText(
+            {
+                var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
                     charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                     filter.AscensionMin, filter.AscensionMax, categoryLabel,
                     filter: filter);
+                ShowAllCharsStats(parts);
+            }
+            return;
         }
 
         SetStatsTitle($"{EncounterCategory.FormatName(encounterId)} Stats");
-        _statsLabel.Text = statsText;
+        ShowSingleLabelStats(statsText);
     }
 
     /// <summary>
@@ -2512,6 +2562,91 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_statsTitleLabel == null) return;
         _statsTitleLabel.Text = string.IsNullOrEmpty(title) ? "" : $"[b]{title}[/b]";
+    }
+
+    // ───────────────────── All-chars scrollable stats ─────────────────────
+
+    /// <summary>Current scroll offset (in pixels) for the all-characters stats table.
+    /// Reset to 0 when switching to a different encounter or mode.</summary>
+    private float _statsCharRowsScroll;
+
+    /// <summary>Switches the stats area to all-characters mode with scrollable character rows.
+    /// The header and baseline rows stay pinned; character rows scroll inside the clipper.</summary>
+    private void ShowAllCharsStats(EncounterTooltipHelper.AllCharsTableParts parts)
+    {
+        if (_statsLabel != null) _statsLabel.Visible = false;
+
+        if (_statsHeaderLabel != null) { _statsHeaderLabel.Text = parts.Header; _statsHeaderLabel.Visible = true; }
+        if (_statsCharRowsLabel != null)
+        {
+            _statsCharRowsLabel.Text = parts.CharacterRows;
+            // With FitContent off, manually size the label to match clipper width.
+            // Height will be set in the deferred scroll setup after layout settles.
+        }
+        if (_statsCharRowsClipper != null) _statsCharRowsClipper.Visible = true;
+        if (_statsBaselineLabel != null) { _statsBaselineLabel.Text = parts.BaselineRow; _statsBaselineLabel.Visible = true; }
+        if (_statsFooterLabel != null)
+        {
+            _statsFooterLabel.Text = parts.Footer;
+            _statsFooterLabel.Visible = parts.Footer.Length > 0;
+        }
+
+        _statsCharRowsScroll = 0;
+        // Defer scroll setup so Godot has processed the layout and clipper has its final size.
+        Godot.Callable.From(SetupStatsCharRowsLayout).CallDeferred();
+    }
+
+    /// <summary>Called deferred after layout to size the character rows label and apply scroll.</summary>
+    private void SetupStatsCharRowsLayout()
+    {
+        if (_statsCharRowsLabel == null || _statsCharRowsClipper == null) return;
+        // Set the label width to match the clipper so BBCode tables render at the right width.
+        float clipperWidth = _statsCharRowsClipper.Size.X;
+        _statsCharRowsLabel.Size = new Godot.Vector2(clipperWidth, _statsCharRowsLabel.GetContentHeight());
+        ApplyStatsCharRowsScroll();
+    }
+
+    /// <summary>Switches the stats area back to the single-label mode (focused/category views).</summary>
+    private void ShowSingleLabelStats(string text)
+    {
+        if (_statsLabel != null) { _statsLabel.Text = text; _statsLabel.Visible = true; }
+        if (_statsHeaderLabel != null) _statsHeaderLabel.Visible = false;
+        if (_statsCharRowsClipper != null) _statsCharRowsClipper.Visible = false;
+        if (_statsBaselineLabel != null) _statsBaselineLabel.Visible = false;
+        if (_statsFooterLabel != null) _statsFooterLabel.Visible = false;
+    }
+
+    /// <summary>Applies the current scroll offset to the character rows label inside the clipper.</summary>
+    private void ApplyStatsCharRowsScroll()
+    {
+        if (_statsCharRowsLabel == null || _statsCharRowsClipper == null) return;
+
+        // Clamp scroll: 0 = top, maxScroll = bottom.
+        float contentHeight = _statsCharRowsLabel.GetContentHeight();
+        float clipperHeight = _statsCharRowsClipper.Size.Y;
+        float maxScroll = Math.Max(0, contentHeight - clipperHeight);
+        _statsCharRowsScroll = Math.Clamp(_statsCharRowsScroll, 0, maxScroll);
+
+        _statsCharRowsLabel.Position = new Godot.Vector2(0, -_statsCharRowsScroll);
+    }
+
+    /// <summary>Handles mouse wheel scroll on the all-characters stats area.</summary>
+    private void OnStatsCharRowsGuiInput(Godot.InputEvent @event)
+    {
+        if (@event is Godot.InputEventMouseButton mb && mb.Pressed)
+        {
+            const float scrollStep = 30f;
+            if (mb.ButtonIndex == Godot.MouseButton.WheelUp)
+            {
+                _statsCharRowsScroll -= scrollStep;
+                ApplyStatsCharRowsScroll();
+            }
+            else if (mb.ButtonIndex == Godot.MouseButton.WheelDown)
+            {
+                _statsCharRowsScroll += scrollStep;
+                ApplyStatsCharRowsScroll();
+            }
+        }
     }
 
     // ───────────────────────── Monster Preview ─────────────────────────

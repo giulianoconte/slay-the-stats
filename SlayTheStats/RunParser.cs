@@ -127,6 +127,28 @@ public static class RunParser
             return;
         }
 
+        // Extract starting max HP from floor 0: max_hp - max_hp_gained + max_hp_lost
+        // (before Neow relic bonuses). Only update if not already known for this character.
+        if (actArray.Count > 0)
+        {
+            var firstActFloors = actArray[0]?.AsArray();
+            if (firstActFloors is { Count: > 0 })
+            {
+                var floor0Ps = firstActFloors[0]?["player_stats"]?[0];
+                if (floor0Ps != null)
+                {
+                    var maxHpFloor0   = floor0Ps["max_hp"]?.GetValue<int>();
+                    var maxHpGained   = floor0Ps["max_hp_gained"]?.GetValue<int>() ?? 0;
+                    var maxHpLost     = floor0Ps["max_hp_lost"]?.GetValue<int>() ?? 0;
+                    if (maxHpFloor0.HasValue)
+                    {
+                        int startingHp = maxHpFloor0.Value - maxHpGained + maxHpLost;
+                        db.CharacterStartingHp[character] = startingHp;
+                    }
+                }
+            }
+        }
+
         // Build cumulative floor counts per act so deck cards can be assigned an act
         // based on their floor_added_to_deck value.
         int cumulativeFloors = 0;

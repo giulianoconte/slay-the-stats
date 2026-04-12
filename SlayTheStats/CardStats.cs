@@ -87,7 +87,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 2; // bumped from 1: added EncounterEvent.DamageValues
+    public const int CurrentSchemaVersion = 3; // bumped from 2: added CharacterStartingHp
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
@@ -111,6 +111,12 @@ public class StatsDb
     [JsonPropertyName("highest_won_ascensions")] public Dictionary<string, int> HighestWonAscensions { get; set; } = new();
     [JsonPropertyName("encounters")]      public Dictionary<string, Dictionary<string, EncounterEvent>> Encounters     { get; set; } = new();
     [JsonPropertyName("encounter_meta")]  public Dictionary<string, EncounterMeta>                      EncounterMeta  { get; set; } = new();
+    /// <summary>
+    /// Starting max HP per character ID, derived from floor 0 of parsed runs:
+    /// max_hp - max_hp_gained + max_hp_lost (i.e. before Neow relic bonuses).
+    /// Used to normalize damage values into Dmg% for cross-character comparison.
+    /// </summary>
+    [JsonPropertyName("character_starting_hp")] public Dictionary<string, int> CharacterStartingHp { get; set; } = new();
     public static StatsDb Load(string path, Action<string>? warn = null)
     {
         try
@@ -170,6 +176,7 @@ public class StatsDb
         HighestWonAscensions.Clear();
         Encounters.Clear();
         EncounterMeta.Clear();
+        CharacterStartingHp.Clear();
     }
 
     public CharacterStat GetOrCreateCharacter(string character, string gameMode)
