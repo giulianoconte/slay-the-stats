@@ -217,6 +217,17 @@ internal class SlayTheStatsConfig : SimpleModConfig
         _ => false,
     };
 
+    // ── Bestiary view state (persisted across sessions) ──────────────────────
+    // These remember the player's last bestiary configuration so subsequent
+    // opens restore their preferred view. All hidden from BaseLib's UI.
+
+    [ConfigHideInUI] public static string BestiarySelectedBiome { get; set; } = "";
+    [ConfigHideInUI] public static string BestiarySortMode { get; set; } = "Name";
+    [ConfigHideInUI] public static bool BestiarySortDescending { get; set; } = false;
+    /// <summary>Empty = all characters; otherwise a CHARACTER.* id.</summary>
+    [ConfigHideInUI] public static string BestiarySortCharacter { get; set; } = "";
+    [ConfigHideInUI] public static bool BestiarySortBySignificance { get; set; } = false;
+
     // ── Filter sanitisation ─────────────────────────────────────────────────
     //
     // Older builds + manual cfg edits could leave the filter properties in a state that

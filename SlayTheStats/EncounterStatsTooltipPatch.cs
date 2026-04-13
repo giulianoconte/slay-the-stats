@@ -658,12 +658,12 @@ internal static class EncounterStatsHover
         label.MouseFilter         = Control.MouseFilterEnum.Ignore;
         label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
 
-        var monoFont = TooltipHelper.GetMonoFont();
-        if (monoFont != null)
+        var tableFont = TooltipHelper.GetKreonFont();
+        if (tableFont != null)
         {
-            label.AddThemeFontOverride("normal_font", monoFont);
-            var monoBold = TooltipHelper.GetMonoBoldFont();
-            if (monoBold != null) label.AddThemeFontOverride("bold_font", monoBold);
+            label.AddThemeFontOverride("normal_font", tableFont);
+            var tableBold = TooltipHelper.GetKreonBoldFont();
+            if (tableBold != null) label.AddThemeFontOverride("bold_font", tableBold);
         }
         label.AddThemeFontSizeOverride("normal_font_size", 18);
         label.AddThemeFontSizeOverride("bold_font_size", 18);

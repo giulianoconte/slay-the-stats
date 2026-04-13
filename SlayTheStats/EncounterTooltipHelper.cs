@@ -146,19 +146,6 @@ public static class EncounterTooltipHelper
             AppendEmptyDataCells(body, wide: true);
         }
 
-        // DEBUG: 20 fake character rows to test scrollable layout. Remove before release.
-        for (int i = 1; i <= 20; i++)
-        {
-            // Cycle through real character entries for plausible data
-            if (charEntries.Count > 0)
-            {
-                var (_, stat, startingHp, _) = charEntries[i % charEntries.Count];
-                var fakeDesc = $"{KreonBoldFontTag}Fake Char {i}[/font]";
-                AppendDescriptorCell(body, fakeDesc);
-                AppendAllCharsDataCells(body, stat, startingHp, allBaseline);
-            }
-        }
-
         body.Append("[/table]");
 
         // --- Baseline (All) row table ---
@@ -189,8 +176,9 @@ public static class EncounterTooltipHelper
         };
     }
 
-    /// <summary>Convenience wrapper that concatenates all parts into a single string.
-    /// Used by callers that don't need scrollable layout (e.g. category hover).</summary>
+    /// <summary>Builds the all-characters encounter stats as a single [table=8] block.
+    /// All rows (header, per-character, baseline) share one table so columns align.
+    /// Used by surfaces that don't need a scrollable split layout.</summary>
     internal static string BuildEncounterStatsText(
         Dictionary<string, EncounterEvent> charStats,
         double deathRateBaseline,
@@ -202,14 +190,89 @@ public static class EncounterTooltipHelper
         AggregationFilter? filter = null,
         string? characterLabel = null)
     {
-        var parts = BuildEncounterStatsTextParts(charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
-            ascensionMin, ascensionMax, categoryLabel, filter, characterLabel);
+        var startingHps = MainFile.Db.CharacterStartingHp;
+
+        // --- Pass 1: collect per-character metrics for the All (baseline) row ---
+        var perCharMetrics = new List<AllCharsPerCharMetrics>();
+        var charEntries = new List<(string charId, EncounterEvent stat, int startingHp, string descriptor)>();
+        var emptyEntries = new List<string>();
+        int totalFought = 0, totalDied = 0;
+
+        var rendered = new HashSet<string>();
+        foreach (var (charId, label) in CharacterOrder)
+        {
+            rendered.Add(charId);
+            var icon = CharacterIcon(charId, 30);
+            var descriptor = $"{icon}{KreonBoldFontTag}{label}[/font]";
+            if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
+            {
+                int startingHp = startingHps.GetValueOrDefault(charId, 0);
+                CollectPerCharMetrics(perCharMetrics, stat, startingHp);
+                charEntries.Add((charId, stat, startingHp, descriptor));
+                totalFought += stat.Fought;
+                totalDied += stat.Died;
+            }
+            else
+                emptyEntries.Add(descriptor);
+        }
+        foreach (var (charId, stat) in charStats.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            if (rendered.Contains(charId) || stat.Fought == 0) continue;
+            var icon = CharacterIcon(charId, 30);
+            var label = FormatUnknownCharLabel(charId);
+            int startingHp = startingHps.GetValueOrDefault(charId, 0);
+            CollectPerCharMetrics(perCharMetrics, stat, startingHp);
+            charEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/font]"));
+            totalFought += stat.Fought;
+            totalDied += stat.Died;
+        }
+
+        var allBaseline = ComputeAllRowBaselines(perCharMetrics);
+
+        // --- Single [table=8]: header + char rows + baseline ---
+        var WP = new WideColumnPaddings();
         var sb = new StringBuilder();
-        sb.Append(parts.Header);
-        sb.Append(parts.CharacterRows);
-        sb.Append(parts.BaselineRow);
-        if (parts.Footer.Length > 0)
-            sb.Append($"\n{parts.Footer}");
+        sb.Append("[table=8]");
+
+        // Header row
+        AppendDescriptorCell(sb, " ", isHeader: true);
+        AppendHeaderCell(sb, "Fought", WP.Fought);
+        AppendHeaderCell(sb, "Dmg%",    WP.Dmg);
+        AppendHeaderCell(sb, "Mid 50%", WP.Mid50);
+        AppendHeaderCell(sb, "Spread",  WP.Spread);
+        AppendHeaderCell(sb, "Turns",   WP.Turns);
+        AppendHeaderCell(sb, "Potions", WP.Pots);
+        AppendHeaderCell(sb, "Deaths",  WP.Deaths);
+
+        // Character data rows
+        foreach (var (charId, stat, startingHp, descriptor) in charEntries)
+        {
+            AppendDescriptorCell(sb, descriptor);
+            AppendAllCharsDataCells(sb, stat, startingHp, allBaseline);
+        }
+        foreach (var descriptor in emptyEntries)
+        {
+            AppendDescriptorCell(sb, descriptor);
+            AppendEmptyDataCells(sb, wide: true);
+        }
+
+        // Baseline (All) row
+        var allIcon = AllCharsIcon(22);
+        AppendDescriptorCell(sb, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)");
+        if (perCharMetrics.Count > 0)
+            AppendAllRowFromPerCharMetrics(sb, perCharMetrics, totalFought, totalDied);
+        else
+            AppendEmptyDataCells(sb, wide: true);
+
+        sb.Append("[/table]");
+
+        // Footer
+        var filterCtx = filter != null
+            ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
+            : "";
+        if (filterCtx.Length > 0)
+            sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+
         return sb.ToString();
     }
 
@@ -234,6 +297,11 @@ public static class EncounterTooltipHelper
     private const string KreonRegClose    = "[/font_size][/font]";
     private const string KreonBoldFontTag = "[font=res://themes/kreon_bold_glyph_space_one.tres]";
     private const string HeaderColor      = "#8e8676";  // dim warm grey for column headers
+    // Minimum baseline for potion coloration. Prevents extreme colors from tiny
+    // absolute differences (e.g. 0.2 vs 0.5 pots/fight = 250% of baseline).
+    // With a floor of 0.5, the ratio can't exceed 2x until the encounter actually
+    // consumes >1 potion/fight on average.
+    private const double PotionBaselineFloor = 0.5;
     // Per-cell padding controls inter-column gaps. Godot [cell padding] format
     // is `left,top,right,bottom`. Adjacent cells' right + left pad sum to the
     // visual gap. Three tiers of tightness:
@@ -245,8 +313,8 @@ public static class EncounterTooltipHelper
     private const string NormalCellPadding      = "padding=8,0,8,0";   // between groups
     private const string DescriptorCellPadding  = "padding=0,0,8,0";   // descriptor → Fought
     // Wider padding for the all-characters table — character icons + "%" suffixes need more room.
-    private const string WideNormalCellPadding   = "padding=12,0,12,0";
-    private const string WideTightCellPadding    = "padding=6,0,6,0";
+    private const string WideNormalCellPadding   = "padding=18,0,18,0";
+    private const string WideTightCellPadding    = "padding=12,0,12,0";
 
     /// <summary>Per-column padding assignments so each cell-emitter picks the
     /// right tier without hard-coding padding strings inline.</summary>
@@ -263,16 +331,19 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>Wider padding for the all-characters table where character icons and
-    /// "%" suffixes on damage columns make the rows wider.</summary>
+    /// "%" suffixes on damage columns make the rows wider. Includes expand=1 on every
+    /// data column so all three independent [table=8] RichTextLabels (header, character
+    /// rows, baseline) allocate the same proportional column widths regardless of
+    /// content differences.</summary>
     private struct WideColumnPaddings
     {
-        public readonly string Fought = WideNormalCellPadding;
-        public readonly string Dmg    = WideTightCellPadding;
-        public readonly string Mid50  = WideTightCellPadding;
-        public readonly string Spread = WideNormalCellPadding;
-        public readonly string Turns  = WideTightCellPadding;
-        public readonly string Pots   = WideTightCellPadding;
-        public readonly string Deaths = WideTightCellPadding;
+        public readonly string Fought = $"expand=1 {WideNormalCellPadding}";
+        public readonly string Dmg    = $"expand=1 {WideTightCellPadding}";
+        public readonly string Mid50  = $"expand=1 {WideTightCellPadding}";
+        public readonly string Spread = $"expand=1 {WideNormalCellPadding}";
+        public readonly string Turns  = $"expand=1 {WideTightCellPadding}";
+        public readonly string Pots   = $"expand=1 {WideTightCellPadding}";
+        public readonly string Deaths = $"expand=1 {WideTightCellPadding}";
         public WideColumnPaddings() {}
     }
 
@@ -292,11 +363,12 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell expand=3 {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
     }
 
-    /// <summary>Column header cell. Kreon, muted, right-aligned within the cell
-    /// so the header sits over right-aligned numbers in the same column.</summary>
+    /// <summary>Column header cell. Uses the same monospace font as data cells (via
+    /// the RichTextLabel's theme override) so auto-sized column widths align with
+    /// the data rows below. Right-aligned to sit over right-aligned numbers.</summary>
     private static void AppendHeaderCell(StringBuilder sb, string name, string padding = NormalCellPadding)
     {
-        sb.Append($"[cell {padding}][right]{KreonRegFontTag}[color={HeaderColor}]{name}[/color]{KreonRegClose}[/right][/cell]");
+        sb.Append($"[cell {padding}][right][color={HeaderColor}]{name}[/color][/right][/cell]");
     }
 
     /// <summary>Row 1 (subject encounter) data cells. Colored against the
@@ -331,11 +403,11 @@ public static class EncounterTooltipHelper
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread  = FormatSpreadCell(iqr, dmgMedian, n, iqrcBase);
         var cTurns   = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBase, n);
-        var cPots    = ColBadRelative($"{avgPots:F1}", avgPots, potsBase, n);
+        var cPots    = ColBadRelative($"{avgPots:F1}", avgPots, potsBase, n, PotionBaselineFloor);
         var cDeaths  = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBase);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
-       
+
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
         sb.Append($"[cell {P.Spread}][right]{cSpread}[/right][/cell]");
@@ -376,11 +448,11 @@ public static class EncounterTooltipHelper
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread  = FormatSpreadCell(subject.IQR, subject.Median, n, iqrcBase);
         var cTurns   = ColBadRelative($"{subject.AvgTurns:F1}", subject.AvgTurns, turnsBase, n);
-        var cPots    = ColBadRelative($"{subject.AvgPots:F1}", subject.AvgPots, potsBase, n);
+        var cPots    = ColBadRelative($"{subject.AvgPots:F1}", subject.AvgPots, potsBase, n, PotionBaselineFloor);
         var cDeaths  = FormatDeathsCellInner(subject.Died, n, subject.DeathRate, deathRateBase);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
-       
+
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
         sb.Append($"[cell {P.Spread}][right]{cSpread}[/right][/cell]");
@@ -629,7 +701,7 @@ public static class EncounterTooltipHelper
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread = FormatSpreadCell(iqrPct, displayDmgPct, n, baselines.Iqrc);
         var cTurns  = ColBadRelative(fTurns, avgTurns, baselines.AvgTurns, n);
-        var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n);
+        var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n, PotionBaselineFloor);
         var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, baselines.DeathRate);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
@@ -691,31 +763,6 @@ public static class EncounterTooltipHelper
         "event"  => "events",
         _        => categoryLower + "s",
     };
-    // Horizontal separator between sections in focused mode. 51 box-drawing chars span the
-    // data row content width (with the new wider columns). Dim colour so it doesn't compete.
-    private static readonly string SectionSeparator =
-        $"  [color=#505050]{new string('─', 51)}[/color]";
-
-    // Two-line column header for focused-character views with descriptive labels.
-    //   Line 1:          median   middle 50%
-    //   Line 2:  Fought  damage   damage range  turns  potions  deaths
-    // Column widths: Fought(6) | damage(6) | range(12) | turns(5) | potions(7) | deaths(7)
-    // Two-space separators between columns for breathing room.
-    private static string FocusedColumnHeader()
-    {
-        // Render the two header lines in Kreon (proportional) rather than the
-        // table's monospace font. Proportional Kreon words are considerably
-        // narrower than the old mono padding, which shrinks the overall header
-        // strip — the data columns underneath still align with each other in
-        // monospace, and the header words are positioned roughly above their
-        // columns via a small amount of manual leading whitespace.
-        const string Open  = "[font=res://themes/kreon_regular_glyph_space_one.tres][color=#9a9484]";
-        const string Close = "[/color][/font]";
-        var sb = new StringBuilder();
-        sb.Append($"{Open}                median     middle 50%{Close}\n");
-        sb.Append($"{Open}       Fought   damage    damage range    turns   potions   deaths{Close}\n");
-        return sb.ToString();
-    }
 
     /// <summary>Returns just the inline character icon BBCode at a given size, without the
     /// trailing name. Returns empty string when the character has no recognised icon.</summary>
@@ -834,7 +881,7 @@ public static class EncounterTooltipHelper
         AppendDescriptorCell(sb, $"{charIcon}vs {encNameRow1}");
         AppendRow1DataCells(sb, encounterStat, medianBase, iqrcBase, deathRateBase, turnsBase, potsBase);
 
-        // Row 2: act + category pool baseline
+        // Row 2: act + category pool baseline — plain text (no coloring on context rows)
         if (poolAct.HasValue && actLabel != null)
         {
             AppendDescriptorCell(sb, $"{charIcon}vs {actLabel} {PluralizeCategory(catLower)} (baseline)");
@@ -860,20 +907,6 @@ public static class EncounterTooltipHelper
         return sb.ToString();
     }
 
-    /// <summary>Appends a horizontal section separator on its own line, no extra blank
-    /// lines (the line height of the separator itself provides the visual breathing room).</summary>
-    private static void AppendSectionSeparator(StringBuilder sb)
-    {
-        sb.Append(SectionSeparator);
-        sb.Append('\n');
-    }
-
-    /// <summary>Previously added a blank line above the all-chars separator; row 4 now
-    /// sits flush with the rest of the table (no extra vertical gap) per the tighter
-    /// spacing pass. Kept as a thin alias for the call sites.</summary>
-    private static void AppendSectionSeparatorWithExtraSpace(StringBuilder sb)
-        => AppendSectionSeparator(sb);
-
     /// <summary>
     /// Builds category-level stats for a focused single-character view. Same section
     /// layout as encounter view but without the encounter row; bottom row is all-chars
@@ -886,22 +919,24 @@ public static class EncounterTooltipHelper
         string characterId,
         string? biomeLabel,
         string categoryLabel,
-        AggregationFilter filter)
+        AggregationFilter filter,
+        string? category = null)
     {
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
         var catLower = categoryLabel.ToLowerInvariant();
+        var catColor = category != null ? EncounterIcons.CategoryColorHex(category) : null;
 
         sb.Append("[table=8]");
 
         // Header row
         AppendDescriptorCell(sb, " ", isHeader: true);
         AppendHeaderCell(sb, "Fought", NormalCellPadding);
-       
+
         AppendHeaderCell(sb, "Dmg",     TightCellPadding);
         AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
         AppendHeaderCell(sb, "Spread",  NormalCellPadding);
-       
+
         AppendHeaderCell(sb, "Turns",   TightCellPadding);
         AppendHeaderCell(sb, "Potions", TightCellPadding);
         AppendHeaderCell(sb, "Deaths",  NormalCellPadding);
@@ -913,9 +948,14 @@ public static class EncounterTooltipHelper
         {
             // Specific biome or act: 3 rows.
             // Row 1 (colored): this char, scoped to biome/act — colored vs char's all-acts pool.
-            // The biome/act name is bold + highlighted so the scope stands out in the descriptor.
-            var boldBiome = $"{KreonBoldFontTag}[color=#d4c9a8]{biomeLabel}[/color][/font]";
-            AppendDescriptorCell(sb, $"{charIcon}vs {boldBiome} {catPlural}");
+            // The biome/act name is bold + category-colored so the scope stands out.
+            var biomeColored = catColor != null
+                ? $"{KreonBoldFontTag}[color={catColor}]{biomeLabel}[/color][/font]"
+                : $"{KreonBoldFontTag}{biomeLabel}[/font]";
+            var catPluralColored = catColor != null
+                ? $"{KreonBoldFontTag}[color={catColor}]{catPlural}[/color][/font]"
+                : catPlural;
+            AppendDescriptorCell(sb, $"{charIcon}vs {biomeColored} {catPluralColored}");
             AppendRow1PoolDataCells(sb, poolBiome, poolAll);
 
             // Row 2 (neutral baseline): this char, all acts
@@ -971,90 +1011,18 @@ public static class EncounterTooltipHelper
     /// thresholds in <see cref="TooltipHelper.ColWR"/> trigger meaningfully on small
     /// absolute differences. Falls back to neutral grey when the baseline is zero.
     /// </summary>
-    private static string ColBadRelative(string text, double value, double baseline, int n)
+    /// <param name="baselineFloor">Minimum baseline value. When the actual baseline
+    /// is below this, the floor is used instead — preventing extreme color ratios
+    /// from tiny absolute differences (e.g. 0.2 vs 0.5 potions).</param>
+    private static string ColBadRelative(string text, double value, double baseline, int n,
+        double baselineFloor = 0)
     {
-        if (baseline <= 0) return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
-        double pctOfBaseline = value / baseline * 100.0;
+        if (baseline <= 0 && baselineFloor <= 0)
+            return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
+        double effectiveBaseline = Math.Max(baseline, baselineFloor);
+        double pctOfBaseline = value / effectiveBaseline * 100.0;
         return ColBad(text, pctOfBaseline, n, 100.0);
     }
-
-    /// <summary>Data row from an encounter-weighted PoolMetrics in a section color.
-    /// Each metric is already an average across per-encounter values.</summary>
-    private static string FormatPoolDataRow(PoolMetrics m, string color)
-    {
-        int n = m.Fought;
-        string fIqr = m.IQR.HasValue
-            ? $"{m.IQR.Value.p25:F0}-{m.IQR.Value.p75:F0}"
-            : "-";
-        var fDmg    = $"{m.Median:F0}";
-        var fTurns  = $"{m.AvgTurns:F1}";
-        var fPots   = $"{m.AvgPots:F1}";
-        var fDeaths = $"{m.Died}/{n}";
-        var pad     = new string(' ', Math.Max(0, 7 - fDeaths.Length));
-
-        return $"  [color={color}]{n,6}  {fDmg,6}  {fIqr,-12}  {fTurns,5}  {fPots,7}  {pad}{fDeaths}[/color]";
-    }
-
-    /// <summary>Sub-label in Kreon font with optional section color. Null color uses default dim grey.
-    /// Proportional font (not monospace) since the sub-labels don't need to align with column data.</summary>
-    private static string SubLabel(string text, string? color)
-        => $"[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=15][color={color ?? "#787878"}]{text}[/color][/font_size][/font]";
-
-    /// <summary>Data row with coloration (no label column). Used for the focused encounter row.
-    /// Column widths: Fought(6) | dmg(6) | IQR(12) | Turns(5) | Pots(7) | Deaths(7).
-    /// Two-space separators between columns. All metric cells are colored against the
-    /// pool baselines via ColBadRelative (high = bad, low = good).</summary>
-    private static string FormatDataRow(EncounterEvent stat,
-        double medianBase, double iqrcBase, double deathRateBase, double turnsBase, double potsBase)
-    {
-        int n = stat.Fought;
-        double deathRate = 100.0 * stat.Died / n;
-        double avgTurns  = (double)stat.TurnsTakenSum / n;
-        double avgPots   = (double)stat.PotionsUsedSum / n;
-        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
-        var iqr = stat.DamageIQR();
-        string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
-
-        var fDmg   = $"{dmgMedian:F0}";
-        var fTurns = $"{avgTurns:F1}";
-        var fPots  = $"{avgPots:F1}";
-
-        var cN      = TooltipHelper.ColN($"{n,6}", n);
-        var cDmg    = ColBadRelative($"{fDmg,6}", dmgMedian, medianBase, n);
-        var cIqr    = FormatIqrCell(fIqr, iqr, dmgMedian, n, iqrcBase, width: 12, leftAlign: true);
-        var cTurns  = ColBadRelative($"{fTurns,5}", avgTurns, turnsBase, n);
-        var cPots   = ColBadRelative($"{fPots,7}", avgPots, potsBase, n);
-        var cDeaths = FormatDeathsCell(stat.Died, n, deathRate, deathRateBase);
-
-        return $"  {cN}  {cDmg}  {cIqr}  {cTurns}  {cPots}  {cDeaths}";
-    }
-
-    /// <summary>Data row in a section color (no label column). Used for context/pool rows.
-    /// Column widths: Fought(6) | dmg(6) | IQR(12) | Turns(5) | Pots(7) | Deaths(7).</summary>
-    private static string FormatSectionDataRow(EncounterEvent stat, string color)
-    {
-        int n = stat.Fought;
-        double avgTurns = (double)stat.TurnsTakenSum / n;
-        double avgPots  = (double)stat.PotionsUsedSum / n;
-        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
-        var iqr = stat.DamageIQR();
-        string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
-        var fDmg    = $"{dmgMedian:F0}";
-        var fTurns  = $"{avgTurns:F1}";
-        var fPots   = $"{avgPots:F1}";
-        var fDeaths = $"{stat.Died}/{n}";
-        var pad     = new string(' ', Math.Max(0, 7 - fDeaths.Length));
-
-        return $"  [color={color}]{n,6}  {fDmg,6}  {fIqr,-12}  {fTurns,5}  {fPots,7}  {pad}{fDeaths}[/color]";
-    }
-
-    /// <summary>Empty data row with dashes in a section color.</summary>
-    private static string FormatEmptySectionDataRow(string color)
-        => $"  [color={color}]{"-",6}  {"-",6}  {"-",-12}  {"-",5}  {"-",7}  {"-",7}[/color]";
-
-    /// <summary>Empty data row with dashes (no label column, default neutral).</summary>
-    private static string FormatEmptyDataRow()
-        => FormatEmptySectionDataRow(ContextRowDataColor);
 
     /// <summary>
     /// Builds encounter stats text with a single row (no character breakdown).
@@ -1075,6 +1043,10 @@ public static class EncounterTooltipHelper
     /// line, matching the card / relic tooltip footer format. Every active filter
     /// (asc range, character, version range, profile) is visible even at default
     /// values like A0-20.</param>
+    // Column padding for the in-combat encounter [table=5]. expand=1 distributes
+    // leftover width so columns span the full tooltip panel.
+    private const string CombatCellPadding = "expand=1 padding=10,0,10,0";
+
     internal static string BuildEncounterStatsTextSingleRow(
         EncounterEvent stat,
         double deathRateBaseline,
@@ -1087,20 +1059,24 @@ public static class EncounterTooltipHelper
     {
         var sb = new StringBuilder();
 
-        // Header — column widths align with FormatRowCombat:
-        //   N(4)  Dmg(5)  Mid50%(9)  Turns(5)  Deaths(7)
-        sb.Append("   N   Dmg   Mid 50% Turns  Deaths\n");
+        sb.Append("[table=5]");
+        // Header row
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]N[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Dmg[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Mid 50%[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Turns[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Deaths[/color][/right][/cell]");
 
         if (stat.Fought > 0)
-            sb.Append(FormatRowCombat(stat, deathRateBaseline, dmgPctBaseline, iqrcBaseline));
+            AppendCombatDataCells(sb, stat, deathRateBaseline, dmgPctBaseline, iqrcBaseline);
         else
-            sb.Append($"[color={TooltipHelper.NeutralShade}]No data[/color]");
+        {
+            for (int i = 0; i < 5; i++)
+                sb.Append($"[cell {CombatCellPadding}][right][color={TooltipHelper.NeutralShade}]-[/color][/right][/cell]");
+        }
+        sb.Append("[/table]");
 
-        // Footer — line 1 is the absolute-damage baseline
-        // ("Baseline {category} pool dmg: X.X"). Line 2 is the filter
-        // context — asc · char · version · profile, separator is the
-        // interpunct (U+00B7). Segments collapse/disappear per the rules
-        // in CardHoverShowPatch.BuildFilterContext.
+        // Footer — baseline + filter context
         var baselineDmgAbs = $"{dmgBaseline:F1}";
         var charLabel = character != null
             ? CardHoverShowPatch.GetCharacterDisplay(character)
@@ -1115,130 +1091,45 @@ public static class EncounterTooltipHelper
         return sb.ToString();
     }
 
+    /// <summary>Appends 5 data cells for the in-combat encounter table: N | Dmg | Mid 50% | Turns | Deaths.</summary>
+    private static void AppendCombatDataCells(StringBuilder sb, EncounterEvent stat,
+        double deathRateBaseline, double dmgPctBaseline, double iqrcBaseline)
+    {
+        int n = stat.Fought;
+        double deathRate = 100.0 * stat.Died / n;
+        double avgTurns  = (double)stat.TurnsTakenSum / n;
+        double avgDmgPct = stat.DmgPctSum / n * 100.0;
+        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
+        var iqr = stat.DamageIQR();
+        string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
+
+        var cN      = TooltipHelper.ColN($"{n}", n);
+        var cDmg    = ColBad($"{dmgMedian:F0}", avgDmgPct, n, dmgPctBaseline);
+        var cIqr    = FormatIqrCellInner(fIqr, iqr, dmgMedian, n, iqrcBaseline);
+        var cTurns  = $"[color={TooltipHelper.NeutralShade}]{avgTurns:F1}[/color]";
+        var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBaseline);
+
+        sb.Append($"[cell {CombatCellPadding}][right]{cN}[/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right]{cDmg}[/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right]{cIqr}[/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right]{cTurns}[/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right]{cDeaths}[/right][/cell]");
+    }
+
+    /// <summary>IQR cell content without padding — just the colored text for use inside [cell] tags.</summary>
+    private static string FormatIqrCellInner(string formattedIqr, (double p25, double p75)? iqr, double? median, int n, double iqrcBaseline)
+    {
+        if (!iqr.HasValue || median == null || median.Value <= 0)
+            return $"[color={TooltipHelper.NeutralShade}]{formattedIqr}[/color]";
+        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
+        return ColBad(formattedIqr, iqrc * 100, n, iqrcBaseline * 100);
+    }
+
     internal static string NoDataText(string? characterLabel, int? ascensionMin, int? ascensionMax)
     {
         var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
         var label = characterLabel ?? "All chars";
         return $"[color={TooltipHelper.NeutralShade}]No encounter data\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16]{ascPrefix}{label}[/font_size][/font][/color]";
-    }
-
-    /// <summary>
-    /// Bestiary multi-row formatter — 6 columns:
-    ///   N | Dmg (median) | Mid 50% (p25-p75) | Turns | Pots | Deaths
-    ///
-    /// Dmg uses ColBad against the dmg-pct baseline. Mid 50% uses ColBad against the
-    /// IQRC baseline (high IQRC = swingy = bad). Deaths colors the *numerator* (died)
-    /// by ColBad against death-rate baseline; *denominator* (fought) by ColN for
-    /// confidence.
-    ///
-    /// When DamageValues is null (old db that predates per-fight tracking), falls back
-    /// to the mean (DamageTakenSum / Fought) so nothing breaks on upgrade.
-    /// </summary>
-    private static string FormatRow(string label, EncounterEvent stat, double deathRateBaseline, double dmgPctBaseline, double iqrcBaseline)
-    {
-        int n = stat.Fought;
-
-        double deathRate = 100.0 * stat.Died / n;
-        double avgTurns  = (double)stat.TurnsTakenSum / n;
-        double avgPots   = (double)stat.PotionsUsedSum / n;
-        double avgDmgPct = stat.DmgPctSum / n * 100.0;
-
-        // Median damage. Fall back to mean if per-fight values not yet tracked.
-        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
-
-        // IQR: p25-p75. Empty string if not enough data for a meaningful IQR.
-        var iqr = stat.DamageIQR();
-        string fIqr = iqr.HasValue
-            ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}"
-            : "-";
-
-        var fDmg   = $"{dmgMedian:F0}";
-        var fTurns = $"{avgTurns:F1}";
-        var fPots  = $"{avgPots:F1}";
-
-        var cN      = TooltipHelper.ColN($"{n,4}", n);
-        var cDmg    = ColBad($"{fDmg,5}", avgDmgPct, n, dmgPctBaseline);
-        var cIqr    = FormatIqrCell(fIqr, iqr, dmgMedian, n, iqrcBaseline);
-        var cTurns  = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
-        var cPots   = $"[color={TooltipHelper.NeutralShade}]{fPots,5}[/color]";
-        var cDeaths = FormatDeathsCell(stat.Died, n, deathRate, deathRateBaseline);
-
-        return $"{label} {cN} {cDmg} {cIqr} {cTurns} {cPots} {cDeaths}";
-    }
-
-    /// <summary>
-    /// In-combat single-row formatter — 5 columns: N | Dmg (median) | Mid 50% (IQR) |
-    /// Turns | Deaths (drops Pots vs FormatRow, plus the per-character label since
-    /// the in-combat tooltip is always for the current run's character). Tighter
-    /// formatting so the table fits inside the standard hover-tip width.
-    /// </summary>
-    private static string FormatRowCombat(EncounterEvent stat, double deathRateBaseline, double dmgPctBaseline, double iqrcBaseline)
-    {
-        int n = stat.Fought;
-
-        double deathRate = 100.0 * stat.Died / n;
-        double avgTurns  = (double)stat.TurnsTakenSum / n;
-        double avgDmgPct = stat.DmgPctSum / n * 100.0;
-
-        double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
-        var iqr = stat.DamageIQR();
-        string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
-
-        var fDmg   = $"{dmgMedian:F0}";
-        var fTurns = $"{avgTurns:F1}";
-
-        var cN      = TooltipHelper.ColN($"{n,4}", n);
-        var cDmg    = ColBad($"{fDmg,5}", avgDmgPct, n, dmgPctBaseline);
-        var cIqr    = FormatIqrCell(fIqr, iqr, dmgMedian, n, iqrcBaseline);
-        var cTurns  = $"[color={TooltipHelper.NeutralShade}]{fTurns,5}[/color]";
-        var cDeaths = FormatDeathsCell(stat.Died, n, deathRate, deathRateBaseline);
-
-        return $"{cN} {cDmg} {cIqr} {cTurns} {cDeaths}";
-    }
-
-    /// <summary>
-    /// Formats the Mid 50% (IQR) cell with IQRC-based coloration. IQRC = IQR / median.
-    /// High IQRC (swingy encounter) → orange/red. Low IQRC (consistent) → teal/green.
-    /// Falls back to neutral grey when there's not enough data for IQR or when median is zero.
-    /// </summary>
-    /// <summary>
-    /// Formats the IQR (Mid 50%) cell. The focused-view tables use a wide column (12) and
-    /// left-align the data so it sits flush with the median dmg column on its left rather
-    /// than drifting to the right edge. The legacy bestiary all-characters table still
-    /// uses the narrower 9-wide right-aligned default. <paramref name="leftAlign"/>
-    /// switches between the two.
-    /// </summary>
-    private static string FormatIqrCell(string formattedIqr, (double p25, double p75)? iqr, double? median, int n, double iqrcBaseline, int width = 9, bool leftAlign = false)
-    {
-        var padded = leftAlign ? formattedIqr.PadRight(width) : formattedIqr.PadLeft(width);
-        if (!iqr.HasValue || median == null || median.Value <= 0)
-            return $"[color={TooltipHelper.NeutralShade}]{padded}[/color]";
-
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
-        // Scale IQRC to percentage-like range for ColBad (which uses tanh significance).
-        // Multiply by 100 so the deviation from baseline has similar magnitude to dmg%/death%.
-        return ColBad(padded, iqrc * 100, n, iqrcBaseline * 100);
-    }
-
-    /// <summary>
-    /// Builds the Deaths cell as "[colored]died[/colored]/[colored]fought[/colored]"
-    /// right-aligned in a 7-char visual field. Two-axis coloration:
-    ///   • Numerator (died) — ColBad against death-rate baseline. Encodes severity:
-    ///     low rate = teal/good, high rate = orange/bad.
-    ///   • Denominator (fought, "times seen") — ColN by sample size. Encodes
-    ///     confidence: more samples → brighter/bolder grey.
-    /// The two complement each other: a faint grey "1/2" reads as "low confidence",
-    /// while a bright teal "0" over a bold "30" reads as "confidently safe".
-    /// </summary>
-    private static string FormatDeathsCell(int died, int fought, double deathRate, double deathRateBaseline)
-    {
-        var diedStr   = $"{died}";
-        var foughtStr = $"{fought}";
-        var combined  = $"{diedStr}/{foughtStr}";
-        var pad       = new string(' ', Math.Max(0, 7 - combined.Length));
-        var cDied     = ColBad(diedStr, deathRate, fought, deathRateBaseline);
-        var cFought   = TooltipHelper.ColN(foughtStr, fought);
-        return $"{pad}{cDied}[color={TooltipHelper.NeutralShade}]/[/color]{cFought}";
     }
 
     /// <summary>

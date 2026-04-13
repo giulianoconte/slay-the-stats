@@ -250,6 +250,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private NScrollbar? _statsScrollbar;
     private HSeparator? _statsScrollTopSep;
     private HSeparator? _statsScrollBottomSep;
+    private MarginContainer? _statsHeaderMarginContainer;
+    private MarginContainer? _statsBaselineMarginContainer;
     private NScrollableContainer? _bestiaryScrollContainer;
     private MarginContainer? _headerMarginContainer;
     private Control? _renderArea;
@@ -325,6 +327,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// freshly-built catWrap.</summary>
     private string? _pendingHoverCategory;
     private readonly Dictionary<string, Control> _rowsByEncounter = new();
+    /// <summary>Maps encounter ID to the inner highlight panel — the narrower
+    /// PanelContainer that receives hover/lock styles (covering only name + stat,
+    /// not arrow or icon).</summary>
+    private readonly Dictionary<string, PanelContainer> _highlightPanels = new();
     /// <summary>Per-category bundles of icon hover handles, used to drive the run-history-style
     /// scale-up tween whenever the player hovers a category header or any encounter row inside
     /// that category.</summary>
@@ -705,14 +711,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // All-characters scrollable layout: header (sticky) + character rows (scrollable) + baseline (sticky) + footer.
         // These are hidden until the all-chars view is active.
-        _statsHeaderLabel = CreateStatsRichTextLabel();
-        _statsHeaderLabel.Visible = false;
-        statsVbox.AddChild(_statsHeaderLabel);
-
-        // Scrollable character rows: wrapper holds the clipped content + scrollbar.
-        // Border panel provides a thin outline around the scroll area.
         const float StatsScrollbarWidth = 20f;
         const float StatsScrollbarGap = 3f;
+
+        _statsHeaderLabel = CreateStatsRichTextLabel();
+        // Reserve right margin matching the scrollbar gutter so header columns
+        // align with the character rows label inside the clipper.
+        var statsHeaderMargin = new MarginContainer();
+        statsHeaderMargin.Visible = false;
+        statsHeaderMargin.AddThemeConstantOverride("margin_right", (int)(StatsScrollbarWidth + StatsScrollbarGap));
+        statsHeaderMargin.AddChild(_statsHeaderLabel);
+        statsVbox.AddChild(statsHeaderMargin);
+        _statsHeaderMarginContainer = statsHeaderMargin;
+
+        // Scrollable character rows: wrapper holds the clipped content + scrollbar.
 
         // Horizontal separator between header and scrollable rows
         var statsScrollTopSep = new HSeparator();
@@ -784,8 +796,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         };
 
         _statsBaselineLabel = CreateStatsRichTextLabel();
-        _statsBaselineLabel.Visible = false;
-        statsVbox.AddChild(_statsBaselineLabel);
+        // Reserve right margin matching the scrollbar gutter so baseline columns
+        // align with the character rows label inside the clipper.
+        var statsBaselineMargin = new MarginContainer();
+        statsBaselineMargin.Visible = false;
+        statsBaselineMargin.AddThemeConstantOverride("margin_right", (int)(StatsScrollbarWidth + StatsScrollbarGap));
+        statsBaselineMargin.AddChild(_statsBaselineLabel);
+        statsVbox.AddChild(statsBaselineMargin);
+        _statsBaselineMarginContainer = statsBaselineMargin;
 
         _statsFooterLabel = CreateStatsRichTextLabel();
         _statsFooterLabel.Visible = false;
@@ -1064,7 +1082,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     // ───────────────────────── Stats label factory ─────────────────────────
 
     /// <summary>Creates a RichTextLabel with the standard stats-table theme overrides
-    /// (mono font, line separation, BBCode, etc.). All stats labels share these settings.</summary>
+    /// (Kreon font, line separation, BBCode, etc.). All stats labels share these settings.</summary>
     private static RichTextLabel CreateStatsRichTextLabel()
     {
         var label = new RichTextLabel();
@@ -1077,11 +1095,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         label.AddThemeFontSizeOverride("normal_font_size", 18);
         label.AddThemeFontSizeOverride("bold_font_size", 18);
         label.AddThemeConstantOverride("line_separation", -6);
-        var monoFont = TooltipHelper.GetMonoFont();
-        if (monoFont != null)
+        var kreonFont = TooltipHelper.GetKreonFont();
+        if (kreonFont != null)
         {
-            label.AddThemeFontOverride("normal_font", monoFont);
-            var boldFont = TooltipHelper.GetMonoBoldFont();
+            label.AddThemeFontOverride("normal_font", kreonFont);
+            var boldFont = TooltipHelper.GetKreonBoldFont();
             if (boldFont != null) label.AddThemeFontOverride("bold_font", boldFont);
         }
         return label;
@@ -1171,9 +1189,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             BbcodeEnabled = true,
             FitContent    = true,
             ScrollActive  = false,
-            AutowrapMode  = TextServer.AutowrapMode.Off,
+            AutowrapMode  = TextServer.AutowrapMode.WordSmart,
             MouseFilter   = MouseFilterEnum.Ignore,
-            CustomMinimumSize = new Vector2(560, 0),
+            CustomMinimumSize = new Vector2(520, 0),
         };
         body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
         body.AddThemeFontSizeOverride("normal_font_size", 16);
@@ -1182,11 +1200,25 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         body.Text = string.Join('\n', new[]
         {
             "[b][color=#efc851]N[/color][/b] — times fought. Color intensity grows with sample size.",
-            "[b][color=#efc851]Dmg[/color][/b] — median damage taken in this fight. Tints orange when above the category baseline, teal when below.",
-            "[b][color=#efc851]Mid 50%[/color][/b] — interquartile range (p25–p75) of damage taken. Shows the spread of the middle half of fights. Tints orange when swingier than the category baseline, teal when more consistent.",
+            "",
+            "[b][color=#efc851]Dmg[/color][/b] — the [i]median[/i] damage taken across matching fights — half of fights",
+            "dealt more, half dealt less. Tints orange above the category baseline, teal below.",
+            "",
+            "[b][color=#efc851]Mid 50%[/color][/b] — the interquartile range (p25–p75): the damage window that the",
+            "middle half of all fights fell inside. A narrow range means consistent fights; a wide",
+            "range means high variance.",
+            "",
+            "[b][color=#efc851]Spread[/color][/b] — how wide the middle 50% is relative to the typical fight, as a",
+            "percentage (IQR / median). Lower = more consistent, higher = swingier. Tints orange",
+            "when swingier than the category baseline, teal when more consistent.",
+            "",
             "[b][color=#efc851]Turns[/color][/b] — average turns the fight lasts.",
             "[b][color=#efc851]Pots[/color][/b] — average potions used per fight.",
             "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total times fought.",
+            "",
+            "[color=#9c9c9c]Pool rows (baselines) weight each encounter equally — an encounter you've",
+            "fought 50 times counts the same as one you've fought 5 times, matching the",
+            "game's uniform spawn rates.[/color]",
             "",
             "[i][color=#9c9c9c]Click ? again to dismiss.[/color][/i]",
         });
@@ -1238,9 +1270,53 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public void Refresh()
     {
-        if (_selectedBiome == null)
-            _selectedBiome = GetDefaultBiome();
+        RestoreBestiaryState();
         RefreshEncounterList();
+    }
+
+    /// <summary>Restores persisted bestiary view state from config on first open.
+    /// Falls back to defaults if the persisted values are invalid.</summary>
+    private void RestoreBestiaryState()
+    {
+        // Only restore on the very first Refresh (when _selectedBiome is still null).
+        // Subsequent refreshes use the in-session values.
+        if (_selectedBiome != null) return;
+
+        var savedBiome = SlayTheStatsConfig.BestiarySelectedBiome;
+        if (!string.IsNullOrEmpty(savedBiome))
+        {
+            var biomes = GetBiomes();
+            _selectedBiome = biomes.Contains(savedBiome) ? savedBiome : GetDefaultBiome();
+        }
+        else
+        {
+            _selectedBiome = GetDefaultBiome();
+        }
+
+        if (Enum.TryParse<EncounterSortMode>(SlayTheStatsConfig.BestiarySortMode, out var mode))
+            _sortMode = mode;
+        _sortDescending = SlayTheStatsConfig.BestiarySortDescending;
+
+        var savedChar = SlayTheStatsConfig.BestiarySortCharacter;
+        _sortCharacter = string.IsNullOrEmpty(savedChar) ? null : savedChar;
+
+        _sortBySignificance = SlayTheStatsConfig.BestiarySortBySignificance;
+    }
+
+    /// <summary>Persists the current bestiary view state to config.</summary>
+    private static void SaveBestiaryState(string? biome, EncounterSortMode sortMode, bool sortDescending,
+        string? sortCharacter, bool sortBySignificance)
+    {
+        SlayTheStatsConfig.BestiarySelectedBiome = biome ?? "";
+        SlayTheStatsConfig.BestiarySortMode = sortMode.ToString();
+        SlayTheStatsConfig.BestiarySortDescending = sortDescending;
+        SlayTheStatsConfig.BestiarySortCharacter = sortCharacter ?? "";
+        SlayTheStatsConfig.BestiarySortBySignificance = sortBySignificance;
+        try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] Failed to save bestiary state: {e.Message}");
+        }
     }
 
     // ───────────────────────── Refresh Logic ─────────────────────────
@@ -1256,6 +1332,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             child.QueueFree();
         }
         _rowsByEncounter.Clear();
+        _highlightPanels.Clear();
         _iconBundles.Clear();
         _grownTargets.Clear();
         _animatingHandles.Clear();
@@ -1265,8 +1342,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
         SetStatsTitle("");
         _hoveredEncounterId = null;
-        // Rebuilding the list means any previously locked row's wrapper is being
-        // destroyed — release the lock so we don't keep a stale id pinned.
+        // Snapshot locked state before clearing — we'll re-apply after the list
+        // rebuild if the locked category/encounter still exists in the new view.
+        var pendingLockedCategory = _lockedCategory;
+        var pendingLockedEncounterId = _lockedEncounterId;
         _lockedEncounterId = null;
         _lockedRowWrap = null;
         _lockedCategory = null;
@@ -1356,6 +1435,27 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 bundle.HeaderIcon = catHandle;
             }
 
+            // Category highlight panel — covers only the category name text.
+            // Arrow and icon sit outside so the highlight doesn't extend over them.
+            // The highlight panel starts at the same x as encounter row highlights,
+            // but the category text is indented slightly via an inner spacer so
+            // category names sit visually offset from encounter names.
+            var catHighlightPanel = new PanelContainer();
+            catHighlightPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            catHighlightPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
+            catHighlightPanel.MouseFilter = MouseFilterEnum.Ignore;
+            catHighlightPanel.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+            catRow.AddChild(catHighlightPanel);
+
+            var catInnerRow = new HBoxContainer();
+            catInnerRow.MouseFilter = MouseFilterEnum.Ignore;
+            catInnerRow.Alignment = BoxContainer.AlignmentMode.Center;
+            catHighlightPanel.AddChild(catInnerRow);
+
+            // Indent spacer — pushes the category text right of the highlight start
+            // so category names are visually offset from encounter names below them.
+            catInnerRow.AddChild(new Control { CustomMinimumSize = new Vector2(CategoryTextIndentPx, 0), MouseFilter = MouseFilterEnum.Ignore });
+
             var catLabel = new RichTextLabel();
             catLabel.BbcodeEnabled = true;
             catLabel.FitContent = true;
@@ -1369,18 +1469,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             ApplyTextShadow(catLabel);
             var catColorHex = EncounterIcons.CategoryColorHex(category);
             catLabel.Text = $"[b][color={catColorHex}]{EncounterCategory.FormatCategory(category)}[/color][/b]";
-            catRow.AddChild(catLabel);
+            catInnerRow.AddChild(catLabel);
 
             // Hover the category header to show pool-aggregate stats; click to collapse/expand.
             var capturedCategory = category;
             var capturedEncIds = catEncounters;
             void ApplyCategoryHover()
             {
-                if (!GodotObject.IsInstanceValid(catWrap)) return;
+                if (!GodotObject.IsInstanceValid(catHighlightPanel)) return;
                 var style = (_lockedCategory == capturedCategory)
                     ? (StyleBox)s_rowLockedStyle
                     : s_rowHighlightStyle;
-                catWrap.AddThemeStyleboxOverride("panel", style);
+                catHighlightPanel.AddThemeStyleboxOverride("panel", style);
                 HighlightCategory(capturedCategory, true);
                 OnCategoryHover(capturedCategory, capturedEncIds);
             }
@@ -1390,15 +1490,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 var fallback = (_lockedCategory == capturedCategory)
                     ? (StyleBox)s_rowLockedStyle
                     : MakeRowEmptyStyle();
-                catWrap.AddThemeStyleboxOverride("panel", fallback);
+                catHighlightPanel.AddThemeStyleboxOverride("panel", fallback);
                 HighlightCategory(capturedCategory, false);
                 OnEncounterUnhover();
             };
             catWrap.GuiInput += (InputEvent ev) =>
             {
+                const float ArrowThreshold = 50f;
                 if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
                 {
-                    const float ArrowThreshold = 50f;
                     if (mb.Position.X < ArrowThreshold)
                     {
                         ToggleCategoryCollapse(capturedCategory);
@@ -1406,16 +1506,19 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                     else if (_lockedCategory == capturedCategory)
                     {
                         ClearLockedEncounter();
-                        catWrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
+                        catHighlightPanel.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
                     }
                     else
                     {
-                        LockCategory(capturedCategory, capturedEncIds, catWrap);
+                        LockCategory(capturedCategory, capturedEncIds, catHighlightPanel);
                     }
                     catWrap.AcceptEvent();
                 }
-                // Double-click toggles collapse/expand regardless of click position.
-                if (ev is InputEventMouseButton db && db.DoubleClick && db.ButtonIndex == MouseButton.Left)
+                // Double-click on the body (not the arrow) toggles collapse/expand.
+                // Skip arrow area — otherwise rapid clicking on the arrow fires
+                // single-click (toggle) + double-click (toggle again) = net zero.
+                if (ev is InputEventMouseButton db && db.DoubleClick && db.ButtonIndex == MouseButton.Left
+                    && db.Position.X >= ArrowThreshold)
                 {
                     ToggleCategoryCollapse(capturedCategory);
                     catWrap.AcceptEvent();
@@ -1434,6 +1537,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             if (pendingHoverCategory == category)
                 Callable.From(ApplyCategoryHover).CallDeferred();
 
+            // Re-apply category lock if the user had this category locked before
+            // the list rebuild (e.g. biome/act tab switch).
+            if (pendingLockedCategory == category)
+            {
+                _lockedCategory = capturedCategory;
+                _lockedCategoryEncIds = capturedEncIds;
+                _lockedCategoryWrap = catHighlightPanel;
+                catHighlightPanel.AddThemeStyleboxOverride("panel", s_rowLockedStyle);
+                // Force the stats panel to display this category's data.
+                Callable.From(() => OnCategoryHoverForced(capturedCategory, capturedEncIds)).CallDeferred();
+            }
+
             if (collapsed) continue;
 
             foreach (var encId in catEncounters)
@@ -1442,6 +1557,22 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 _rowsByEncounter[encId] = entry;
                 _encounterList.AddChild(entry);
             }
+        }
+
+        // Re-apply encounter lock if the encounter still exists in the rebuilt list.
+        if (pendingLockedEncounterId != null &&
+            _lockedCategory == null && // category lock takes priority (set above)
+            _highlightPanels.TryGetValue(pendingLockedEncounterId, out var lockedHighlight))
+        {
+            _lockedEncounterId = pendingLockedEncounterId;
+            _lockedRowWrap = lockedHighlight;
+            lockedHighlight.AddThemeStyleboxOverride("panel", s_rowLockedStyle);
+            var capturedLockedId = pendingLockedEncounterId;
+            Callable.From(() =>
+            {
+                UpdateStatsPanel(capturedLockedId);
+                ScheduleMonsterPreviewRender(capturedLockedId);
+            }).CallDeferred();
         }
 
         // Force the scroll container to recompute its content limit so scroll bounds match
@@ -1543,10 +1674,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         encounterHeader.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(encounterHeader);
         ApplyTextShadow(encounterHeader);
-        // Left margin matches the encounter rows below: 14px lead spacer + 62px icon
-        // column + 8px HBox separation = 84px before the name label starts. The header
-        // row itself has separation=6, so subtract that from the spacer.
-        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(78, 0) });
+        // Left margin matches the encounter rows below: 20px lead spacer + 62px icon
+        // column + 8px HBox separation = 90px before the highlight panel starts, plus
+        // the highlight panel's left content margin (RowMarginLeftPx). The header row
+        // itself has separation=6, so subtract that from the spacer.
+        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(84 + RowMarginLeftPx, 0) });
         _statsColumnHeaderRow.AddChild(encounterHeader);
 
         var spacer = new Control();
@@ -1703,6 +1835,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                         _sortMode = mode;
                         _sortDescending = mode != EncounterSortMode.Name; // Name defaults A→Z
                     }
+                    SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                     RefreshEncounterList();
                 });
             _sortTabRow.AddChild(btn);
@@ -1722,6 +1855,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             () =>
             {
                 _sortBySignificance = !_sortBySignificance;
+                SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                 RefreshEncounterList();
             });
         _sortTabRow.AddChild(sigBtn);
@@ -1772,6 +1906,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var btn = MakeChipButton(label, selected, () =>
             {
                 _sortCharacter = capturedId;
+                SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                 RefreshEncounterList();
             });
             _sortCharRow.AddChild(btn);
@@ -1955,6 +2090,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             {
                 SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
                 _selectedBiome = capturedBiome;
+                SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                 RefreshEncounterList();
             };
             _biomeTabRow.AddChild(btn);
@@ -1965,8 +2101,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     // Both styles use IDENTICAL content margins so swapping them on hover never moves layout.
     // The only visual difference is the highlight's background color and left accent border.
-    private const int RowMarginLeftPx   = 0;
-    private const int RowMarginRightPx  = 0;
+    private const int RowMarginLeftPx   = 10;
+    private const int RowMarginRightPx  = 6;
+    /// <summary>Extra left indent for category name text inside the highlight panel.
+    /// The highlight background starts aligned with encounter rows, but the category
+    /// text sits slightly further right for visual hierarchy.</summary>
+    private const int CategoryTextIndentPx = 4;
     private const int RowMarginTopPx    = 0;
     private const int RowMarginBottomPx = 0;
 
@@ -2059,9 +2199,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta);
 
-        // Lead spacer mirrors the width of the category header's collapse arrow (14px) so
-        // the icon column that comes next sits at the same x as the category headers.
-        var leadSpacer = new Control { CustomMinimumSize = new Vector2(14, 0) };
+        // Lead spacer mirrors the width of the category header's collapse arrow (20px) so
+        // the icon column and highlight panel align with category rows.
+        var leadSpacer = new Control { CustomMinimumSize = new Vector2(20, 0) };
         row.AddChild(leadSpacer);
 
         if (category == "boss")
@@ -2090,6 +2230,22 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             row.AddChild(new Control { CustomMinimumSize = new Vector2(EncounterIcons.CategoryIconColumnWidthPx, 0) });
         }
 
+        // Highlight panel — covers only the name + stat area. The arrow and icon
+        // sit outside this panel so the hover/lock highlight doesn't extend over them.
+        var highlightPanel = new PanelContainer();
+        highlightPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        highlightPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
+        highlightPanel.MouseFilter = MouseFilterEnum.Ignore;
+        highlightPanel.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+        row.AddChild(highlightPanel);
+        _highlightPanels[encounterId] = highlightPanel;
+
+        var innerRow = new HBoxContainer();
+        innerRow.AddThemeConstantOverride("separation", 8);
+        innerRow.MouseFilter = MouseFilterEnum.Ignore;
+        innerRow.Alignment = BoxContainer.AlignmentMode.Center;
+        highlightPanel.AddChild(innerRow);
+
         var nameLabel = new RichTextLabel();
         nameLabel.BbcodeEnabled = true;
         nameLabel.FitContent = true;
@@ -2112,7 +2268,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             monsterInfo = $"  [color=#505050]({string.Join(", ", monsterCounts)})[/color]";
         }
         nameLabel.Text = $"{encounterName}{monsterInfo}";
-        row.AddChild(nameLabel);
+        innerRow.AddChild(nameLabel);
 
         // Stat column on the right — shows whichever stat the active sort mode is keyed on
         // (Dmg% by default), filtered by character if a sort character is selected.
@@ -2139,13 +2295,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statLabel.Text = hasBbcodeColor
             ? $"[right]{scoreText}[/right]"
             : $"[right][color=#a8a39a]{scoreText}[/color][/right]";
-        row.AddChild(statLabel);
-
-        // Right pad so the stat column doesn't kiss the panel edge.
-        row.AddChild(new Control { CustomMinimumSize = new Vector2(StatColumnRightPadPx, 0) });
+        innerRow.AddChild(statLabel);
 
         var capturedCategory = category;
         var capturedEncId = encounterId;
+        var capturedHighlight = highlightPanel;
         wrap.MouseEntered += () =>
         {
             // If THIS row is locked, keep locked (white) style — don't override
@@ -2153,7 +2307,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var style = (_lockedEncounterId == capturedEncId)
                 ? (StyleBox)s_rowLockedStyle
                 : s_rowHighlightStyle;
-            wrap.AddThemeStyleboxOverride("panel", style);
+            capturedHighlight.AddThemeStyleboxOverride("panel", style);
             HighlightCategory(capturedCategory, true, capturedEncId);
             OnEncounterHover(capturedEncId);
         };
@@ -2163,7 +2317,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var fallback = (_lockedEncounterId == capturedEncId)
                 ? (StyleBox)s_rowLockedStyle
                 : MakeRowEmptyStyle();
-            wrap.AddThemeStyleboxOverride("panel", fallback);
+            capturedHighlight.AddThemeStyleboxOverride("panel", fallback);
             HighlightCategory(capturedCategory, false, capturedEncId);
             OnEncounterUnhover();
         };
@@ -2176,11 +2330,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                     // Toggle unlock — mouse is still over this row, so
                     // immediately show hover highlight instead of empty.
                     ClearLockedEncounter();
-                    wrap.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
+                    capturedHighlight.AddThemeStyleboxOverride("panel", s_rowHighlightStyle);
                 }
                 else
                 {
-                    LockEncounter(capturedEncId, wrap);
+                    LockEncounter(capturedEncId, capturedHighlight);
                 }
                 wrap.AcceptEvent();
             }
@@ -2335,7 +2489,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
             statsText = EncounterTooltipHelper.BuildCategoryStatsTextFocused(
                 poolBiome, poolAll, allCharsPool,
-                _sortCharacter, biomeLabel, categoryLabel, filter);
+                _sortCharacter, biomeLabel, categoryLabel, filter,
+                category);
 
             var scopePrefix = biomeLabel ?? "All";
             SetStatsTitle($"{scopePrefix} {categoryLabel} Encounter Stats");
@@ -2368,11 +2523,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : "All";
             SetStatsTitle($"{biomeName} {categoryLabel} Encounter Stats");
 
-            var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
+            var text = EncounterTooltipHelper.BuildEncounterStatsText(
                 combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                 filter.AscensionMin, filter.AscensionMax, categoryLabel,
                 filter: filter);
-            ShowAllCharsStats(parts);
+            ShowSingleLabelStats(text);
 
             ClearMonsterPreview();
             return;
@@ -2591,11 +2746,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
             else
             {
-                var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
+                var text = EncounterTooltipHelper.BuildEncounterStatsText(
                     charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                     filter.AscensionMin, filter.AscensionMax, categoryLabel,
                     filter: filter);
-                ShowAllCharsStats(parts);
+                ShowSingleLabelStats(text);
             }
             return;
         }
@@ -2644,12 +2799,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_statsLabel != null) _statsLabel.Visible = false;
 
-        if (_statsHeaderLabel != null) { _statsHeaderLabel.Text = parts.Header; _statsHeaderLabel.Visible = true; }
+        if (_statsHeaderLabel != null) _statsHeaderLabel.Text = parts.Header;
+        if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = true;
         if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = true;
         if (_statsCharRowsLabel != null) _statsCharRowsLabel.Text = parts.CharacterRows;
         if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = true;
         if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = true;
-        if (_statsBaselineLabel != null) { _statsBaselineLabel.Text = parts.BaselineRow; _statsBaselineLabel.Visible = true; }
+        if (_statsBaselineLabel != null) _statsBaselineLabel.Text = parts.BaselineRow;
+        if (_statsBaselineMarginContainer != null) _statsBaselineMarginContainer.Visible = true;
         if (_statsFooterLabel != null)
         {
             _statsFooterLabel.Text = parts.Footer;
@@ -2665,7 +2822,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// the scrollbar range, and show/hide the scrollbar based on content overflow.</summary>
     private void SetupStatsCharRowsLayout()
     {
-        if (_statsCharRowsLabel == null || _statsCharRowsClipper == null) return;
+        if (_statsCharRowsLabel == null || _statsCharRowsClipper == null || _statsCharRowsWrapper == null) return;
         // Set the label width to match the clipper so BBCode tables render at the right width.
         float clipperWidth = _statsCharRowsClipper.Size.X;
         float contentHeight = _statsCharRowsLabel.GetContentHeight();
@@ -2673,6 +2830,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         float clipperHeight = _statsCharRowsClipper.Size.Y;
         bool needsScroll = contentHeight > clipperHeight;
+
+        // When content is shorter than available space, shrink the wrapper so
+        // the baseline/footer sit right below the last character row instead
+        // of being pushed to the bottom of the fixed-height stats area.
+        if (!needsScroll)
+        {
+            _statsCharRowsWrapper.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+            _statsCharRowsWrapper.CustomMinimumSize = new Godot.Vector2(0, contentHeight);
+        }
+        else
+        {
+            _statsCharRowsWrapper.SizeFlagsVertical = SizeFlags.ExpandFill;
+            _statsCharRowsWrapper.CustomMinimumSize = new Godot.Vector2(0, 0);
+        }
 
         // Configure scrollbar range and visibility.
         if (_statsScrollbar != null)
@@ -2694,11 +2865,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void ShowSingleLabelStats(string text)
     {
         if (_statsLabel != null) { _statsLabel.Text = text; _statsLabel.Visible = true; }
-        if (_statsHeaderLabel != null) _statsHeaderLabel.Visible = false;
+        if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = false;
         if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = false;
         if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = false;
         if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = false;
-        if (_statsBaselineLabel != null) _statsBaselineLabel.Visible = false;
+        if (_statsBaselineMarginContainer != null) _statsBaselineMarginContainer.Visible = false;
         if (_statsFooterLabel != null) _statsFooterLabel.Visible = false;
     }
 
@@ -3747,30 +3918,33 @@ internal static class EncounterSorting
         if (!bySignificance || mode == EncounterSortMode.Seen)
             return raw;
 
-        // Significance: z-score against the category baseline, weighted by sample
-        // size. Low-N encounters get small z-scores even with large deviation;
-        // well-sampled encounters with modest deviation beat them.
+        // Significance: z-score against the encounter-weighted category baseline,
+        // weighted by sample size. Uses AggregateEncounterPoolWeighted so the
+        // baseline matches the display code's median-of-medians / mean-of-means
+        // aggregation (each encounter contributes equally, not fight-weighted).
         string? category = null;
         if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
             category = meta.Category;
+
+        var pool = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, biome);
 
         switch (mode)
         {
             case EncounterSortMode.DeathRate:
             {
-                double p0 = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, biome);
+                double p0 = pool.DeathRate / 100.0; // PoolMetrics stores 0–100, raw is 0–1
                 double se = Math.Sqrt(Math.Max(1e-9, p0 * (1 - p0) / fought));
                 return (raw - p0) / se;
             }
             case EncounterSortMode.MedianDamage:
             {
-                double mu0 = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
+                double mu0 = pool.Median;
                 double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, mu0) / fought));
                 return (raw - mu0) / se;
             }
             case EncounterSortMode.IQR:
             {
-                double iqrcBase = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, biome);
+                double iqrcBase = pool.Iqrc;
                 double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, iqrcBase) / fought));
                 return (raw - iqrcBase) / se;
             }
@@ -3828,24 +4002,24 @@ internal static class EncounterSorting
         if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
             category = meta.Category;
 
-        // Pick the matching baseline per mode and compute (value/baseline*100) so the
-        // existing ColWR significance pipeline (calibrated for 0-100 scales) triggers
-        // meaningfully on small absolute differences. ColBad direction = high is bad.
+        // Pick the matching baseline per mode using encounter-weighted pool metrics
+        // so coloration matches the display code's aggregation approach.
+        var pool = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, biome);
         double value, baseline;
         switch (mode)
         {
             case EncounterSortMode.MedianDamage:
                 value = score.Value;
-                baseline = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
+                baseline = pool.Median;
                 break;
             case EncounterSortMode.DeathRate:
-                // Score returns died/fought (fraction); baseline is in percent.
+                // Score returns died/fought (fraction); pool.DeathRate is 0–100.
                 value = score.Value * 100.0;
-                baseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, biome);
+                baseline = pool.DeathRate;
                 break;
             case EncounterSortMode.IQR:
-                // Score returns absolute (p75 - p25); IQRC baseline is unitless. Compute
-                // this encounter's IQRC and compare against the IQRC baseline.
+                // Score returns absolute (p75 - p25); compute this encounter's IQRC
+                // and compare against the pool's encounter-weighted IQRC.
                 EncounterEvent combined = new();
                 if (sortCharacter != null && perChar.TryGetValue(sortCharacter, out var only)) combined = only;
                 else
@@ -3862,7 +4036,7 @@ internal static class EncounterSorting
                 var med = combined.DamageMedian();
                 if (!med.HasValue || med.Value <= 0) return raw;
                 value = score.Value / med.Value;
-                baseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, biome);
+                baseline = pool.Iqrc;
                 break;
             default:
                 return raw;

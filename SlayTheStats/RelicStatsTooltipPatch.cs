@@ -209,12 +209,28 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
+    // Reuse the card tooltip's cell helpers and padding constants.
+    private static string HdrCell(string name, string padding)
+        => $"[cell {padding}][right][color=#8e8676]{name}[/color][/right][/cell]";
+    private static string DataCell(string content, string padding)
+        => $"[cell {padding}][right]{content}[/right][/cell]";
+    private static string EmptyCell(string padding)
+        => $"[cell {padding}][right][color={TooltipHelper.NeutralShade}]-[/color][/right][/cell]";
+
+    private const string ColPadOuter = "expand=1 padding=4,0,12,0";
+    private const string ColPadInner = "expand=1 padding=12,0,12,0";
+    private const string ColPadLast  = "expand=1 padding=12,0,4,0";
+
     private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All characters", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 
-        // Relics always show the Buys column: Act(3)  Runs(5)  Buys(7)  Win%(4)
-        sb.Append("Act  Runs     Buys  Win%\n");
+        // Relics: Act | Runs | Buys (bought/seen) | Win%
+        sb.Append("[table=4]");
+        sb.Append(HdrCell("Act", ColPadOuter));
+        sb.Append(HdrCell("Runs", ColPadInner));
+        sb.Append(HdrCell("Buys", ColPadInner));
+        sb.Append(HdrCell("Win%", ColPadLast));
 
         int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
 
@@ -230,14 +246,20 @@ internal static class RelicHoverHelper
                 var wrPct   = stat.RunsPresent > 0 ? 100.0 * stat.RunsWon          / stat.RunsPresent  : -1;
                 var shopPct = stat.RunsShopSeen > 0 ? 100.0 * stat.RunsShopBought  / stat.RunsShopSeen : -1;
                 var wr      = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
-                var cRuns   = TooltipHelper.ColN($"{stat.RunsPresent,5}", stat.RunsPresent);
-                var cWr     = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
-                var cBuys   = CardHoverShowPatch.FormatBuysCell(stat.RunsShopBought, stat.RunsShopSeen, shopPct, shopBuyRateBaseline);
-                sb.Append($"{act,3} {cRuns}  {cBuys}  {cWr}\n");
+                var cRuns   = TooltipHelper.ColN($"{stat.RunsPresent}", stat.RunsPresent);
+                var cWr     = wrPct >= 0 ? TooltipHelper.ColWR(wr, wrPct, stat.RunsPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
+
+                sb.Append(DataCell($"{act}", ColPadOuter));
+                sb.Append(DataCell(cRuns, ColPadInner));
+                sb.Append(CardHoverShowPatch.FormatBuysFractionCell(stat.RunsShopBought, stat.RunsShopSeen, shopPct, shopBuyRateBaseline, ColPadInner));
+                sb.Append(DataCell(cWr, ColPadLast));
             }
             else
             {
-                sb.Append($"{act,3} [color={TooltipHelper.NeutralShade}]{"-",5}  {"-",7}  {"-",4}[/color]\n");
+                sb.Append(DataCell($"{act}", ColPadOuter));
+                sb.Append(EmptyCell(ColPadInner));
+                sb.Append(EmptyCell(ColPadInner));
+                sb.Append(EmptyCell(ColPadLast));
             }
         }
 
@@ -245,10 +267,13 @@ internal static class RelicHoverHelper
         var totWrPct   = totPresent  > 0 ? 100.0 * totWon        / totPresent  : -1;
         var totShopPct = totShopSeen > 0 ? 100.0 * totShopBought / totShopSeen : -1;
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var cTotRuns   = TooltipHelper.ColN($"{totPresent,5}", totPresent);
-        var cTotWr     = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
-        var cTotBuys   = CardHoverShowPatch.FormatBuysCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline);
-        sb.Append($"All {cTotRuns}  {cTotBuys}  {cTotWr}");
+        var cTotRuns   = TooltipHelper.ColN($"{totPresent}", totPresent);
+        var cTotWr     = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        sb.Append(DataCell("All", ColPadOuter));
+        sb.Append(DataCell(cTotRuns, ColPadInner));
+        sb.Append(CardHoverShowPatch.FormatBuysFractionCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline, ColPadInner));
+        sb.Append(DataCell(cTotWr, ColPadLast));
+        sb.Append("[/table]");
 
         var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";
         var wrStr       = $"{Math.Round(wrBaseline):F0}%";

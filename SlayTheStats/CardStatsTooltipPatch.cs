@@ -716,6 +716,25 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
+    // Column padding for card/relic [table=4] layout. expand=1 distributes
+    // leftover width so columns span the full panel rather than clustering tight.
+    private const string ColPadOuter = "expand=1 padding=4,0,12,0";
+    private const string ColPadInner = "expand=1 padding=12,0,12,0";
+    private const string ColPadLast  = "expand=1 padding=12,0,4,0";
+    private const string HeaderColor = "#8e8676";
+
+    private static string HdrCell(string name, string padding)
+        => $"[cell {padding}][right][color={HeaderColor}]{name}[/color][/right][/cell]";
+
+    private static string DataCell(string content, string padding)
+        => $"[cell {padding}][right]{content}[/right][/cell]";
+
+    private static string EmptyCell(string padding)
+        => $"[cell {padding}][right][color={TooltipHelper.NeutralShade}]-[/color][/right][/cell]";
+
+    private static string FractionCell(string coloredNum, string den, string padding)
+        => $"[cell {padding}][right]{coloredNum}[color={TooltipHelper.NeutralShade}]/{den}[/color][/right][/cell]";
+
     internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All characters", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
@@ -723,9 +742,12 @@ public static class CardHoverShowPatch
         if (showBuysLayout)
             return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter);
 
-        // Class card columns: Act(3)  Runs(7)  Pick%(5)  Win%(4)
-        // Runs shows RunsPresent/RunsOffered, e.g. "12/30"
-        sb.Append("Act     Runs  Pick%  Win%\n");
+        // Class card columns: Act | Runs (present/offered) | Pick% | Win%
+        sb.Append("[table=4]");
+        sb.Append(HdrCell("Act", ColPadOuter));
+        sb.Append(HdrCell("Runs", ColPadInner));
+        sb.Append(HdrCell("Pick%", ColPadInner));
+        sb.Append(HdrCell("Win%", ColPadLast));
 
         int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
 
@@ -743,23 +765,21 @@ public static class CardHoverShowPatch
                 var pr    = prPct >= 0 ? $"{Math.Round(prPct):F0}%" : "-";
                 var wr    = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
 
-                // Pad before wrapping in color tags — BBCode tags are invisible to layout but
-                // would break fixed-width padding if included in the format string width.
-                // Pick% significance uses RunsOffered (total trials), not RunsPicked (successes).
-                // Picks: numerator colored by ColN (bold if strong), /denominator always neutral.
-                var numStr = $"{stat.RunsPresent}";
-                var denStr = $"{stat.RunsOffered}";
-                var cPicks = $"{new string(' ', Math.Max(0, 7 - numStr.Length - 1 - denStr.Length))}"
-                           + $"{TooltipHelper.ColN(numStr, stat.RunsPresent)}"
-                           + $"[color={TooltipHelper.NeutralShade}]/{denStr}[/color]";
-                var cPr    = prPct >= 0 ? TooltipHelper.ColPR($"{pr,5}", prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
-                var cWr    = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
+                var cNum  = TooltipHelper.ColN($"{stat.RunsPresent}", stat.RunsPresent);
+                var cPr   = prPct >= 0 ? TooltipHelper.ColPR(pr, prPct, stat.RunsOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
+                var cWr   = wrPct >= 0 ? TooltipHelper.ColWR(wr, wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
 
-                sb.Append($"{act,3}  {cPicks}  {cPr}  {cWr}\n");
+                sb.Append(DataCell($"{act}", ColPadOuter));
+                sb.Append(FractionCell(cNum, $"{stat.RunsOffered}", ColPadInner));
+                sb.Append(DataCell(cPr, ColPadInner));
+                sb.Append(DataCell(cWr, ColPadLast));
             }
             else
             {
-                sb.Append($"{act,3}  [color={TooltipHelper.NeutralShade}]{"-",7}  {"-",5}  {"-",4}[/color]\n");
+                sb.Append(DataCell($"{act}", ColPadOuter));
+                sb.Append(EmptyCell(ColPadInner));
+                sb.Append(EmptyCell(ColPadInner));
+                sb.Append(EmptyCell(ColPadLast));
             }
         }
 
@@ -768,14 +788,14 @@ public static class CardHoverShowPatch
         var totWrPct  = totPresent > 0 ? 100.0 * totWon     / totPresent : -1;
         var totPr     = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
         var totWr     = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
-        var totNumStr  = $"{totPresent}";
-        var totDenStr  = $"{totOffered}";
-        var cTotPicks  = $"{new string(' ', Math.Max(0, 7 - totNumStr.Length - 1 - totDenStr.Length))}"
-                       + $"{TooltipHelper.ColN(totNumStr, totPresent)}"
-                       + $"[color={TooltipHelper.NeutralShade}]/{totDenStr}[/color]";
-        var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR($"{totPr,5}", totPrPct, totOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]{"-",5}[/color]";
-        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
-        sb.Append($"All  {cTotPicks}  {cTotPr}  {cTotWr}");
+        var cTotNum   = TooltipHelper.ColN($"{totPresent}", totPresent);
+        var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR(totPr, totPrPct, totOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        sb.Append(DataCell("All", ColPadOuter));
+        sb.Append(FractionCell(cTotNum, $"{totOffered}", ColPadInner));
+        sb.Append(DataCell(cTotPr, ColPadInner));
+        sb.Append(DataCell(cTotWr, ColPadLast));
+        sb.Append("[/table]");
 
         var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         var prBaseStr = $"{Math.Round(pickRateBaseline):F0}%";
@@ -797,9 +817,12 @@ public static class CardHoverShowPatch
     private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
-        // Columns: Act(3)  Runs(5)  Buys(7)  Win%(4)
-        // "Buys" right-aligned in 7-char field: "   Buys"
-        sb.Append("Act  Runs     Buys  Win%\n");
+        // Columns: Act | Runs | Buys (bought/seen) | Win%
+        sb.Append("[table=4]");
+        sb.Append(HdrCell("Act", ColPadOuter));
+        sb.Append(HdrCell("Runs", ColPadInner));
+        sb.Append(HdrCell("Buys", ColPadInner));
+        sb.Append(HdrCell("Win%", ColPadLast));
 
         int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
 
@@ -816,15 +839,20 @@ public static class CardHoverShowPatch
                 var buysPct = stat.RunsShopSeen > 0 ? 100.0 * stat.RunsShopBought   / stat.RunsShopSeen : -1;
                 var wr      = wrPct >= 0 ? $"{Math.Round(wrPct):F0}%" : "-";
 
-                var cPicks = TooltipHelper.ColN($"{stat.RunsPresent,5}", stat.RunsPresent);
-                var cBuys  = FormatBuysCell(stat.RunsShopBought, stat.RunsShopSeen, buysPct, shopBuyRateBaseline);
-                var cWr    = wrPct >= 0 ? TooltipHelper.ColWR($"{wr,4}", wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
+                var cRuns = TooltipHelper.ColN($"{stat.RunsPresent}", stat.RunsPresent);
+                var cWr   = wrPct >= 0 ? TooltipHelper.ColWR(wr, wrPct, stat.RunsPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
 
-                sb.Append($"{act,3} {cPicks}  {cBuys}  {cWr}\n");
+                sb.Append(DataCell($"{act}", ColPadOuter));
+                sb.Append(DataCell(cRuns, ColPadInner));
+                sb.Append(FormatBuysFractionCell(stat.RunsShopBought, stat.RunsShopSeen, buysPct, shopBuyRateBaseline, ColPadInner));
+                sb.Append(DataCell(cWr, ColPadLast));
             }
             else
             {
-                sb.Append($"{act,3} [color={TooltipHelper.NeutralShade}]{"-",5}  {"-",7}  {"-",4}[/color]\n");
+                sb.Append(DataCell($"{act}", ColPadOuter));
+                sb.Append(EmptyCell(ColPadInner));
+                sb.Append(EmptyCell(ColPadInner));
+                sb.Append(EmptyCell(ColPadLast));
             }
         }
 
@@ -832,10 +860,13 @@ public static class CardHoverShowPatch
         var totBuysPct = totShopSeen > 0 ? 100.0 * totShopBought / totShopSeen : -1;
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
 
-        var cTotPicks = TooltipHelper.ColN($"{totPresent,5}", totPresent);
-        var cTotBuys  = FormatBuysCell(totShopBought, totShopSeen, totBuysPct, shopBuyRateBaseline);
-        var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR($"{totWr,4}", totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]{"-",4}[/color]";
-        sb.Append($"All {cTotPicks}  {cTotBuys}  {cTotWr}");
+        var cTotRuns = TooltipHelper.ColN($"{totPresent}", totPresent);
+        var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        sb.Append(DataCell("All", ColPadOuter));
+        sb.Append(DataCell(cTotRuns, ColPadInner));
+        sb.Append(FormatBuysFractionCell(totShopBought, totShopSeen, totBuysPct, shopBuyRateBaseline, ColPadInner));
+        sb.Append(DataCell(cTotWr, ColPadLast));
+        sb.Append("[/table]");
 
         var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         var wrStr        = $"{Math.Round(characterWR):F0}%";
@@ -849,19 +880,20 @@ public static class CardHoverShowPatch
     }
 
     /// <summary>
-    /// Formats a Buys cell as "bought/seen" right-aligned in a 7-char visual field,
+    /// Formats a Buys cell as "bought/seen" inside a [cell] tag,
     /// with the numerator colored by buy-rate significance. Returns neutral "-" when no data.
     /// </summary>
-    internal static string FormatBuysCell(int bought, int seen, double pct, double baseline)
+    internal static string FormatBuysFractionCell(int bought, int seen, double pct, double baseline, string padding)
     {
         if (pct < 0)
-            return $"[color={TooltipHelper.NeutralShade}]{"-",7}[/color]";
-        var numStr = $"{bought}";
-        var denStr = $"{seen}";
-        return $"{new string(' ', Math.Max(0, 7 - numStr.Length - 1 - denStr.Length))}"
-             + $"{TooltipHelper.ColBuys(numStr, pct, seen, baseline)}"
-             + $"[color={TooltipHelper.NeutralShade}]/{denStr}[/color]";
+            return EmptyCell(padding);
+        var cNum = TooltipHelper.ColBuys($"{bought}", pct, seen, baseline);
+        return FractionCell(cNum, $"{seen}", padding);
     }
+
+    /// <summary>Legacy wrapper — kept for any external callers during migration.</summary>
+    internal static string FormatBuysCell(int bought, int seen, double pct, double baseline)
+        => FormatBuysFractionCell(bought, seen, pct, baseline, ColPadInner);
 }
 
 [HarmonyPatch(typeof(NCardHolder), "ClearHoverTips")]

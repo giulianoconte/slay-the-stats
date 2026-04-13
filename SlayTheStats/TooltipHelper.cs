@@ -39,9 +39,11 @@ internal static class TooltipHelper
     private static Font? _monoBold;
     private static bool  _modFontsLoaded;
 
-    internal static bool HasBoldFont => _monoBold != null;
+    internal static bool HasBoldFont => Fonts.Bold != null || _monoBold != null;
     internal static Font? GetMonoFont() => _monoRegular ?? ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
     internal static Font? GetMonoBoldFont() => _monoBold;
+    internal static Font? GetKreonFont() => Fonts.Normal;
+    internal static Font? GetKreonBoldFont() => Fonts.Bold;
 
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
@@ -395,15 +397,15 @@ internal static class TooltipHelper
     private static void ApplyTableStyle(RichTextLabel label)
     {
         label.AddThemeColorOverride("default_color", Fonts.Text);
-        // Prefer bundled FiraMono; fall back to the game's SourceCodePro (no bold variant).
-        var normal = _monoRegular ?? ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
-        if (normal != null) label.AddThemeFontOverride("normal_font", normal);
-        if (_monoBold != null)
+        // Use Kreon proportional font — column alignment is handled by [table=N]
+        // BBCode layout, not character width.
+        if (Fonts.Normal != null) label.AddThemeFontOverride("normal_font", Fonts.Normal);
+        if (Fonts.Bold != null)
         {
-            label.AddThemeFontOverride("bold_font", _monoBold);
+            label.AddThemeFontOverride("bold_font", Fonts.Bold);
             label.AddThemeFontSizeOverride("bold_font_size", 20);
         }
-        label.AddThemeFontSizeOverride("normal_font_size", 20); // smaller than header to fit 4-col table within panel width
+        label.AddThemeFontSizeOverride("normal_font_size", 20);
         label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
         label.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
