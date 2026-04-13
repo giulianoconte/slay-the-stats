@@ -246,6 +246,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private RichTextLabel? _statsBaselineLabel;
     private RichTextLabel? _statsFooterLabel;
     private Control? _statsCharRowsClipper;
+    private Control? _statsCharRowsWrapper; // holds clipper + scrollbar
+    private NScrollbar? _statsScrollbar;
+    private HSeparator? _statsScrollTopSep;
+    private HSeparator? _statsScrollBottomSep;
     private NScrollableContainer? _bestiaryScrollContainer;
     private MarginContainer? _headerMarginContainer;
     private Control? _renderArea;
@@ -705,24 +709,79 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsHeaderLabel.Visible = false;
         statsVbox.AddChild(_statsHeaderLabel);
 
-        // Scrollable character rows: a clipped container holding the rows label.
-        // Uses the same pattern as the encounter list: the label lives inside a
-        // clipped Control that doesn't propagate the label's full height upward.
-        // FitContent is OFF so the label doesn't force a minimum size; instead we
-        // set the label's width to match the clipper and let it grow tall naturally.
+        // Scrollable character rows: wrapper holds the clipped content + scrollbar.
+        // Border panel provides a thin outline around the scroll area.
+        const float StatsScrollbarWidth = 20f;
+        const float StatsScrollbarGap = 3f;
+
+        // Horizontal separator between header and scrollable rows
+        var statsScrollTopSep = new HSeparator();
+        statsScrollTopSep.Visible = false;
+        statsScrollTopSep.AddThemeConstantOverride("separation", 0);
+        statsScrollTopSep.AddThemeStyleboxOverride("separator", CreateThinSeparatorStyle());
+        statsVbox.AddChild(statsScrollTopSep);
+        _statsScrollTopSep = statsScrollTopSep;
+
+        _statsCharRowsWrapper = new Control();
+        _statsCharRowsWrapper.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _statsCharRowsWrapper.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _statsCharRowsWrapper.Visible = false;
+        statsVbox.AddChild(_statsCharRowsWrapper);
+
+        // Horizontal separator between scrollable rows and baseline
+        var statsScrollBottomSep = new HSeparator();
+        statsScrollBottomSep.Visible = false;
+        statsScrollBottomSep.AddThemeConstantOverride("separation", 0);
+        statsScrollBottomSep.AddThemeStyleboxOverride("separator", CreateThinSeparatorStyle());
+        statsVbox.AddChild(statsScrollBottomSep);
+        _statsScrollBottomSep = statsScrollBottomSep;
+
+        // Clipper: clips the character rows label. Leaves room for scrollbar on the right.
         _statsCharRowsClipper = new Control();
         _statsCharRowsClipper.ClipContents = true;
-        _statsCharRowsClipper.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        _statsCharRowsClipper.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _statsCharRowsClipper.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _statsCharRowsClipper.OffsetRight = -(StatsScrollbarWidth + StatsScrollbarGap);
         _statsCharRowsClipper.MouseFilter = MouseFilterEnum.Stop;
-        _statsCharRowsClipper.Visible = false;
         _statsCharRowsClipper.GuiInput += OnStatsCharRowsGuiInput;
-        statsVbox.AddChild(_statsCharRowsClipper);
+        _statsCharRowsWrapper.AddChild(_statsCharRowsClipper);
 
         _statsCharRowsLabel = CreateStatsRichTextLabel();
         _statsCharRowsLabel.FitContent = false;  // prevent min-size propagation
         _statsCharRowsLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         _statsCharRowsClipper.AddChild(_statsCharRowsLabel);
+
+        // Scrollbar: game's native NScrollbar, anchored to the right edge.
+        _statsScrollbar = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/scrollbar"))
+            .Instantiate<NScrollbar>();
+        _statsScrollbar.Name = "StatsScrollbar";
+        _statsScrollbar.AnchorLeft   = 1f;
+        _statsScrollbar.AnchorRight  = 1f;
+        _statsScrollbar.AnchorTop    = 0f;
+        _statsScrollbar.AnchorBottom = 1f;
+        _statsScrollbar.OffsetLeft   = -StatsScrollbarWidth;
+        _statsScrollbar.OffsetRight  = 0;
+        _statsScrollbar.OffsetTop    = 0;
+        _statsScrollbar.OffsetBottom = 0;
+        _statsCharRowsWrapper.AddChild(_statsScrollbar);
+
+        // Shrink the scrollbar handle after the scene's _Ready runs.
+        var capturedStatsScrollbar = _statsScrollbar;
+        Callable.From(() =>
+        {
+            if (!GodotObject.IsInstanceValid(capturedStatsScrollbar)) return;
+            var handle = ((Node)capturedStatsScrollbar).GetNodeOrNull<Control>("%Handle");
+            if (handle == null) return;
+            DisableMouseRecursive(handle);
+            handle.PivotOffset = handle.Size / 2f;
+            handle.Scale = new Vector2(0.45f, 0.70f);
+        }).CallDeferred();
+
+        // Wire scrollbar value changes to update the scroll offset.
+        _statsScrollbar.ValueChanged += (double value) =>
+        {
+            _statsCharRowsScroll = (float)value;
+            ApplyStatsCharRowsScroll();
+        };
 
         _statsBaselineLabel = CreateStatsRichTextLabel();
         _statsBaselineLabel.Visible = false;
@@ -991,6 +1050,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         if (SlayTheStatsConfig.DebugMode)
             MainFile.Logger.Info("[SlayTheStats] Bestiary tutorial shown");
+    }
+
+    /// <summary>Creates a 1px warm-earth separator style for the stats scroll area borders.</summary>
+    private static Godot.StyleBoxLine CreateThinSeparatorStyle()
+    {
+        var style = new Godot.StyleBoxLine();
+        style.Color = new Color(0.22f, 0.20f, 0.16f, 0.5f);
+        style.Thickness = 1;
+        return style;
     }
 
     // ───────────────────────── Stats label factory ─────────────────────────
@@ -2577,13 +2645,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_statsLabel != null) _statsLabel.Visible = false;
 
         if (_statsHeaderLabel != null) { _statsHeaderLabel.Text = parts.Header; _statsHeaderLabel.Visible = true; }
-        if (_statsCharRowsLabel != null)
-        {
-            _statsCharRowsLabel.Text = parts.CharacterRows;
-            // With FitContent off, manually size the label to match clipper width.
-            // Height will be set in the deferred scroll setup after layout settles.
-        }
-        if (_statsCharRowsClipper != null) _statsCharRowsClipper.Visible = true;
+        if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = true;
+        if (_statsCharRowsLabel != null) _statsCharRowsLabel.Text = parts.CharacterRows;
+        if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = true;
+        if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = true;
         if (_statsBaselineLabel != null) { _statsBaselineLabel.Text = parts.BaselineRow; _statsBaselineLabel.Visible = true; }
         if (_statsFooterLabel != null)
         {
@@ -2596,13 +2661,32 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         Godot.Callable.From(SetupStatsCharRowsLayout).CallDeferred();
     }
 
-    /// <summary>Called deferred after layout to size the character rows label and apply scroll.</summary>
+    /// <summary>Called deferred after layout to size the character rows label, configure
+    /// the scrollbar range, and show/hide the scrollbar based on content overflow.</summary>
     private void SetupStatsCharRowsLayout()
     {
         if (_statsCharRowsLabel == null || _statsCharRowsClipper == null) return;
         // Set the label width to match the clipper so BBCode tables render at the right width.
         float clipperWidth = _statsCharRowsClipper.Size.X;
-        _statsCharRowsLabel.Size = new Godot.Vector2(clipperWidth, _statsCharRowsLabel.GetContentHeight());
+        float contentHeight = _statsCharRowsLabel.GetContentHeight();
+        _statsCharRowsLabel.Size = new Godot.Vector2(clipperWidth, contentHeight);
+
+        float clipperHeight = _statsCharRowsClipper.Size.Y;
+        bool needsScroll = contentHeight > clipperHeight;
+
+        // Configure scrollbar range and visibility.
+        if (_statsScrollbar != null)
+        {
+            _statsScrollbar.Visible = needsScroll;
+            if (needsScroll)
+            {
+                _statsScrollbar.MinValue = 0;
+                _statsScrollbar.MaxValue = contentHeight;
+                _statsScrollbar.Page = clipperHeight;
+                _statsScrollbar.Value = 0;
+            }
+        }
+
         ApplyStatsCharRowsScroll();
     }
 
@@ -2611,12 +2695,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_statsLabel != null) { _statsLabel.Text = text; _statsLabel.Visible = true; }
         if (_statsHeaderLabel != null) _statsHeaderLabel.Visible = false;
-        if (_statsCharRowsClipper != null) _statsCharRowsClipper.Visible = false;
+        if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = false;
+        if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = false;
+        if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = false;
         if (_statsBaselineLabel != null) _statsBaselineLabel.Visible = false;
         if (_statsFooterLabel != null) _statsFooterLabel.Visible = false;
     }
 
-    /// <summary>Applies the current scroll offset to the character rows label inside the clipper.</summary>
+    /// <summary>Applies the current scroll offset to the character rows label inside the clipper,
+    /// and syncs the scrollbar value.</summary>
     private void ApplyStatsCharRowsScroll()
     {
         if (_statsCharRowsLabel == null || _statsCharRowsClipper == null) return;
@@ -2628,6 +2715,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsCharRowsScroll = Math.Clamp(_statsCharRowsScroll, 0, maxScroll);
 
         _statsCharRowsLabel.Position = new Godot.Vector2(0, -_statsCharRowsScroll);
+
+        // Sync scrollbar without re-triggering the ValueChanged handler.
+        if (_statsScrollbar != null && _statsScrollbar.Visible)
+            _statsScrollbar.SetValueNoSignal(_statsCharRowsScroll);
     }
 
     /// <summary>Handles mouse wheel scroll on the all-characters stats area.</summary>

@@ -117,16 +117,17 @@ public static class EncounterTooltipHelper
         var allBaseline = ComputeAllRowBaselines(perCharMetrics);
 
         // --- Header table ---
+        var WP = new WideColumnPaddings();
         var hdr = new StringBuilder();
         hdr.Append("[table=8]");
         AppendDescriptorCell(hdr, " ", isHeader: true);
-        AppendHeaderCell(hdr, "Fought", NormalCellPadding);
-        AppendHeaderCell(hdr, "Dmg%",    TightCellPadding);
-        AppendHeaderCell(hdr, "Mid 50%", TightCellPadding);
-        AppendHeaderCell(hdr, "Spread",  NormalCellPadding);
-        AppendHeaderCell(hdr, "Turns",   TightCellPadding);
-        AppendHeaderCell(hdr, "Potions", TightCellPadding);
-        AppendHeaderCell(hdr, "Deaths",  TightCellPadding);
+        AppendHeaderCell(hdr, "Fought", WP.Fought);
+        AppendHeaderCell(hdr, "Dmg%",    WP.Dmg);
+        AppendHeaderCell(hdr, "Mid 50%", WP.Mid50);
+        AppendHeaderCell(hdr, "Spread",  WP.Spread);
+        AppendHeaderCell(hdr, "Turns",   WP.Turns);
+        AppendHeaderCell(hdr, "Potions", WP.Pots);
+        AppendHeaderCell(hdr, "Deaths",  WP.Deaths);
         hdr.Append("[/table]");
 
         // --- Pass 2: render character rows colored against All baselines ---
@@ -142,7 +143,7 @@ public static class EncounterTooltipHelper
         foreach (var descriptor in emptyEntries)
         {
             AppendDescriptorCell(body, descriptor);
-            AppendEmptyDataCells(body);
+            AppendEmptyDataCells(body, wide: true);
         }
 
         // DEBUG: 20 fake character rows to test scrollable layout. Remove before release.
@@ -168,7 +169,7 @@ public static class EncounterTooltipHelper
         if (perCharMetrics.Count > 0)
             AppendAllRowFromPerCharMetrics(baseline, perCharMetrics, totalFought, totalDied);
         else
-            AppendEmptyDataCells(baseline);
+            AppendEmptyDataCells(baseline, wide: true);
         baseline.Append("[/table]");
 
         // --- Footer ---
@@ -243,6 +244,9 @@ public static class EncounterTooltipHelper
     private const string TightCellPadding      = "padding=3,0,3,0";   // within a triple
     private const string NormalCellPadding      = "padding=8,0,8,0";   // between groups
     private const string DescriptorCellPadding  = "padding=0,0,8,0";   // descriptor → Fought
+    // Wider padding for the all-characters table — character icons + "%" suffixes need more room.
+    private const string WideNormalCellPadding   = "padding=12,0,12,0";
+    private const string WideTightCellPadding    = "padding=6,0,6,0";
 
     /// <summary>Per-column padding assignments so each cell-emitter picks the
     /// right tier without hard-coding padding strings inline.</summary>
@@ -256,6 +260,20 @@ public static class EncounterTooltipHelper
         public readonly string Pots   = TightCellPadding;
         public readonly string Deaths = NormalCellPadding;
         public ColumnPaddings() {}
+    }
+
+    /// <summary>Wider padding for the all-characters table where character icons and
+    /// "%" suffixes on damage columns make the rows wider.</summary>
+    private struct WideColumnPaddings
+    {
+        public readonly string Fought = WideNormalCellPadding;
+        public readonly string Dmg    = WideTightCellPadding;
+        public readonly string Mid50  = WideTightCellPadding;
+        public readonly string Spread = WideNormalCellPadding;
+        public readonly string Turns  = WideTightCellPadding;
+        public readonly string Pots   = WideTightCellPadding;
+        public readonly string Deaths = WideTightCellPadding;
+        public WideColumnPaddings() {}
     }
 
     private static string EmptyDataCell(string padding, string? color = null)
@@ -506,7 +524,7 @@ public static class EncounterTooltipHelper
     {
         int charCount = metrics.Count;
         string color = ContextRowDataColor;
-        var P = new ColumnPaddings();
+        var P = new WideColumnPaddings();
 
         // Median-of-medians for dmg%
         double allDmgPct = MedianOfDoubles(metrics.Select(m => m.DmgPctMedian).ToList());
@@ -584,10 +602,10 @@ public static class EncounterTooltipHelper
         AllRowBaselines baselines)
     {
         int n = stat.Fought;
-        var P = new ColumnPaddings();
+        var P = new WideColumnPaddings();
         if (n == 0 || startingHp <= 0)
         {
-            AppendEmptyDataCells(sb);
+            AppendEmptyDataCells(sb, wide: true);
             return;
         }
 
@@ -624,16 +642,30 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>Appends a full row of empty "-" data cells for the [table=8] layout.</summary>
-    private static void AppendEmptyDataCells(StringBuilder sb)
+    private static void AppendEmptyDataCells(StringBuilder sb, bool wide = false)
     {
-        var P = new ColumnPaddings();
-        sb.Append(EmptyDataCell(P.Fought));
-        sb.Append(EmptyDataCell(P.Dmg));
-        sb.Append(EmptyDataCell(P.Mid50));
-        sb.Append(EmptyDataCell(P.Spread));
-        sb.Append(EmptyDataCell(P.Turns));
-        sb.Append(EmptyDataCell(P.Pots));
-        sb.Append(EmptyDataCell(P.Deaths));
+        if (wide)
+        {
+            var W = new WideColumnPaddings();
+            sb.Append(EmptyDataCell(W.Fought));
+            sb.Append(EmptyDataCell(W.Dmg));
+            sb.Append(EmptyDataCell(W.Mid50));
+            sb.Append(EmptyDataCell(W.Spread));
+            sb.Append(EmptyDataCell(W.Turns));
+            sb.Append(EmptyDataCell(W.Pots));
+            sb.Append(EmptyDataCell(W.Deaths));
+        }
+        else
+        {
+            var P = new ColumnPaddings();
+            sb.Append(EmptyDataCell(P.Fought));
+            sb.Append(EmptyDataCell(P.Dmg));
+            sb.Append(EmptyDataCell(P.Mid50));
+            sb.Append(EmptyDataCell(P.Spread));
+            sb.Append(EmptyDataCell(P.Turns));
+            sb.Append(EmptyDataCell(P.Pots));
+            sb.Append(EmptyDataCell(P.Deaths));
+        }
     }
 
     /// <summary>FormatDeathsCell variant for the new table layout — no padding,
