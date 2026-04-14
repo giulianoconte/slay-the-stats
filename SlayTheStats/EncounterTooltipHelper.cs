@@ -154,7 +154,7 @@ public static class EncounterTooltipHelper
         var allIcon = AllCharsIcon(22);
         AppendDescriptorCell(baseline, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)");
         if (perCharMetrics.Count > 0)
-            AppendAllRowFromPerCharMetrics(baseline, perCharMetrics, totalFought, totalDied);
+            AppendAllRowFromPerCharMetrics(baseline, perCharMetrics, totalFought);
         else
             AppendEmptyDataCells(baseline, wide: true);
         baseline.Append("[/table]");
@@ -260,7 +260,7 @@ public static class EncounterTooltipHelper
         var allIcon = AllCharsIcon(22);
         AppendDescriptorCell(sb, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)");
         if (perCharMetrics.Count > 0)
-            AppendAllRowFromPerCharMetrics(sb, perCharMetrics, totalFought, totalDied);
+            AppendAllRowFromPerCharMetrics(sb, perCharMetrics, totalFought);
         else
             AppendEmptyDataCells(sb, wide: true);
 
@@ -281,14 +281,12 @@ public static class EncounterTooltipHelper
     // cells first. Context-row data cells (rows 2, 3, 4) use an off-white beige
     // that's bright enough to scan cleanly but stays distinct from row 1's
     // significance-colored white numbers (which get the default label color).
-    private const string BaselineSectionColor = "#6a6a6a";  // dull grey — biome pool descriptor
-    private const string PoolSectionColor     = "#6a6a6a";  // dull grey — all-acts category descriptor
-    private const string AllCharsSectionColor = "#6a6a6a";  // dull grey — cross-character descriptor
-    // Dull neutral grey for the data cells in rows 2, 3, 4 (the always-neutral
-    // reference/context rows). Intentionally dimmer than TooltipHelper.NeutralShade
-    // (#909090 — used by colorable cells when significance is below threshold) so
-    // context rows read as "reference material" and colorable rows stay visually
-    // distinct even when their values happen to fall at neutral.
+    // Intentionally faded so the non-colored context rows read as "reference material"
+    // and the colored row 1 (subject) + colored per-character rows (all-chars table)
+    // draw the eye. Faded enough to cue "not significance-highlightable".
+    private const string BaselineSectionColor = "#6a6a6a";
+    private const string PoolSectionColor     = "#6a6a6a";
+    private const string AllCharsSectionColor = "#6a6a6a";
     private const string ContextRowDataColor  = "#6a6a6a";
 
     // BBCode constants used across the focused-view table cells.
@@ -298,7 +296,7 @@ public static class EncounterTooltipHelper
     private const string KreonRegFontTag  = "[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=18]";
     private const string KreonRegClose    = "[/font_size][/font]";
     private const string KreonBoldFontTag = "[font=res://themes/kreon_bold_glyph_space_one.tres]";
-    private const string HeaderColor      = "#8e8676";  // dim warm grey for column headers
+    private const string HeaderColor      = "#c0b89e";  // warm grey for column headers, brighter than the dim 8e8676
     // Minimum baseline for potion coloration. Prevents extreme colors from tiny
     // absolute differences by ensuring the ratio denominator isn't near-zero.
     // Complements PotionKScale — the floor handles small baselines, the k-scale
@@ -601,7 +599,7 @@ public static class EncounterTooltipHelper
     /// damage columns use median-of-medians (each character contributes equally).
     /// Mean columns (turns, pots, death rate) use mean-of-means.</summary>
     private static void AppendAllRowFromPerCharMetrics(StringBuilder sb,
-        List<AllCharsPerCharMetrics> metrics, int totalFought, int totalDied)
+        List<AllCharsPerCharMetrics> metrics, int totalFought)
     {
         int charCount = metrics.Count;
         string color = ContextRowDataColor;
@@ -617,16 +615,18 @@ public static class EncounterTooltipHelper
             ? (MedianOfDoubles(p25s), MedianOfDoubles(p75s))
             : null;
 
-        // Mean-of-means for turns, pots, death rate
-        double allTurns    = metrics.Average(m => m.AvgTurns);
-        double allPots     = metrics.Average(m => m.AvgPots);
+        // Mean-of-means for turns, pots, death rate (character-weighted, matching
+        // the baseline used to color per-character Deaths cells).
+        double allTurns     = metrics.Average(m => m.AvgTurns);
+        double allPots      = metrics.Average(m => m.AvgPots);
+        double allDeathRate = metrics.Average(m => m.DeathRate);
 
         string fDmgPct  = $"{allDmgPct:F0}%";
         string fIqr     = allIqr.HasValue ? $"{allIqr.Value.p25:F0}-{allIqr.Value.p75:F0}%" : "-";
         string fSpread  = FormatSpreadValue(allIqr, allDmgPct);
         string fTurns   = $"{allTurns:F1}";
         string fPots    = $"{allPots:F1}";
-        string fDeaths  = $"{totalDied}/{totalFought}";
+        string fDeaths  = $"{allDeathRate:F0}%";
 
         sb.Append($"[cell {P.Fought}][right][color={color}]{totalFought}[/color][/right][/cell]");
         sb.Append($"[cell {P.Dmg}][right][color={color}]{fDmgPct}[/color][/right][/cell]");
@@ -884,7 +884,7 @@ public static class EncounterTooltipHelper
         AppendHeaderCell(sb, "Spread",  NormalCellPadding);
         AppendHeaderCell(sb, "Turns",   TightCellPadding);
         AppendHeaderCell(sb, "Potions", TightCellPadding);
-        AppendHeaderCell(sb, "Deaths",  TightCellPadding);
+        AppendHeaderCell(sb, "Deaths",  NormalCellPadding);  // must match ColumnPaddings.Deaths so header right-aligns with data cells
 
         // Row 1: this encounter, this character — data cells colored against act pool baseline
         AppendDescriptorCell(sb, $"{charIcon}vs {encNameRow1}");

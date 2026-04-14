@@ -422,7 +422,7 @@ internal static class TooltipHelper
 
     // Three shades per direction: light, medium, heavy. Chosen by significance score.
     // NeutralShade is used when significance is below threshold — dimmer than even the faintest shade.
-    internal const string NeutralShade = "#909090";
+    internal const string NeutralShade = "#b5b5b5";
 
     // Color-blind palette: teal (good) / orange (bad) — distinguishable without red/green.
     private static readonly string[] _cbBadShades  = { "#A87850", "#D86828", "#F06020" };

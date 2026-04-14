@@ -129,9 +129,9 @@ public static class BestiaryButtonPatch
                     var hsvField = AccessTools.Field(typeof(NCompendiumBottomButton), "_hsv");
                     hsvField?.SetValue(ourButton, ownMat);
                 }
-                // Earthy / dirt tone — desaturated brown-tan instead of the prior warm
-                // orange so it reads as "field guide" rather than "hazard warning".
-                ((CanvasItem)bgPanel).SelfModulate = new Color(0.88f, 0.80f, 0.62f, 1f);
+                // Earthy dirt tone — darker, desaturated brown so it reads as
+                // "field guide / soil" rather than the bronze-y warm-tan it used to.
+                ((CanvasItem)bgPanel).SelfModulate = new Color(0.65f, 0.59f, 0.52f, 1f);
             }
 
             // Replace the icon with a square grid of boss icons (encountered in full color,
@@ -485,7 +485,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         sortRowOuter.AddThemeConstantOverride("separation", 8);
         var sortLabel = new Label();
         sortLabel.Text = "Sort by:";
-        sortLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.9f));
+        sortLabel.AddThemeColorOverride("font_color", new Color(0.88f, 0.86f, 0.80f, 1f));
         sortLabel.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(sortLabel);
         sortRowOuter.AddChild(sortLabel);
@@ -655,16 +655,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Sits directly above the stats title so the selector is adjacent to the
         // table it controls. Choosing a character switches the table to focused-
         // character mode; leaving "All" shows the per-character comparison table.
+        // Icon-only selector (Prismatic Gem for Overview + per-character head icons).
+        // No label, no surrounding buttons — selected icon is opaque, unselected dimmed.
         var focusCharBar = new HBoxContainer();
         focusCharBar.AddThemeConstantOverride("separation", 8);
         focusCharBar.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        var focusCharLabel = new Label();
-        focusCharLabel.Text = "Table Style:";
-        focusCharLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.9f));
-        focusCharLabel.AddThemeFontSizeOverride("font_size", 14);
-        focusCharLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-        ApplyKreonFont(focusCharLabel);
-        focusCharBar.AddChild(focusCharLabel);
         focusCharBar.AddChild(_sortCharRow);
         rightPanel.AddChild(focusCharBar);
 
@@ -1112,6 +1107,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var boldFont = TooltipHelper.GetKreonBoldFont();
             if (boldFont != null) label.AddThemeFontOverride("bold_font", boldFont);
         }
+        // Drop shadow so the table text matches the rest of the bestiary (and the tooltip family).
+        ApplyTextShadow(label);
         return label;
     }
 
@@ -1417,7 +1414,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             // is centralized on catWrap via position-based hit detection in GuiInput.
             var arrowLabel = new Label();
             arrowLabel.Text = collapsed ? "▶" : "▼";
-            arrowLabel.AddThemeColorOverride("font_color", new Color(0.82f, 0.82f, 0.82f, 1f));
+            arrowLabel.AddThemeColorOverride("font_color", new Color(0.96f, 0.96f, 0.96f, 1f));
             arrowLabel.AddThemeFontSizeOverride("font_size", 15);
             arrowLabel.MouseFilter = MouseFilterEnum.Ignore;
             arrowLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
@@ -1612,7 +1609,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     }
 
     private const float StatColumnWidthPx = 70f;
-    private const float StatColumnRightPadPx = 24f;
+    // Right padding in the column header row. Sized to align the header's stat-label
+    // right edge with each encounter row's stat-label right edge. An encounter row's
+    // stat right edge sits at (row.right - RowMarginRightPx - highlightPanel.CM_right)
+    // = row.right - 12. The header ends at (row.right - StatColumnRightPadPx - 6sep),
+    // so StatColumnRightPadPx = 6 makes the two right edges coincide.
+    private const float StatColumnRightPadPx = 6f;
     private const int RowHeightPx = 30;
     /// <summary>Boss rows get a bit more vertical room than text rows so the per-boss icon
     /// has breathing space without forcing the text rows to grow with it.</summary>
@@ -1627,7 +1629,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// </summary>
     internal static void ApplyTextShadow(Control control)
     {
-        var shadow = new Color(0f, 0f, 0f, 0.55f);
+        // Match the tooltip shadow (TooltipHelper.Fonts.Shadow) so the bestiary and
+        // tooltip surfaces feel like one family. Offsets (3, 2) also match.
+        var shadow = TooltipHelper.Fonts.Shadow;
         switch (control)
         {
             case RichTextLabel rt:
@@ -1676,7 +1680,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var encounterHeader = new Label();
         encounterHeader.Text = "Encounter";
         encounterHeader.MouseFilter = MouseFilterEnum.Ignore;
-        encounterHeader.AddThemeColorOverride("font_color", new Color(0.604f, 0.580f, 0.518f, 1f));
+        encounterHeader.AddThemeColorOverride("font_color", new Color(0.88f, 0.85f, 0.76f, 1f));
         encounterHeader.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(encounterHeader);
         ApplyTextShadow(encounterHeader);
@@ -1700,7 +1704,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         headerLabel.AddThemeFontSizeOverride("normal_font_size", 14);
         headerLabel.AddThemeFontSizeOverride("bold_font_size", 14);
         ApplyKreonFont(headerLabel);
-        headerLabel.Text = $"[right][color=#9a9484]{EncounterSorting.Label(displayMode)}[/color][/right]";
+        // Match the Encounter label color on the same row so both column headers read as one family.
+        headerLabel.Text = $"[right][color=#e0d9c2]{EncounterSorting.Label(displayMode)}[/color][/right]";
         _statsColumnHeaderRow.AddChild(headerLabel);
 
         _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(StatColumnRightPadPx, 0) });
@@ -1876,6 +1881,26 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         return $"{label} {arrow}";
     }
 
+    // Icon-only Table Style selector — mimics NCardPoolFilter from the card library.
+    // Scale-based selection: selected icon sits at 1.1× (slightly larger), unselected
+    // at 0.95×. On hover, the current scale is multiplied by 1.2× using a SINE-OUT
+    // tween (0.05s in / 0.3s out), matching NCardPoolFilter's tween values. No halo,
+    // no alpha dimming — size alone cues selection + hover state. Pivot is set to
+    // the icon center so the scale grows symmetrically.
+    private const int SelectorIconSize = 56;
+    private static readonly Vector2 SelectorSelectedScale   = Vector2.One * 1.1f;
+    private static readonly Vector2 SelectorUnselectedScale = Vector2.One * 0.95f;
+    // Prismatic Gem is the Overview slot — visually it's a chunky relic sprite and
+    // reads larger than the character head icons at the same scale, so shrink it a
+    // bit so it doesn't dominate the row.
+    private const float SelectorGemScaleFactor = 0.75f;
+    private const float SelectorHoverGrowth = 1.2f;
+    private const double SelectorHoverInDuration = 0.05;
+    private const double SelectorHoverOutDuration = 0.3;
+    // Unselected icons fade to this alpha so the selected one stands out in addition
+    // to the scale cue. Selected = full alpha.
+    private const float SelectorUnselectedAlpha = 0.45f;
+
     private void RebuildSortCharRow()
     {
         if (_sortCharRow == null) return;
@@ -1887,13 +1912,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             child.QueueFree();
         }
 
-        // "Overview" pseudo-character (all-chars comparison table) + canonical roster
-        // + any modded characters present in data.
-        var options = new List<(string? id, string label)> { (null, "Overview") };
-        foreach (var (id, label) in EncounterTooltipHelper.CanonicalCharacters)
-            options.Add((id, label));
+        // Overview slot → Prismatic Gem (the relic that grants access to every color in
+        // STS — same symbol as the all-chars row on the stats table).
+        var options = new List<(string? id, Texture2D? icon)>
+        {
+            (null, LoadPrismaticGemTexture()),
+        };
+        foreach (var (id, _) in EncounterTooltipHelper.CanonicalCharacters)
+            options.Add((id, LoadCharacterIconTexture(id)));
 
-        // Append any non-canonical characters that show up in EncounterMeta data
         var canonicalIds = EncounterTooltipHelper.CanonicalCharacters.Select(t => t.id).ToHashSet();
         var extraChars = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var contextMap in MainFile.Db.Encounters.Values)
@@ -1904,21 +1931,110 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                     extraChars.Add(ctx.Character);
             }
         foreach (var id in extraChars)
-            options.Add((id, FormatCharacterShortName(id)));
+            options.Add((id, LoadCharacterIconTexture(id)));
 
-        foreach (var (id, label) in options)
+        foreach (var (id, icon) in options)
         {
+            if (icon == null) continue;
             bool selected = id == _sortCharacter;
             var capturedId = id;
-            var icon = id != null ? LoadCharacterIconTexture(id) : null;
-            var btn = MakeChipButton(label, selected, () =>
+
+            // Overview (Prismatic Gem) slot gets an additional shrink factor so the
+            // chunky relic sprite visually balances with the smaller character heads.
+            float sizeFactor = id == null ? SelectorGemScaleFactor : 1f;
+            var baseScale = (selected ? SelectorSelectedScale : SelectorUnselectedScale) * sizeFactor;
+
+            // Wrapper so the shadow TextureRect can render behind the interactive
+            // TextureButton and scale alongside it via a shared scale tween target.
+            // Wrapper size matches SelectorIconSize; actual icon + shadow scale is
+            // driven by the TextureButton's Scale (both rects share PivotOffset
+            // and their parent transform scales them together).
+            var slot = new Control
             {
+                CustomMinimumSize = new Vector2(SelectorIconSize, SelectorIconSize),
+                MouseFilter = Control.MouseFilterEnum.Pass,
+                PivotOffset = new Vector2(SelectorIconSize / 2f, SelectorIconSize / 2f),
+                Scale = baseScale,
+                Modulate = new Color(1f, 1f, 1f, selected ? 1f : SelectorUnselectedAlpha),
+            };
+
+            // Drop shadow — same icon texture rendered black-with-alpha behind the
+            // main one, offset a few pixels. Matches card library's shadowed icons.
+            var shadowRect = new TextureRect
+            {
+                Texture = icon,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+                AnchorLeft = 0, AnchorTop = 0, AnchorRight = 1, AnchorBottom = 1,
+                OffsetLeft = 3, OffsetTop = 3, OffsetRight = 3, OffsetBottom = 3,
+                Modulate = new Color(0f, 0f, 0f, 0.45f),
+            };
+            slot.AddChild(shadowRect);
+
+            var tb = new TextureButton
+            {
+                TextureNormal = icon,
+                IgnoreTextureSize = true,
+                StretchMode = TextureButton.StretchModeEnum.KeepAspectCentered,
+                AnchorLeft = 0, AnchorTop = 0, AnchorRight = 1, AnchorBottom = 1,
+                OffsetLeft = 0, OffsetTop = 0, OffsetRight = 0, OffsetBottom = 0,
+            };
+            slot.AddChild(tb);
+
+            var slotRef = slot;
+            tb.Pressed += () =>
+            {
+                SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
                 _sortCharacter = capturedId;
                 SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                 RefreshEncounterList();
-            }, icon);
-            _sortCharRow.AddChild(btn);
+            };
+            tb.MouseEntered += () =>
+            {
+                SfxCmd.Play("event:/sfx/ui/clicks/ui_hover");
+                var t = slotRef.CreateTween();
+                t.TweenProperty(slotRef, "scale", baseScale * SelectorHoverGrowth, SelectorHoverInDuration)
+                 .SetTrans(Tween.TransitionType.Sine)
+                 .SetEase(Tween.EaseType.Out);
+            };
+            tb.MouseExited += () =>
+            {
+                var t = slotRef.CreateTween();
+                t.TweenProperty(slotRef, "scale", baseScale, SelectorHoverOutDuration)
+                 .SetTrans(Tween.TransitionType.Sine);
+            };
+            _sortCharRow.AddChild(slot);
         }
+        MainFile.Logger.Info($"[SlayTheStats] RebuildSortCharRow: {options.Count} options, selected={_sortCharacter ?? "<overview>"}");
+    }
+
+    private static Texture2D? _prismaticGemTexture;
+    private static bool _prismaticGemProbed;
+
+    /// <summary>Loads the Prismatic Gem relic icon as a Texture2D for the Overview
+    /// slot of the Table Style selector. Cached after first probe.</summary>
+    private static Texture2D? LoadPrismaticGemTexture()
+    {
+        if (_prismaticGemProbed) return _prismaticGemTexture;
+        _prismaticGemProbed = true;
+        // Candidate paths mirror EncounterTooltipHelper.AllCharsIcon's resolution logic:
+        // the canonical name is prismatic_gem (PrismaticGem → StringHelper.Slugify → PRISMATIC_GEM → prismatic_gem).
+        string[] candidates =
+        {
+            "res://images/relics/prismatic_gem.png",
+            "res://images/relics/prismaticgem.png",
+        };
+        foreach (var path in candidates)
+        {
+            if (ResourceLoader.Exists(path))
+            {
+                _prismaticGemTexture = ResourceLoader.Load<Texture2D>(path);
+                return _prismaticGemTexture;
+            }
+        }
+        MainFile.Logger.Warn("[SlayTheStats] LoadPrismaticGemTexture: failed to resolve any candidate: " + string.Join(", ", candidates));
+        return null;
     }
 
     /// <summary>Loads the top-panel character head sprite as a Texture2D for use
@@ -1967,7 +2083,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         btn.AddThemeStyleboxOverride("hover", hover);
 
         btn.AddThemeColorOverride("font_color",
-            selected ? new Color(0.918f, 0.745f, 0.318f, 1f) : new Color(0.75f, 0.73f, 0.68f, 1f));
+            selected ? new Color(0.918f, 0.745f, 0.318f, 1f) : new Color(0.94f, 0.92f, 0.85f, 1f));
         btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
         btn.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(btn);
@@ -2107,7 +2223,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             btn.AddThemeStyleboxOverride("hover", hoverTab);
 
             btn.AddThemeColorOverride("font_color",
-                selected ? new Color(0.918f, 0.745f, 0.318f, 1f) : new Color(0.80f, 0.78f, 0.72f, 1f));
+                selected ? new Color(0.918f, 0.745f, 0.318f, 1f) : new Color(0.94f, 0.92f, 0.85f, 1f));
             btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
             btn.AddThemeFontSizeOverride("font_size", 18);
             ApplyKreonFont(btn, bold: true);
@@ -2281,7 +2397,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         nameLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         nameLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
         nameLabel.MouseFilter = MouseFilterEnum.Ignore;
-        nameLabel.AddThemeColorOverride("default_color", new Color(0.90f, 0.88f, 0.82f, 1f));
+        nameLabel.AddThemeColorOverride("default_color", new Color(1.00f, 0.98f, 0.92f, 1f));
         nameLabel.AddThemeFontSizeOverride("normal_font_size", 17);
         ApplyKreonFont(nameLabel);
         ApplyTextShadow(nameLabel);
@@ -2293,7 +2409,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var monsterCounts = meta.MonsterIds
                 .GroupBy(m => m)
                 .Select(g => g.Count() > 1 ? $"{FormatMonsterName(g.Key)} x{g.Count()}" : FormatMonsterName(g.Key));
-            monsterInfo = $"  [color=#505050]({string.Join(", ", monsterCounts)})[/color]";
+            monsterInfo = $"  [color=#8a8a8a]({string.Join(", ", monsterCounts)})[/color]";
         }
         nameLabel.Text = $"{encounterName}{monsterInfo}";
         innerRow.AddChild(nameLabel);
@@ -2324,7 +2440,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var hasBbcodeColor = scoreText.Contains("[color=");
         statLabel.Text = hasBbcodeColor
             ? $"[right]{scoreText}[/right]"
-            : $"[right][color=#a8a39a]{scoreText}[/color][/right]";
+            : $"[right][color=#d8d3c8]{scoreText}[/color][/right]";
         innerRow.AddChild(statLabel);
 
         var capturedCategory = category;
@@ -3908,43 +4024,44 @@ internal static class EncounterSorting
         var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
         if (perChar.Count == 0) return null;
 
-        // For median/spread modes we need the merged DamageValues list; for
-        // other modes the aggregate sums suffice.
-        EncounterEvent combined = new();
+        // Per-character branch uses the raw EncounterEvent directly. The all-chars
+        // branch uses character-weighted aggregation (AggregateMetricsFromEvents) to
+        // match the display path's all-chars baseline row. Earlier versions pooled
+        // raw DamageValues across characters via AddRange, which inflated IQRC
+        // dramatically when characters had different damage distributions (e.g.
+        // Ironclad 5-15 + Defect 30-80 → pooled IQR 5-80, IQRC ~5.5).
+        long fought;
+        double raw;
         if (sortCharacter != null)
         {
             if (!perChar.TryGetValue(sortCharacter, out var stat) || stat.Fought == 0) return null;
-            combined = stat;
+            fought = stat.Fought;
+            raw = mode switch
+            {
+                EncounterSortMode.Seen         => fought,
+                EncounterSortMode.DeathRate    => (double)stat.Died / fought,
+                EncounterSortMode.MedianDamage => stat.DamageMedian() ?? (double)stat.DamageTakenSum / fought,
+                EncounterSortMode.Spread       => ComputeIqrc(stat),
+                EncounterSortMode.Turns        => (double)stat.TurnsTakenSum / fought,
+                _ => double.NaN,
+            };
         }
         else
         {
-            foreach (var stat in perChar.Values)
+            var agg = StatsAggregator.AggregateMetricsFromEvents(perChar.Values);
+            if (agg.Fought == 0) return null;
+            fought = agg.Fought;
+            raw = mode switch
             {
-                combined.Fought         += stat.Fought;
-                combined.Died           += stat.Died;
-                combined.DamageTakenSum += stat.DamageTakenSum;
-                combined.TurnsTakenSum  += stat.TurnsTakenSum;
-                combined.DmgPctSum      += stat.DmgPctSum;
-                if (stat.DamageValues != null)
-                {
-                    combined.DamageValues ??= new List<int>();
-                    combined.DamageValues.AddRange(stat.DamageValues);
-                }
-            }
+                EncounterSortMode.Seen         => fought,
+                EncounterSortMode.DeathRate    => agg.DeathRate / 100.0,
+                EncounterSortMode.MedianDamage => agg.Median,
+                EncounterSortMode.Spread       => agg.Iqrc,
+                EncounterSortMode.Turns        => agg.AvgTurns,
+                _ => double.NaN,
+            };
+            MainFile.Logger.Info($"[SlayTheStats] Score(all-chars) enc={encounterId} mode={mode} raw={raw:F3} fought={fought} chars={perChar.Count}");
         }
-
-        long fought = combined.Fought;
-        if (fought == 0) return null;
-
-        double raw = mode switch
-        {
-            EncounterSortMode.Seen         => fought,
-            EncounterSortMode.DeathRate    => (double)combined.Died / fought,
-            EncounterSortMode.MedianDamage => combined.DamageMedian() ?? (double)combined.DamageTakenSum / fought,
-            EncounterSortMode.Spread       => ComputeIqrc(combined),
-            EncounterSortMode.Turns        => (double)combined.TurnsTakenSum / fought,
-            _ => double.NaN,
-        };
         if (double.IsNaN(raw)) return null;
 
         if (!bySignificance || mode == EncounterSortMode.Seen)
@@ -4129,22 +4246,22 @@ internal static class EncounterIcons
 
     public static string CategoryColorHex(string category) => category switch
     {
-        "weak"    => "#7ea88a",  // slight green to differentiate from normal
-        "normal"  => "#e0d4ad",  // warmer / more saturated brownish gold so it reads stronger
-        "elite"   => "#c557b8",  // fuchsia/purple — matches run history elite color
-        "boss"    => "#d6614f",
-        "event"   => "#f4dc4a",  // pure-ish yellow matching the run history question mark
-        _         => "#a0a0a0",
+        "weak"    => "#6fdb8f",  // saturated green
+        "normal"  => "#3da4f0",  // saturated sky blue — differentiates from megacrit golden used for headers/buttons
+        "elite"   => "#e84ad5",  // saturated fuchsia
+        "boss"    => "#fc6e58",  // saturated warm red
+        "event"   => "#ffde3e",  // saturated yellow
+        _         => "#c8c8c8",
     };
 
     public static Color CategoryColor(string category) => category switch
     {
-        "weak"    => new Color(0.494f, 0.659f, 0.541f, 1f),
-        "normal"  => new Color(0.878f, 0.831f, 0.678f, 1f),
-        "elite"   => new Color(0.773f, 0.341f, 0.722f, 1f),
-        "boss"    => new Color(0.839f, 0.380f, 0.310f, 1f),
-        "event"   => new Color(0.957f, 0.863f, 0.290f, 1f),
-        _         => new Color(0.627f, 0.627f, 0.627f, 1f),
+        "weak"    => new Color(0.435f, 0.859f, 0.561f, 1f),
+        "normal"  => new Color(0.239f, 0.643f, 0.941f, 1f),  // saturated sky blue
+        "elite"   => new Color(0.910f, 0.290f, 0.835f, 1f),
+        "boss"    => new Color(0.988f, 0.431f, 0.345f, 1f),
+        "event"   => new Color(1.000f, 0.871f, 0.243f, 1f),
+        _         => new Color(0.784f, 0.784f, 0.784f, 1f),
     };
 
     public static TextureRect? MakeCategoryIcon(string category, int sizePx)
@@ -4190,12 +4307,19 @@ internal static class EncounterIcons
     {
         var tex = LoadCategoryTexture(category);
         if (tex == null) return null;
+        var outline = LoadCategoryOutlineTexture(category);
+        // Elite uses the base texture's pre-baked coloration (the game's run history
+        // leaves secondary details — eyes, mount — at a paler tone, which a uniform
+        // modulate would kill). All other categories still get their category tint
+        // so weak / normal / event / boss are visually distinguishable.
+        var tint = category == "elite" ? Colors.White : CategoryColor(category);
         return BuildHoverHandle(
             tex,
             sizePx,
-            CategoryColor(category),
+            tint,
             wrapperHeightOverride: CategoryIconRowHeightPx,
-            wrapperWidthOverride:  CategoryIconColumnWidthPx);
+            wrapperWidthOverride:  CategoryIconColumnWidthPx,
+            outlineTex: outline);
     }
 
     /// <summary>
@@ -4207,10 +4331,12 @@ internal static class EncounterIcons
     {
         var perBoss = LoadBossTexture(encounterId);
         if (perBoss != null)
-            return BuildHoverHandle(perBoss, sizePx, Colors.White, rowHeightOverridePx);
+            return BuildHoverHandle(perBoss, sizePx, Colors.White, rowHeightOverridePx,
+                outlineTex: LoadBossOutlineTexture(encounterId));
         var fallback = LoadCategoryTexture("boss");
         if (fallback == null) return null;
-        return BuildHoverHandle(fallback, sizePx, CategoryColor("boss"), rowHeightOverridePx);
+        return BuildHoverHandle(fallback, sizePx, CategoryColor("boss"), rowHeightOverridePx,
+            outlineTex: LoadCategoryOutlineTexture("boss"));
     }
 
     /// <summary>
@@ -4230,16 +4356,19 @@ internal static class EncounterIcons
         var perBoss = LoadBossTexture(encounterId);
         Color modulate;
         Texture2D? tex;
+        Texture2D? outlineTex;
         if (perBoss != null)
         {
             tex = perBoss;
             modulate = Colors.White;
+            outlineTex = LoadBossOutlineTexture(encounterId);
         }
         else
         {
             tex = LoadCategoryTexture("boss");
             if (tex == null) return null;
             modulate = CategoryColor("boss");
+            outlineTex = LoadCategoryOutlineTexture("boss");
         }
 
         int padding = 4;
@@ -4249,6 +4378,24 @@ internal static class EncounterIcons
         var wrapper = new Control();
         wrapper.CustomMinimumSize = new Vector2(outerW, outerH);
         wrapper.MouseFilter = Control.MouseFilterEnum.Ignore;
+
+        if (outlineTex != null)
+        {
+            var outline = new TextureRect();
+            outline.Texture       = outlineTex;
+            outline.AnchorLeft    = 0.5f; outline.AnchorRight = 0.5f;
+            outline.AnchorTop     = 0.5f; outline.AnchorBottom = 0.5f;
+            outline.OffsetLeft    = -sizePx / 2f;
+            outline.OffsetRight   =  sizePx / 2f;
+            outline.OffsetTop     = -sizePx / 2f;
+            outline.OffsetBottom  =  sizePx / 2f;
+            outline.StretchMode   = TextureRect.StretchModeEnum.KeepAspectCentered;
+            outline.ExpandMode    = TextureRect.ExpandModeEnum.IgnoreSize;
+            outline.MouseFilter   = Control.MouseFilterEnum.Ignore;
+            ((CanvasItem)outline).Modulate = Colors.Black;
+            outline.PivotOffset   = new Vector2(sizePx / 2f, sizePx / 2f);
+            wrapper.AddChild(outline);
+        }
 
         var icon = new TextureRect();
         icon.Texture       = tex;
@@ -4410,7 +4557,8 @@ internal static class EncounterIcons
         int sizePx,
         Color iconModulate,
         int? wrapperHeightOverride = null,
-        int? wrapperWidthOverride  = null)
+        int? wrapperWidthOverride  = null,
+        Texture2D? outlineTex = null)
     {
         // Wrap the icon in a fixed-size Control so layout doesn't shift when the icon scales.
         // The padding gives the halo + scale tween enough room to render without being
@@ -4484,6 +4632,23 @@ internal static class EncounterIcons
         ((CanvasItem)highlight).Modulate = new Color(1f, 1f, 1f, 0f);
         wrapper.AddChild(highlight);
 
+        // Black outline below the main icon (matches the base game's run history) —
+        // added before the main icon so the main icon renders on top of it. Using
+        // the same sizing as the icon. We scale the outline up a fraction so it
+        // peeks around the main icon's silhouette instead of getting exactly
+        // overlapped pixel-for-pixel.
+        if (outlineTex != null)
+        {
+            var outline = new TextureRect();
+            outline.Texture     = outlineTex;
+            AnchorCenteredIcon(outline);
+            outline.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+            outline.ExpandMode  = TextureRect.ExpandModeEnum.IgnoreSize;
+            outline.MouseFilter = Control.MouseFilterEnum.Ignore;
+            ((CanvasItem)outline).Modulate = Colors.Black;
+            wrapper.AddChild(outline);
+        }
+
         var icon = new TextureRect();
         icon.Texture       = tex;
         AnchorCenteredIcon(icon);
@@ -4513,20 +4678,27 @@ internal static class EncounterIcons
         return rect;
     }
 
+    private static string CategorySlug(string category) => category switch
+    {
+        "weak"   => "monster",
+        "normal" => "monster",
+        "elite"  => "elite",
+        "boss"   => "elite",
+        "event"  => "event",
+        _        => "unknown_monster",
+    };
+
     private static Texture2D? LoadCategoryTexture(string category)
     {
-        // Run history icon slugs: monster.png, elite.png, event.png. Bosses use per-id images,
-        // but we tint elite.png with the boss color for the category header.
-        string slug = category switch
-        {
-            "weak"   => "monster",
-            "normal" => "monster",
-            "elite"  => "elite",
-            "boss"   => "elite",
-            "event"  => "event",
-            _        => "unknown_monster",
-        };
-        return LoadTexture($"res://images/ui/run_history/{slug}.png");
+        return LoadTexture($"res://images/ui/run_history/{CategorySlug(category)}.png");
+    }
+
+    /// <summary>Black outline texture that juxtaposes the main icon against any
+    /// background — same asset the base game's run history uses via
+    /// `ImageHelper.GetRoomIconOutlinePath`. Returns null if the file is missing.</summary>
+    private static Texture2D? LoadCategoryOutlineTexture(string category)
+    {
+        return LoadTexture($"res://images/ui/run_history/{CategorySlug(category)}_outline.png");
     }
 
     internal static Texture2D? LoadBossTexture(string encounterId)
@@ -4538,6 +4710,15 @@ internal static class EncounterIcons
             : encounterId;
         var slug = entry.ToLowerInvariant();
         return LoadTexture($"res://images/ui/run_history/{slug}.png");
+    }
+
+    internal static Texture2D? LoadBossOutlineTexture(string encounterId)
+    {
+        var entry = encounterId.StartsWith("ENCOUNTER.")
+            ? encounterId["ENCOUNTER.".Length..]
+            : encounterId;
+        var slug = entry.ToLowerInvariant();
+        return LoadTexture($"res://images/ui/run_history/{slug}_outline.png");
     }
 
     private static Texture2D? LoadTexture(string path)
