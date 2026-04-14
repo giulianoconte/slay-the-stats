@@ -2409,7 +2409,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var monsterCounts = meta.MonsterIds
                 .GroupBy(m => m)
                 .Select(g => g.Count() > 1 ? $"{FormatMonsterName(g.Key)} x{g.Count()}" : FormatMonsterName(g.Key));
-            monsterInfo = $"  [color=#8a8a8a]({string.Join(", ", monsterCounts)})[/color]";
+            monsterInfo = $"  [color=#6a6a6a]({string.Join(", ", monsterCounts)})[/color]";
         }
         nameLabel.Text = $"{encounterName}{monsterInfo}";
         innerRow.AddChild(nameLabel);
@@ -4381,19 +4381,22 @@ internal static class EncounterIcons
 
         if (outlineTex != null)
         {
+            // Shrink factor matches BuildHoverHandle so outline thickness is uniform across icons.
+            const float OutlineShrink = 0.94f;
+            float outlineSize = sizePx * OutlineShrink;
             var outline = new TextureRect();
             outline.Texture       = outlineTex;
             outline.AnchorLeft    = 0.5f; outline.AnchorRight = 0.5f;
             outline.AnchorTop     = 0.5f; outline.AnchorBottom = 0.5f;
-            outline.OffsetLeft    = -sizePx / 2f;
-            outline.OffsetRight   =  sizePx / 2f;
-            outline.OffsetTop     = -sizePx / 2f;
-            outline.OffsetBottom  =  sizePx / 2f;
+            outline.OffsetLeft    = -outlineSize / 2f;
+            outline.OffsetRight   =  outlineSize / 2f;
+            outline.OffsetTop     = -outlineSize / 2f;
+            outline.OffsetBottom  =  outlineSize / 2f;
             outline.StretchMode   = TextureRect.StretchModeEnum.KeepAspectCentered;
             outline.ExpandMode    = TextureRect.ExpandModeEnum.IgnoreSize;
             outline.MouseFilter   = Control.MouseFilterEnum.Ignore;
             ((CanvasItem)outline).Modulate = Colors.Black;
-            outline.PivotOffset   = new Vector2(sizePx / 2f, sizePx / 2f);
+            outline.PivotOffset   = new Vector2(outlineSize / 2f, outlineSize / 2f);
             wrapper.AddChild(outline);
         }
 
@@ -4614,6 +4617,32 @@ internal static class EncounterIcons
         // The actual screen halo width given our rounded dilation; usually ≈ TargetHaloScreenPx.
         float haloScreen = dilation * sizePx / (float)sourceSize;
 
+        // Black outline (matches the base game's run history). Rendered *below* the
+        // halo highlight so the glow occludes it on hover, and sized slightly smaller
+        // than the icon so the visible black ring peeks thinner around the silhouette.
+        // Source PNG has the icon silhouette pre-dilated, so shrinking the display
+        // rect pulls the edge inward — OutlineShrink tuned to ~6% gives a 1-2px ring
+        // at the normal icon size.
+        const float OutlineShrink = 0.94f;
+        if (outlineTex != null)
+        {
+            float outlineSize = sizePx * OutlineShrink;
+            var outline = new TextureRect();
+            outline.Texture     = outlineTex;
+            outline.AnchorLeft  = 0.5f; outline.AnchorRight  = 0.5f;
+            outline.AnchorTop   = 0.5f; outline.AnchorBottom = 0.5f;
+            outline.OffsetLeft  = -outlineSize / 2f;
+            outline.OffsetRight =  outlineSize / 2f;
+            outline.OffsetTop   = -outlineSize / 2f;
+            outline.OffsetBottom=  outlineSize / 2f;
+            outline.PivotOffset = new Vector2(outlineSize / 2f, outlineSize / 2f);
+            outline.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+            outline.ExpandMode  = TextureRect.ExpandModeEnum.IgnoreSize;
+            outline.MouseFilter = Control.MouseFilterEnum.Ignore;
+            ((CanvasItem)outline).Modulate = Colors.Black;
+            wrapper.AddChild(outline);
+        }
+
         var silhouetteTex = GetSilhouetteTexture(tex, dilation) ?? tex;
         var highlight = new TextureRect();
         highlight.Texture      = silhouetteTex;
@@ -4631,23 +4660,6 @@ internal static class EncounterIcons
         highlight.MouseFilter  = Control.MouseFilterEnum.Ignore;
         ((CanvasItem)highlight).Modulate = new Color(1f, 1f, 1f, 0f);
         wrapper.AddChild(highlight);
-
-        // Black outline below the main icon (matches the base game's run history) —
-        // added before the main icon so the main icon renders on top of it. Using
-        // the same sizing as the icon. We scale the outline up a fraction so it
-        // peeks around the main icon's silhouette instead of getting exactly
-        // overlapped pixel-for-pixel.
-        if (outlineTex != null)
-        {
-            var outline = new TextureRect();
-            outline.Texture     = outlineTex;
-            AnchorCenteredIcon(outline);
-            outline.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
-            outline.ExpandMode  = TextureRect.ExpandModeEnum.IgnoreSize;
-            outline.MouseFilter = Control.MouseFilterEnum.Ignore;
-            ((CanvasItem)outline).Modulate = Colors.Black;
-            wrapper.AddChild(outline);
-        }
 
         var icon = new TextureRect();
         icon.Texture       = tex;
