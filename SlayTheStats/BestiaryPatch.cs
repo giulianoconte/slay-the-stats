@@ -495,20 +495,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         sortRowOuter.AddChild(_sortTabRow);
         leftSection.AddChild(sortRowOuter);
 
-        // ── Sort character tabs ──
-        var sortCharOuter = new HBoxContainer();
-        sortCharOuter.AddThemeConstantOverride("separation", 8);
-        var sortCharLabel = new Label();
-        sortCharLabel.Text = "Score by:";
-        sortCharLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.9f));
-        sortCharLabel.AddThemeFontSizeOverride("font_size", 14);
-        ApplyKreonFont(sortCharLabel);
-        sortCharOuter.AddChild(sortCharLabel);
-
+        // ── Focus character row ──
+        // Moved to the right panel above the stats title so the selector sits next
+        // to the table it controls. The row itself (_sortCharRow) is still built
+        // here in RebuildSortCharRow; we only need to create the HBox container now
+        // and add it to the right panel below.
         _sortCharRow = new HBoxContainer();
         _sortCharRow.AddThemeConstantOverride("separation", 4);
-        sortCharOuter.AddChild(_sortCharRow);
-        leftSection.AddChild(sortCharOuter);
 
         // Separator between the top settings and the encounter list. Lives inside
         // leftSection (not outerVbox) so it doesn't span across the right panel —
@@ -657,6 +650,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         rightPanel.SizeFlagsStretchRatio = 1.25f;
         rightPanel.AddThemeConstantOverride("separation", 8);
         contentSplit.AddChild(rightPanel);
+
+        // ── Focus character bar (above the stats table) ──
+        // Sits directly above the stats title so the selector is adjacent to the
+        // table it controls. Choosing a character switches the table to focused-
+        // character mode; leaving "All" shows the per-character comparison table.
+        var focusCharBar = new HBoxContainer();
+        focusCharBar.AddThemeConstantOverride("separation", 8);
+        focusCharBar.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        var focusCharLabel = new Label();
+        focusCharLabel.Text = "Table Style:";
+        focusCharLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.6f, 0.6f, 0.9f));
+        focusCharLabel.AddThemeFontSizeOverride("font_size", 14);
+        focusCharLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        ApplyKreonFont(focusCharLabel);
+        focusCharBar.AddChild(focusCharLabel);
+        focusCharBar.AddChild(_sortCharRow);
+        rightPanel.AddChild(focusCharBar);
 
         // Stats label — wrapped in a fixed-height container so the divider below it
         // doesn't move, and the preview area below is the same height regardless of
@@ -1036,7 +1046,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             "  • Click a category header to collapse / expand it.",
             "",
             "[b][color=#efc851]Biome tabs[/color][/b] (top): switch between Acts and individual biomes. \"All\" shows everything.",
-            "[b][color=#efc851]Sort by[/color][/b] / [b][color=#efc851]Score by[/color][/b]: pick how the encounter list is ordered. \"Score by\" restricts the sort score to one character.",
+            "[b][color=#efc851]Sort by[/color][/b] / [b][color=#efc851]Focus character[/color][/b]: pick how the encounter list is ordered. \"Focus character\" switches the stats table to show detailed per-act context for one character (vs the default multi-character comparison view).",
             "[b][color=#efc851]Filters[/color][/b] (bottom-left): the SlayTheStats button opens a pane to filter by ascension / version / profile.",
             "",
             "[b][color=#efc851]Stat columns:[/color][/b]",
@@ -1293,7 +1303,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _selectedBiome = GetDefaultBiome();
         }
 
-        if (Enum.TryParse<EncounterSortMode>(SlayTheStatsConfig.BestiarySortMode, out var mode))
+        // Migrate legacy "IQR" value from prior versions → "Spread"
+        var savedSortMode = SlayTheStatsConfig.BestiarySortMode == "IQR"
+            ? "Spread"
+            : SlayTheStatsConfig.BestiarySortMode;
+        if (Enum.TryParse<EncounterSortMode>(savedSortMode, out var mode))
             _sortMode = mode;
         _sortDescending = SlayTheStatsConfig.BestiarySortDescending;
 
@@ -1399,31 +1413,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             catRow.Alignment = BoxContainer.AlignmentMode.Center;
             catWrap.AddChild(catRow);
 
-            // Collapse arrow indicator — wrapped in an opaque PanelContainer so the
-            // row's highlight background doesn't bleed under the arrow. The arrow
-            // area is functionally separate from the highlighted body (click on
-            // arrow → collapse/expand, click on body → lock stats).
+            // Collapse arrow indicator — plain label, no background. Click handling
+            // is centralized on catWrap via position-based hit detection in GuiInput.
             var arrowLabel = new Label();
             arrowLabel.Text = collapsed ? "▶" : "▼";
-            arrowLabel.AddThemeColorOverride("font_color", new Color(0.55f, 0.55f, 0.55f, 0.9f));
-            arrowLabel.AddThemeFontSizeOverride("font_size", 13);
+            arrowLabel.AddThemeColorOverride("font_color", new Color(0.82f, 0.82f, 0.82f, 1f));
+            arrowLabel.AddThemeFontSizeOverride("font_size", 15);
             arrowLabel.MouseFilter = MouseFilterEnum.Ignore;
             arrowLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             arrowLabel.VerticalAlignment = VerticalAlignment.Center;
             arrowLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            arrowLabel.CustomMinimumSize = new Vector2(20, 0);
             ApplyKreonFont(arrowLabel);
             ApplyTextShadow(arrowLabel);
-
-            var arrowBg = new PanelContainer();
-            arrowBg.CustomMinimumSize = new Vector2(20, 0);
-            arrowBg.MouseFilter = MouseFilterEnum.Ignore;
-            arrowBg.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-            var arrowStyle = new StyleBoxFlat();
-            arrowStyle.BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
-            arrowStyle.SetCornerRadiusAll(3);
-            arrowBg.AddThemeStyleboxOverride("panel", arrowStyle);
-            arrowBg.AddChild(arrowLabel);
-            catRow.AddChild(arrowBg);
+            catRow.AddChild(arrowLabel);
 
             // Build the category icon inside a hover wrapper so we can scale + outline it.
             var catSize = EncounterIcons.CategoryIconSize(category);
@@ -1496,10 +1499,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             };
             catWrap.GuiInput += (InputEvent ev) =>
             {
-                const float ArrowThreshold = 50f;
+                // Click region for collapse/expand: arrow + icon. 20(arrow) + 8(sep)
+                // + 62(icon column) = 90px. Matches the encounter row layout so the
+                // clickable collapse area visually lines up with the icon column.
+                const float CollapseThreshold = 90f;
                 if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
                 {
-                    if (mb.Position.X < ArrowThreshold)
+                    if (mb.Position.X < CollapseThreshold)
                     {
                         ToggleCategoryCollapse(capturedCategory);
                     }
@@ -1514,11 +1520,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                     }
                     catWrap.AcceptEvent();
                 }
-                // Double-click on the body (not the arrow) toggles collapse/expand.
-                // Skip arrow area — otherwise rapid clicking on the arrow fires
+                // Double-click on the body (not the arrow/icon area) toggles collapse/expand.
+                // Skip the collapse region — otherwise rapid clicking there fires
                 // single-click (toggle) + double-click (toggle again) = net zero.
                 if (ev is InputEventMouseButton db && db.DoubleClick && db.ButtonIndex == MouseButton.Left
-                    && db.Position.X >= ArrowThreshold)
+                    && db.Position.X >= CollapseThreshold)
                 {
                     ToggleCategoryCollapse(capturedCategory);
                     catWrap.AcceptEvent();
@@ -1881,8 +1887,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             child.QueueFree();
         }
 
-        // "All" pseudo-character + canonical roster + any modded characters present in data
-        var options = new List<(string? id, string label)> { (null, "All") };
+        // "Overview" pseudo-character (all-chars comparison table) + canonical roster
+        // + any modded characters present in data.
+        var options = new List<(string? id, string label)> { (null, "Overview") };
         foreach (var (id, label) in EncounterTooltipHelper.CanonicalCharacters)
             options.Add((id, label));
 
@@ -1903,21 +1910,42 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         {
             bool selected = id == _sortCharacter;
             var capturedId = id;
+            var icon = id != null ? LoadCharacterIconTexture(id) : null;
             var btn = MakeChipButton(label, selected, () =>
             {
                 _sortCharacter = capturedId;
                 SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                 RefreshEncounterList();
-            });
+            }, icon);
             _sortCharRow.AddChild(btn);
         }
     }
 
-    private Button MakeChipButton(string text, bool selected, Action onPressed)
+    /// <summary>Loads the top-panel character head sprite as a Texture2D for use
+    /// as a button icon. Returns null if the path doesn't resolve (e.g. for modded
+    /// characters without a matching asset).</summary>
+    private static Texture2D? LoadCharacterIconTexture(string characterId)
+    {
+        var name = characterId.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+            ? characterId.Substring("CHARACTER.".Length)
+            : characterId;
+        var path = $"res://images/ui/top_panel/character_icon_{name.ToLowerInvariant()}.png";
+        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+    }
+
+    private Button MakeChipButton(string text, bool selected, Action onPressed, Texture2D? icon = null)
     {
         var btn = new Button();
         btn.Text = text;
         btn.CustomMinimumSize = new Vector2(0, 28);
+        if (icon != null)
+        {
+            btn.Icon = icon;
+            btn.ExpandIcon = false;
+            btn.IconAlignment = HorizontalAlignment.Left;
+            btn.AddThemeConstantOverride("h_separation", 6);
+            btn.AddThemeConstantOverride("icon_max_width", 20);
+        }
 
         var style = new StyleBoxFlat();
         style.BgColor = selected
@@ -2283,7 +2311,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // clipped at the label's right edge — the shadow would otherwise get
         // cut off past the last glyph.
         statLabel.ClipContents = false;
-        statLabel.AddThemeFontSizeOverride("normal_font_size", 15);
+        // Match the name label's font size (17pt) so the stat column's text baseline
+        // aligns vertically with the encounter name on its left.
+        statLabel.AddThemeFontSizeOverride("normal_font_size", 17);
         ApplyKreonFont(statLabel);
         ApplyTextShadow(statLabel);
         var displayMode = sortMode == EncounterSortMode.Name ? EncounterSortMode.MedianDamage : sortMode;
@@ -3833,7 +3863,8 @@ internal enum EncounterSortMode
     Seen,
     DeathRate,
     MedianDamage,
-    IQR,
+    Spread,
+    Turns,
 }
 
 internal static class EncounterSorting
@@ -3842,18 +3873,20 @@ internal static class EncounterSorting
     {
         EncounterSortMode.Name,
         EncounterSortMode.Seen,
-        EncounterSortMode.DeathRate,
         EncounterSortMode.MedianDamage,
-        EncounterSortMode.IQR,
+        EncounterSortMode.Spread,
+        EncounterSortMode.Turns,
+        EncounterSortMode.DeathRate,
     };
 
     public static string Label(EncounterSortMode mode) => mode switch
     {
         EncounterSortMode.Name         => "Name",
-        EncounterSortMode.Seen         => "Seen",
+        EncounterSortMode.Seen         => "Times Fought",
         EncounterSortMode.DeathRate    => "Death%",
         EncounterSortMode.MedianDamage => "Dmg",
-        EncounterSortMode.IQR          => "IQR",
+        EncounterSortMode.Spread       => "Spread",
+        EncounterSortMode.Turns        => "Turns",
         _ => mode.ToString(),
     };
 
@@ -3875,7 +3908,7 @@ internal static class EncounterSorting
         var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
         if (perChar.Count == 0) return null;
 
-        // For median/IQR modes we need the merged DamageValues list; for
+        // For median/spread modes we need the merged DamageValues list; for
         // other modes the aggregate sums suffice.
         EncounterEvent combined = new();
         if (sortCharacter != null)
@@ -3890,6 +3923,7 @@ internal static class EncounterSorting
                 combined.Fought         += stat.Fought;
                 combined.Died           += stat.Died;
                 combined.DamageTakenSum += stat.DamageTakenSum;
+                combined.TurnsTakenSum  += stat.TurnsTakenSum;
                 combined.DmgPctSum      += stat.DmgPctSum;
                 if (stat.DamageValues != null)
                 {
@@ -3907,10 +3941,8 @@ internal static class EncounterSorting
             EncounterSortMode.Seen         => fought,
             EncounterSortMode.DeathRate    => (double)combined.Died / fought,
             EncounterSortMode.MedianDamage => combined.DamageMedian() ?? (double)combined.DamageTakenSum / fought,
-            EncounterSortMode.IQR          =>
-                combined.DamageIQR() is var iqr && iqr.HasValue
-                    ? iqr.Value.p75 - iqr.Value.p25
-                    : 0,
+            EncounterSortMode.Spread       => ComputeIqrc(combined),
+            EncounterSortMode.Turns        => (double)combined.TurnsTakenSum / fought,
             _ => double.NaN,
         };
         if (double.IsNaN(raw)) return null;
@@ -3942,14 +3974,32 @@ internal static class EncounterSorting
                 double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, mu0) / fought));
                 return (raw - mu0) / se;
             }
-            case EncounterSortMode.IQR:
+            case EncounterSortMode.Spread:
             {
                 double iqrcBase = pool.Iqrc;
                 double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, iqrcBase) / fought));
                 return (raw - iqrcBase) / se;
             }
+            case EncounterSortMode.Turns:
+            {
+                double mu0 = pool.AvgTurns;
+                double se = Math.Sqrt(Math.Max(1e-9, Math.Max(raw, mu0) / fought));
+                return (raw - mu0) / se;
+            }
         }
         return raw;
+    }
+
+    /// <summary>IQRC (IQR coefficient) = (p75 - p25) / max(median, 1). Returns 0
+    /// when there's no valid IQR. Matches the display-side FormatSpreadCell logic
+    /// so sort order aligns with what the Spread column shows.</summary>
+    private static double ComputeIqrc(EncounterEvent stat)
+    {
+        var iqr = stat.DamageIQR();
+        if (!iqr.HasValue) return 0;
+        var median = stat.DamageMedian();
+        if (!median.HasValue) return 0;
+        return (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
     }
 
     /// <summary>
@@ -3964,7 +4014,8 @@ internal static class EncounterSorting
             EncounterSortMode.Seen         => ((long)score.Value).ToString(),
             EncounterSortMode.DeathRate    => $"{score.Value * 100:0}%",
             EncounterSortMode.MedianDamage => $"{score.Value:0}",
-            EncounterSortMode.IQR          => $"{score.Value:0}",
+            EncounterSortMode.Spread       => $"{score.Value * 100:0}%",
+            EncounterSortMode.Turns        => $"{score.Value:F1}",
             _ => "—",
         };
     }
@@ -4006,6 +4057,7 @@ internal static class EncounterSorting
         // so coloration matches the display code's aggregation approach.
         var pool = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, biome);
         double value, baseline;
+        bool useLog = false;
         switch (mode)
         {
             case EncounterSortMode.MedianDamage:
@@ -4017,35 +4069,37 @@ internal static class EncounterSorting
                 value = score.Value * 100.0;
                 baseline = pool.DeathRate;
                 break;
-            case EncounterSortMode.IQR:
-                // Score returns absolute (p75 - p25); compute this encounter's IQRC
-                // and compare against the pool's encounter-weighted IQRC.
-                EncounterEvent combined = new();
-                if (sortCharacter != null && perChar.TryGetValue(sortCharacter, out var only)) combined = only;
-                else
-                {
-                    foreach (var s in perChar.Values)
-                    {
-                        if (s.DamageValues != null)
-                        {
-                            combined.DamageValues ??= new List<int>();
-                            combined.DamageValues.AddRange(s.DamageValues);
-                        }
-                    }
-                }
-                var med = combined.DamageMedian();
-                if (!med.HasValue || med.Value <= 0) return raw;
-                value = score.Value / med.Value;
+            case EncounterSortMode.Spread:
+                // Score already returns IQRC (ratio); pool.Iqrc is the baseline IQRC.
+                // Use log-space coloration so 4× and 1/4× color symmetrically, matching
+                // the Spread column's FormatSpreadCell in the stats table.
+                value = score.Value;
                 baseline = pool.Iqrc;
+                useLog = true;
+                break;
+            case EncounterSortMode.Turns:
+                value = score.Value;
+                baseline = pool.AvgTurns;
                 break;
             default:
                 return raw;
         }
         if (baseline <= 0) return raw;
-        double pctOfBaseline = value / baseline * 100.0;
+
+        double pct;
+        if (useLog)
+        {
+            // Same formula as EncounterTooltipHelper.ColBadLog with scale=20.
+            double ratio = Math.Max(value, 1e-6) / baseline;
+            pct = 100.0 + Math.Log(ratio) * 20.0;
+        }
+        else
+        {
+            pct = value / baseline * 100.0;
+        }
         // ColBad direction (high = bad): swap the deviation around the baseline before
         // handing to ColWR (which uses high = good).
-        return TooltipHelper.ColWR(raw, 100.0 + (100.0 - pctOfBaseline), fought, 100.0);
+        return TooltipHelper.ColWR(raw, 100.0 + (100.0 - pct), fought, 100.0);
     }
 }
 

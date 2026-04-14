@@ -484,8 +484,8 @@ public static class StatsAggregator
             {
                 p25s.Add(iqr.Value.p25);
                 p75s.Add(iqr.Value.p75);
-                if (median.HasValue && median.Value > 0)
-                    iqrcs.Add((iqr.Value.p75 - iqr.Value.p25) / median.Value);
+                if (median.HasValue)
+                    iqrcs.Add((iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0));
             }
 
             avgTurnsList.Add((double)e.TurnsTakenSum / e.Fought);
@@ -703,9 +703,9 @@ public static class StatsAggregator
             var tempEvent = new EncounterEvent { DamageValues = merged };
             var median = tempEvent.DamageMedian();
             var iqr = tempEvent.DamageIQR();
-            if (median == null || iqr == null || median.Value <= 0) continue;
+            if (median == null || iqr == null) continue;
 
-            totalIqrc += (iqr.Value.p75 - iqr.Value.p25) / median.Value;
+            totalIqrc += (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
             count++;
         }
 

@@ -284,10 +284,12 @@ public static class EncounterTooltipHelper
     private const string BaselineSectionColor = "#6a6a6a";  // dull grey — biome pool descriptor
     private const string PoolSectionColor     = "#6a6a6a";  // dull grey — all-acts category descriptor
     private const string AllCharsSectionColor = "#6a6a6a";  // dull grey — cross-character descriptor
-    // Dull neutral grey for the data cells in rows 2, 3, 4. Intentionally
-    // muted so row 1's emphasized white / colored numbers stay the visual
-    // focus of the table.
-    private const string ContextRowDataColor  = "#808080";
+    // Dull neutral grey for the data cells in rows 2, 3, 4 (the always-neutral
+    // reference/context rows). Intentionally dimmer than TooltipHelper.NeutralShade
+    // (#909090 — used by colorable cells when significance is below threshold) so
+    // context rows read as "reference material" and colorable rows stay visually
+    // distinct even when their values happen to fall at neutral.
+    private const string ContextRowDataColor  = "#6a6a6a";
 
     // BBCode constants used across the focused-view table cells.
     // Descriptor font is slightly bigger than the data cells so it reads as the
@@ -298,10 +300,16 @@ public static class EncounterTooltipHelper
     private const string KreonBoldFontTag = "[font=res://themes/kreon_bold_glyph_space_one.tres]";
     private const string HeaderColor      = "#8e8676";  // dim warm grey for column headers
     // Minimum baseline for potion coloration. Prevents extreme colors from tiny
-    // absolute differences (e.g. 0.2 vs 0.5 pots/fight = 250% of baseline).
-    // With a floor of 0.5, the ratio can't exceed 2x until the encounter actually
-    // consumes >1 potion/fight on average.
-    private const double PotionBaselineFloor = 0.5;
+    // absolute differences by ensuring the ratio denominator isn't near-zero.
+    // Complements PotionKScale — the floor handles small baselines, the k-scale
+    // dampens the color intensity at any deviation.
+    private const double PotionBaselineFloor = 0.1;
+    // Dampens the k factor for the potions column specifically. Potion averages
+    // (0.0–1.5 per fight) produce very large pctOfBaseline deviations even for
+    // semantically small differences, which tanh saturates quickly at the default
+    // k. Scaling the deviation by 0.3 before the significance calculation means
+    // only substantially-different potion usage reaches vivid colors.
+    private const double PotionKScale = 0.3;
     // Per-cell padding controls inter-column gaps. Godot [cell padding] format
     // is `left,top,right,bottom`. Adjacent cells' right + left pad sum to the
     // visual gap. Three tiers of tightness:
@@ -403,7 +411,7 @@ public static class EncounterTooltipHelper
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread  = FormatSpreadCell(iqr, dmgMedian, n, iqrcBase);
         var cTurns   = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBase, n);
-        var cPots    = ColBadRelative($"{avgPots:F1}", avgPots, potsBase, n, PotionBaselineFloor);
+        var cPots    = ColBadRelative($"{avgPots:F1}", avgPots, potsBase, n, PotionBaselineFloor, PotionKScale);
         var cDeaths  = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBase);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
@@ -448,7 +456,7 @@ public static class EncounterTooltipHelper
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread  = FormatSpreadCell(subject.IQR, subject.Median, n, iqrcBase);
         var cTurns   = ColBadRelative($"{subject.AvgTurns:F1}", subject.AvgTurns, turnsBase, n);
-        var cPots    = ColBadRelative($"{subject.AvgPots:F1}", subject.AvgPots, potsBase, n, PotionBaselineFloor);
+        var cPots    = ColBadRelative($"{subject.AvgPots:F1}", subject.AvgPots, potsBase, n, PotionBaselineFloor, PotionKScale);
         var cDeaths  = FormatDeathsCellInner(subject.Died, n, subject.DeathRate, deathRateBase);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
@@ -504,23 +512,24 @@ public static class EncounterTooltipHelper
     /// there's insufficient data for an IQR or the median is zero.</summary>
     private static string FormatSpreadValue((double p25, double p75)? iqr, double median)
     {
-        if (!iqr.HasValue || median <= 0) return "-";
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median;
+        if (!iqr.HasValue) return "-";
+        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median, 1.0);
         return $"{iqrc * 100:F0}%";
     }
 
     /// <summary>Formats the Spread cell for colored row-1 use. IQRC displayed as
-    /// percent ("82%"), colored by ColBad against the IQRC baseline (high = swingy
-    /// = bad → orange, low = consistent = good → teal). Returns neutral when
-    /// there's no data.</summary>
+    /// percent ("82%"), colored by ColBadLog against the IQRC baseline so ratio
+    /// deviations are symmetric — a 4× swingier encounter colors with equal
+    /// intensity to one 1/4 as swingy. High = swingy = bad (orange); low =
+    /// consistent = good (teal). Returns neutral when there's no data.</summary>
     private static string FormatSpreadCell((double p25, double p75)? iqr, double? median, int n, double iqrcBaseline)
     {
-        if (!iqr.HasValue || median == null || median.Value <= 0)
+        if (!iqr.HasValue || median == null)
             return $"[color={TooltipHelper.NeutralShade}]-[/color]";
 
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
+        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
         string text = $"{iqrc * 100:F0}%";
-        return ColBad(text, iqrc * 100, n, iqrcBaseline * 100);
+        return ColBadLog(text, iqrc, iqrcBaseline, n);
     }
 
     /// <summary>Computes median of dmg% values: each raw DamageValues entry divided by
@@ -650,11 +659,11 @@ public static class EncounterTooltipHelper
         var p25s = metrics.Where(m => m.IqrP25.HasValue).Select(m => m.IqrP25!.Value).ToList();
         var p75s = metrics.Where(m => m.IqrP75.HasValue).Select(m => m.IqrP75!.Value).ToList();
         double iqrc = 1.0;
-        if (p25s.Count > 0 && p75s.Count > 0 && dmgPct > 0)
+        if (p25s.Count > 0 && p75s.Count > 0)
         {
             double medP25 = MedianOfDoubles(p25s);
             double medP75 = MedianOfDoubles(p75s);
-            iqrc = (medP75 - medP25) / dmgPct;
+            iqrc = (medP75 - medP25) / Math.Max(dmgPct, 1.0);
         }
 
         return new AllRowBaselines
@@ -701,7 +710,7 @@ public static class EncounterTooltipHelper
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread = FormatSpreadCell(iqrPct, displayDmgPct, n, baselines.Iqrc);
         var cTurns  = ColBadRelative(fTurns, avgTurns, baselines.AvgTurns, n);
-        var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n, PotionBaselineFloor);
+        var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n, PotionBaselineFloor, PotionKScale);
         var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, baselines.DeathRate);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
@@ -1014,14 +1023,47 @@ public static class EncounterTooltipHelper
     /// <param name="baselineFloor">Minimum baseline value. When the actual baseline
     /// is below this, the floor is used instead — preventing extreme color ratios
     /// from tiny absolute differences (e.g. 0.2 vs 0.5 potions).</param>
+    /// <param name="kScale">Multiplier applied to the deviation from 100% before
+    /// handing to ColBad. Since sig = tanh(k × n × |pct − baseline|), scaling the
+    /// deviation is equivalent to scaling the effective k. Values &lt; 1 dampen the
+    /// color (higher deviations needed for the same shade); values &gt; 1 amplify.
+    /// Default 1.0 (no change). Used for metrics like potions where normal k is
+    /// too sensitive on the 0–200% scale that relative metrics produce.</param>
     private static string ColBadRelative(string text, double value, double baseline, int n,
-        double baselineFloor = 0)
+        double baselineFloor = 0, double kScale = 1.0)
     {
         if (baseline <= 0 && baselineFloor <= 0)
             return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
         double effectiveBaseline = Math.Max(baseline, baselineFloor);
         double pctOfBaseline = value / effectiveBaseline * 100.0;
-        return ColBad(text, pctOfBaseline, n, 100.0);
+        double dampenedPct = 100.0 + (pctOfBaseline - 100.0) * kScale;
+        return ColBad(text, dampenedPct, n, 100.0);
+    }
+
+    /// <summary>
+    /// Log-space variant of ColBad for ratio metrics where "4× baseline" and
+    /// "baseline / 4" should color with equal magnitude in opposite directions.
+    /// Converts the multiplicative ratio to an additive log deviation, then feeds
+    /// the existing ColBad tanh pipeline. log(value/baseline) is symmetric around
+    /// zero: log(4) ≈ +1.39, log(0.25) ≈ −1.39.
+    /// </summary>
+    /// <param name="scale">Multiplier applied to the log ratio before significance.
+    /// Log-space deviations are much smaller in magnitude than percentage deviations
+    /// (log(2) ≈ 0.69, log(4) ≈ 1.39), so scale compensates to land in the ColBad
+    /// tanh sweet spot. Calibrated for per-character Fought counts (typically n≈10–50):
+    /// with scale=20, ratio 2× at n=20 ≈ level 1, ratio 4× at n=20 ≈ level 2,
+    /// ratio 1.2× at n=20 stays faint. Small-n cases need higher scale to overcome
+    /// the k × n product being tiny; pool-aggregated contexts with n=100+ will
+    /// saturate quickly on any notable ratio — acceptable since those are high-
+    /// confidence signals worth emphasizing.</param>
+    private static string ColBadLog(string text, double value, double baseline, int n, double scale = 20.0)
+    {
+        if (baseline <= 0)
+            return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
+        // Clamp to a tiny minimum so log stays finite when value is 0.
+        double ratio = Math.Max(value, 1e-6) / baseline;
+        double logDev = Math.Log(ratio);
+        return ColBad(text, 100.0 + logDev * scale, n, 100.0);
     }
 
     /// <summary>
@@ -1045,7 +1087,7 @@ public static class EncounterTooltipHelper
     /// values like A0-20.</param>
     // Column padding for the in-combat encounter [table=5]. expand=1 distributes
     // leftover width so columns span the full tooltip panel.
-    private const string CombatCellPadding = "expand=1 padding=10,0,10,0";
+    private const string CombatCellPadding = "expand=1 padding=4,0,4,0";
 
     internal static string BuildEncounterStatsTextSingleRow(
         EncounterEvent stat,
@@ -1119,9 +1161,9 @@ public static class EncounterTooltipHelper
     /// <summary>IQR cell content without padding — just the colored text for use inside [cell] tags.</summary>
     private static string FormatIqrCellInner(string formattedIqr, (double p25, double p75)? iqr, double? median, int n, double iqrcBaseline)
     {
-        if (!iqr.HasValue || median == null || median.Value <= 0)
+        if (!iqr.HasValue || median == null)
             return $"[color={TooltipHelper.NeutralShade}]{formattedIqr}[/color]";
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / median.Value;
+        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
         return ColBad(formattedIqr, iqrc * 100, n, iqrcBaseline * 100);
     }
 
