@@ -21,6 +21,7 @@
     <Compile Include="../SlayTheStats/CardStats.cs" />
     <Compile Include="../SlayTheStats/RelicStats.cs" />
     <Compile Include="../SlayTheStats/EncounterStats.cs" />
+    <Compile Include="../SlayTheStats/EventStats.cs" />
     <Compile Include="../SlayTheStats/RunParser.cs" />
     <Compile Include="../SlayTheStats/StatsAggregator.cs" />
   </ItemGroup>

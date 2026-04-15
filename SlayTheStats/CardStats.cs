@@ -104,7 +104,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 5; // bumped from 4: added RewardScreensOffered/Skipped to RunSummary for filter-aware pick-rate baseline
+    public const int CurrentSchemaVersion = 6; // bumped from 5: added EventVisits/EventMeta for v1.0.0 event tracking
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
@@ -128,6 +128,15 @@ public class StatsDb
     [JsonPropertyName("highest_won_ascensions")] public Dictionary<string, int> HighestWonAscensions { get; set; } = new();
     [JsonPropertyName("encounters")]      public Dictionary<string, Dictionary<string, EncounterEvent>> Encounters     { get; set; } = new();
     [JsonPropertyName("encounter_meta")]  public Dictionary<string, EncounterMeta>                      EncounterMeta  { get; set; } = new();
+    /// <summary>
+    /// Per-visit event records, keyed by event ID (e.g. "EVENT.DROWNING_BEACON").
+    /// Each list entry carries its own run context. Aggregation happens at read
+    /// time — see slay-the-stats.md §Event tracking and
+    /// game-state-diagram-v1.0.0.md. Ancient-event ids (<see cref="AncientEvents"/>)
+    /// are excluded at parse time.
+    /// </summary>
+    [JsonPropertyName("event_visits")]    public Dictionary<string, List<EventVisit>>                   EventVisits    { get; set; } = new();
+    [JsonPropertyName("event_meta")]      public Dictionary<string, EventMeta>                          EventMeta      { get; set; } = new();
     /// <summary>
     /// Starting max HP per character ID, derived from floor 0 of parsed runs:
     /// max_hp - max_hp_gained + max_hp_lost (i.e. before Neow relic bonuses).
@@ -202,8 +211,30 @@ public class StatsDb
         HighestWonAscensions.Clear();
         Encounters.Clear();
         EncounterMeta.Clear();
+        EventVisits.Clear();
+        EventMeta.Clear();
         CharacterStartingHp.Clear();
         Runs.Clear();
+    }
+
+    public List<EventVisit> GetOrCreateEventVisits(string eventId)
+    {
+        if (!EventVisits.TryGetValue(eventId, out var list))
+        {
+            list = new List<EventVisit>();
+            EventVisits[eventId] = list;
+        }
+        return list;
+    }
+
+    public EventMeta GetOrCreateEventMeta(string eventId)
+    {
+        if (!EventMeta.TryGetValue(eventId, out var meta))
+        {
+            meta = new EventMeta();
+            EventMeta[eventId] = meta;
+        }
+        return meta;
     }
 
     public CharacterStat GetOrCreateCharacter(string character, string gameMode)

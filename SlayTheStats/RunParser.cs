@@ -119,6 +119,12 @@ public static class RunParser
         int rewardScreensOfferedThisRun = 0;
         int rewardScreensSkippedThisRun = 0;
 
+        // Event tracking. Visits are collected here and stamped with `won`
+        // after the floor walk so we don't need the run-outcome before we
+        // know it. Ancient events (see AncientEvents) are skipped — their
+        // relic options are already covered by RelicStats.
+        var eventVisitsThisRun = new List<(string eventId, EventVisit visit)>();
+
         // Encounter tracking
         var encountersThisRun = new HashSet<(string encounterId, string contextKey)>();
         string? lastEncounterId = null;
@@ -318,6 +324,155 @@ public static class RunParser
                             if (isShop)
                                 relicShopSeenThisRun.Add((relicId, context.ToKey()));
                         }
+                    }
+                }
+
+                // --- Event visit extraction ---
+                // One EventVisit per event floor. Reads rooms[].model_id for the
+                // event id, walks event_choices[] for the option path + variables,
+                // and pulls floor deltas / linked acquisitions from player_stats[0].
+                // Ancient events are skipped; their relic options are already in
+                // RelicStats. The cards_upgraded → eventRelicUpgradesThisRun path
+                // above coexists intentionally — it feeds the verbose acquisition
+                // breakdown (§Backlog) and operates on a different aggregate.
+                if (isEvent)
+                {
+                    string? eventId = null;
+                    string? spawnedEncounterId = null;
+                    var roomsForEvent = floor?["rooms"]?.AsArray();
+                    if (roomsForEvent != null)
+                    {
+                        foreach (var room in roomsForEvent)
+                        {
+                            var mId = room?["model_id"]?.GetValue<string>();
+                            if (mId == null) continue;
+                            if (eventId == null && mId.StartsWith("EVENT."))
+                                eventId = mId;
+                            else if (spawnedEncounterId == null && mId.StartsWith("ENCOUNTER."))
+                                spawnedEncounterId = mId;
+                        }
+                    }
+
+                    if (eventId != null && !AncientEvents.IsAncient(eventId))
+                    {
+                        var ps = floor?["player_stats"]?[0];
+                        var visit = new EventVisit
+                        {
+                            Character     = character,
+                            Ascension     = ascension,
+                            Act           = actIndex + 1,
+                            GameMode      = gameMode,
+                            BuildVersion  = buildVersion,
+                            Profile       = profile,
+                            RunId         = runId,
+                            DamageTaken   = ps?["damage_taken"]?.GetValue<int>() ?? 0,
+                            HpHealed      = ps?["hp_healed"]?.GetValue<int>()    ?? 0,
+                            MaxHpGained   = ps?["max_hp_gained"]?.GetValue<int>() ?? 0,
+                            MaxHpLost     = ps?["max_hp_lost"]?.GetValue<int>()   ?? 0,
+                            GoldGained    = ps?["gold_gained"]?.GetValue<int>()   ?? 0,
+                            GoldLost      = ps?["gold_lost"]?.GetValue<int>()     ?? 0,
+                            GoldSpent     = ps?["gold_spent"]?.GetValue<int>()    ?? 0,
+                            GoldStolen    = ps?["gold_stolen"]?.GetValue<int>()   ?? 0,
+                            SpawnedEncounterId = spawnedEncounterId,
+                        };
+
+                        var meta = db.GetOrCreateEventMeta(eventId);
+                        if (meta.Act == 0) meta.Act = actIndex + 1;
+                        if (string.IsNullOrEmpty(meta.Biome))
+                            meta.Biome = (actIndex < biomeByAct.Count) ? biomeByAct[actIndex] : "";
+
+                        var eventChoices = ps?["event_choices"]?.AsArray();
+                        if (eventChoices != null)
+                        {
+                            foreach (var choice in eventChoices)
+                            {
+                                var titleKey = choice?["title"]?["key"]?.GetValue<string>();
+                                if (titleKey != null)
+                                    visit.OptionPath.Add(titleKey);
+
+                                var vars = choice?["variables"]?.AsObject();
+                                if (vars != null)
+                                {
+                                    foreach (var kv in vars)
+                                    {
+                                        var val = kv.Value?["string_value"]?.GetValue<string>();
+                                        if (string.IsNullOrEmpty(val))
+                                        {
+                                            var dec = kv.Value?["decimal_value"];
+                                            if (dec != null) val = dec.ToString();
+                                        }
+                                        if (!string.IsNullOrEmpty(val))
+                                            visit.Variables[kv.Key] = val!;
+                                        meta.ObservedVariables.Add(kv.Key);
+                                    }
+                                }
+                            }
+
+                            var terminal = EventIdHelpers.TerminalOption(visit.OptionPath);
+                            if (!string.IsNullOrEmpty(terminal))
+                                meta.ObservedOptions.Add(terminal);
+                        }
+
+                        // Linked acquisitions on the event floor
+                        var cardsGainedNode = ps?["cards_gained"]?.AsArray();
+                        if (cardsGainedNode != null)
+                        {
+                            foreach (var c in cardsGainedNode)
+                            {
+                                var id = c?["id"]?.GetValue<string>();
+                                if (id != null) visit.CardsGained.Add(id);
+                            }
+                        }
+                        var cardsRemovedNode = ps?["cards_removed"]?.AsArray();
+                        if (cardsRemovedNode != null)
+                        {
+                            foreach (var c in cardsRemovedNode)
+                            {
+                                var id = c?["id"]?.GetValue<string>();
+                                if (id != null) visit.CardsRemoved.Add(id);
+                            }
+                        }
+                        var cardsUpgradedNode = ps?["cards_upgraded"]?.AsArray();
+                        if (cardsUpgradedNode != null)
+                        {
+                            foreach (var c in cardsUpgradedNode)
+                            {
+                                var id = c?["id"]?.GetValue<string>();
+                                if (id != null) visit.CardsUpgraded.Add(id);
+                            }
+                        }
+                        var cardsTransformedNode = ps?["cards_transformed"]?.AsArray();
+                        if (cardsTransformedNode != null)
+                        {
+                            foreach (var t in cardsTransformedNode)
+                            {
+                                var from = t?["original_card"]?["id"]?.GetValue<string>() ?? "";
+                                var to   = t?["final_card"]?["id"]?.GetValue<string>()    ?? "";
+                                visit.CardsTransformed.Add(new CardTransform { From = from, To = to });
+                            }
+                        }
+                        var relicChoicesNode = ps?["relic_choices"]?.AsArray();
+                        if (relicChoicesNode != null)
+                        {
+                            foreach (var r in relicChoicesNode)
+                            {
+                                bool picked = r?["was_picked"]?.GetValue<bool>() ?? false;
+                                var id = r?["choice"]?.GetValue<string>();
+                                if (picked && id != null) visit.RelicsGained.Add(id);
+                            }
+                        }
+                        var potionChoicesNode = ps?["potion_choices"]?.AsArray();
+                        if (potionChoicesNode != null)
+                        {
+                            foreach (var p in potionChoicesNode)
+                            {
+                                bool picked = p?["was_picked"]?.GetValue<bool>() ?? false;
+                                var id = p?["choice"]?.GetValue<string>();
+                                if (picked && id != null) visit.PotionsChosen.Add(id);
+                            }
+                        }
+
+                        eventVisitsThisRun.Add((eventId, visit));
                     }
                 }
 
@@ -533,6 +688,13 @@ public static class RunParser
 
         foreach (var (cardId, context) in eventRelicUpgradesThisRun)
             db.GetOrCreate(cardId, context).EventRelicUpgrades++;
+
+        // Event visits: stamp `won` now that the run outcome is known and flush.
+        foreach (var (eventId, visit) in eventVisitsThisRun)
+        {
+            visit.Won = won;
+            db.GetOrCreateEventVisits(eventId).Add(visit);
+        }
 
         // Relic stats: one entry per acquired relic
         foreach (var (relicId, context) in relicsAcquired)
