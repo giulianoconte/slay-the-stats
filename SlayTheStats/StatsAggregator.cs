@@ -59,6 +59,36 @@ public class AggregationFilter
     }
 
     /// <summary>
+    /// Returns true if a RunSummary passes all filters. Mirrors the RunContext
+    /// overload but omits the Act predicate (RunSummary is per-run, not per-act).
+    /// </summary>
+    public bool Matches(RunSummary r)
+    {
+        // Character filter
+        if (Characters != null && Characters.Count > 0)
+        {
+            if (!Characters.Contains(r.Character)) return false;
+        }
+        else if (Character != null && r.Character != Character) return false;
+
+        // Game mode
+        if (GameMode != null && r.GameMode != GameMode) return false;
+
+        // Ascension range
+        if (AscensionMin != null && r.Ascension < AscensionMin) return false;
+        if (AscensionMax != null && r.Ascension > AscensionMax) return false;
+
+        // Version range (semantic comparison)
+        if (VersionMin != null && CompareVersions(r.BuildVersion, VersionMin) < 0) return false;
+        if (VersionMax != null && CompareVersions(r.BuildVersion, VersionMax) > 0) return false;
+
+        // Profile
+        if (Profile != null && r.Profile != Profile) return false;
+
+        return true;
+    }
+
+    /// <summary>
     /// Compares two version strings semantically (e.g. "v0.4.10" > "v0.4.9").
     /// Strips leading 'v' prefix. Returns negative if a &lt; b, 0 if equal, positive if a &gt; b.
     /// </summary>
@@ -176,10 +206,49 @@ public static class StatsAggregator
 
     /// <summary>
     /// Returns the overall win-rate percentage for a character in a given game mode,
-    /// or 50.0 as a neutral fallback if no data exists yet.
+    /// or 50.0 as a neutral fallback if no data exists yet. Decision tree:
+    /// <list type="bullet">
+    /// <item><c>filter == null</c> → unfiltered <c>db.Characters</c> aggregate.</item>
+    /// <item><c>filter != null &amp;&amp; db.Runs.Count == 0</c> → fall back to unfiltered
+    /// (migration path for old schema-3 DBs that haven't been re-parsed yet;
+    /// can be dropped once we're confident users have reparsed).</item>
+    /// <item><c>filter != null &amp;&amp; db.Runs.Count &gt; 0 &amp;&amp; zero matches</c> → <c>NaN</c>
+    /// (caller renders as "—"); no misleading fallback.</item>
+    /// <item>otherwise → filtered baseline from matching <c>db.Runs</c>.</item>
+    /// </list>
     /// </summary>
-    public static double GetCharacterWR(StatsDb db, string character, string gameMode = "standard")
+    public static double GetCharacterWR(StatsDb db, string character, string gameMode = "standard",
+                                        AggregationFilter? filter = null)
     {
+        if (filter != null && db.Runs.Count > 0)
+        {
+            int runs = 0, wins = 0;
+            foreach (var r in db.Runs)
+            {
+                if (r.Character != character) continue;
+                if (r.GameMode != gameMode) continue;
+                // Apply the filter's asc/version/profile predicates only — character
+                // and gameMode are already pinned above. Build a scoped copy that
+                // drops the character constraint (caller's filter may carry a
+                // different Character/Characters set for e.g. compendium panes).
+                var scoped = new AggregationFilter
+                {
+                    GameMode = gameMode,
+                    AscensionMin = filter.AscensionMin,
+                    AscensionMax = filter.AscensionMax,
+                    VersionMin = filter.VersionMin,
+                    VersionMax = filter.VersionMax,
+                    Profile = filter.Profile,
+                };
+                if (!scoped.Matches(r)) continue;
+                runs++;
+                if (r.Won) wins++;
+            }
+            return runs > 0 ? 100.0 * wins / runs : double.NaN;
+        }
+
+        // filter == null, or migration-only path (filter != null but Runs is empty):
+        // use the legacy unfiltered Characters aggregate.
         var key = $"{character}|{gameMode}";
         if (!db.Characters.TryGetValue(key, out var stat) || stat.Runs == 0)
             return 50.0;
@@ -188,10 +257,38 @@ public static class StatsAggregator
 
     /// <summary>
     /// Returns the overall win-rate percentage across all characters in a given game mode,
-    /// or 50.0 as a neutral fallback if no data exists yet.
+    /// or 50.0 as a neutral fallback if no data exists yet. Filter-aware: see
+    /// <see cref="GetCharacterWR"/> for the full decision tree.
     /// </summary>
-    public static double GetGlobalWR(StatsDb db, string gameMode = "standard")
+    public static double GetGlobalWR(StatsDb db, string gameMode = "standard",
+                                     AggregationFilter? filter = null)
     {
+        if (filter != null && db.Runs.Count > 0)
+        {
+            int runs = 0, wins = 0;
+            foreach (var r in db.Runs)
+            {
+                if (r.GameMode != gameMode) continue;
+                // Strip the character constraint (global = all characters), keep
+                // asc / version / profile predicates.
+                var scoped = new AggregationFilter
+                {
+                    GameMode = gameMode,
+                    AscensionMin = filter.AscensionMin,
+                    AscensionMax = filter.AscensionMax,
+                    VersionMin = filter.VersionMin,
+                    VersionMax = filter.VersionMax,
+                    Profile = filter.Profile,
+                };
+                if (!scoped.Matches(r)) continue;
+                runs++;
+                if (r.Won) wins++;
+            }
+            return runs > 0 ? 100.0 * wins / runs : double.NaN;
+        }
+
+        // filter == null, or migration-only path (filter != null but Runs is empty):
+        // use the legacy unfiltered Characters aggregate.
         int totalRuns = 0, totalWins = 0;
         foreach (var (key, stat) in db.Characters)
         {
@@ -205,11 +302,35 @@ public static class StatsAggregator
     /// <summary>
     /// Returns the expected pick rate for a single card as a percentage (0–100),
     /// accounting for the skip option.
-    /// Baseline = (1 - skipRate) / 3 × 100, where skipRate = TotalSkips / TotalRewardScreens.
+    /// Baseline = (1 - skipRate) / 3 × 100, where skipRate = totalSkipped / totalOffered.
     /// Falls back to 100/3 ≈ 33.3 if no data.
+    ///
+    /// Filter-aware via per-run <c>RewardScreensOffered</c> / <c>RewardScreensSkipped</c>
+    /// counters. Decision tree mirrors <see cref="GetCharacterWR"/>.
     /// </summary>
-    public static double GetPickRateBaseline(StatsDb db)
+    public static double GetPickRateBaseline(StatsDb db, AggregationFilter? filter = null)
     {
+        if (filter != null && db.Runs.Count > 0)
+        {
+            int totalOffered = 0, totalSkipped = 0;
+            int matched = 0;
+            foreach (var r in db.Runs)
+            {
+                // Strip character constraint if any — pick-rate baseline is
+                // computed on whatever run set the caller's filter defines.
+                if (!filter.Matches(r)) continue;
+                matched++;
+                totalOffered += r.RewardScreensOffered;
+                totalSkipped += r.RewardScreensSkipped;
+            }
+            if (matched == 0) return double.NaN;
+            if (totalOffered == 0) return double.NaN;
+            var filteredSkipRate = (double)totalSkipped / totalOffered;
+            return (1.0 - filteredSkipRate) / 3.0 * 100.0;
+        }
+
+        // filter == null, or migration-only path (filter != null but Runs is empty):
+        // use the legacy unfiltered global counters.
         if (db.TotalRewardScreens == 0) return 100.0 / 3.0;
         var skipRate = (double)db.TotalSkips / db.TotalRewardScreens;
         return (1.0 - skipRate) / 3.0 * 100.0;
@@ -715,9 +836,32 @@ public static class StatsAggregator
     /// <summary>
     /// Returns the overall shop buy rate as a percentage (0–100): total shop purchases / total shop
     /// appearances across all cards and relics. Falls back to 20.0 if no shop data exists yet.
+    /// Decision tree mirrors <see cref="GetCharacterWR"/>: with a non-null filter and
+    /// a populated <c>db.Runs</c>, zero matching contexts returns <c>NaN</c> rather than
+    /// falling back to the unfiltered aggregate.
     /// </summary>
-    public static double GetShopBuyRateBaseline(StatsDb db)
+    public static double GetShopBuyRateBaseline(StatsDb db, AggregationFilter? filter = null)
     {
+        if (filter != null && db.Runs.Count > 0)
+        {
+            int seen = 0, bought = 0;
+            foreach (var contextMap in db.Cards.Values)
+                foreach (var (key, stat) in contextMap)
+                {
+                    if (!filter.Matches(RunContext.Parse(key))) continue;
+                    seen += stat.RunsShopSeen; bought += stat.RunsShopBought;
+                }
+            foreach (var contextMap in db.Relics.Values)
+                foreach (var (key, stat) in contextMap)
+                {
+                    if (!filter.Matches(RunContext.Parse(key))) continue;
+                    seen += stat.RunsShopSeen; bought += stat.RunsShopBought;
+                }
+            return seen > 0 ? 100.0 * bought / seen : double.NaN;
+        }
+
+        // filter == null, or migration-only path (filter != null but Runs is empty):
+        // use the legacy unfiltered aggregate.
         int totalSeen = 0, totalBought = 0;
         foreach (var contextMap in db.Cards.Values)
             foreach (var stat in contextMap.Values)

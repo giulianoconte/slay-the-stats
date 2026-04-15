@@ -164,8 +164,10 @@ public static class EncounterTooltipHelper
         var filterCtx = filter != null
             ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
             : "";
-        if (filterCtx.Length > 0)
-            footer.Append($"[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+        // Use FormatFooter but strip the leading newline since this footer appears standalone (no table above).
+        var footerStr = TooltipHelper.FormatFooter(filterCtx);
+        if (footerStr.StartsWith("\n")) footerStr = footerStr.Substring(1);
+        footer.Append(footerStr);
 
         return new AllCharsTableParts
         {
@@ -270,24 +272,22 @@ public static class EncounterTooltipHelper
         var filterCtx = filter != null
             ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
             : "";
-        if (filterCtx.Length > 0)
-            sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
 
-    // Section colors for focused-character view. Row descriptors use a dull grey
-    // that contrasts less with the background so the eye travels to the data
-    // cells first. Context-row data cells (rows 2, 3, 4) use an off-white beige
-    // that's bright enough to scan cleanly but stays distinct from row 1's
-    // significance-colored white numbers (which get the default label color).
-    // Intentionally faded so the non-colored context rows read as "reference material"
-    // and the colored row 1 (subject) + colored per-character rows (all-chars table)
-    // draw the eye. Faded enough to cue "not significance-highlightable".
-    private const string BaselineSectionColor = "#6a6a6a";
-    private const string PoolSectionColor     = "#6a6a6a";
-    private const string AllCharsSectionColor = "#6a6a6a";
-    private const string ContextRowDataColor  = "#6a6a6a";
+    // Section colors for focused-character view. Row descriptors (labels like
+    // "All (baseline)", pool names, character names) get Cream — they are the
+    // primary content of their row and should read clearly. Context-row data
+    // cells (rows 2, 3, 4) stay in footer grey so the data recedes relative to
+    // the descriptor, and so the colored row 1 (subject) + colored per-character
+    // rows in the all-chars table draw the eye. This split cues the reader that
+    // context rows are "reference material" while colored rows are the signal.
+    private const string BaselineSectionColor = "#fef6e2";
+    private const string PoolSectionColor     = "#fef6e2";
+    private const string AllCharsSectionColor = "#fef6e2";
+    private const string ContextRowDataColor  = "#686868";
 
     // BBCode constants used across the focused-view table cells.
     // Descriptor font is slightly bigger than the data cells so it reads as the
@@ -296,7 +296,7 @@ public static class EncounterTooltipHelper
     private const string KreonRegFontTag  = "[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=18]";
     private const string KreonRegClose    = "[/font_size][/font]";
     private const string KreonBoldFontTag = "[font=res://themes/kreon_bold_glyph_space_one.tres]";
-    private const string HeaderColor      = "#c0b89e";  // warm grey for column headers, brighter than the dim 8e8676
+    private const string HeaderColor      = "#8e8676";  // warm grey for column headers (matches ThemeStyle.HeaderGrey)
     // Minimum baseline for potion coloration. Prevents extreme colors from tiny
     // absolute differences by ensuring the ratio denominator isn't near-zero.
     // Complements PotionKScale — the floor handles small baselines, the k-scale
@@ -794,7 +794,7 @@ public static class EncounterTooltipHelper
     /// "all characters" symbol on row 4. Tries the unpacked PNG path first, then the
     /// atlas .tres resource as a fallback. Result is cached for the session. Returns
     /// empty string if neither path resolves.</summary>
-    private static string AllCharsIcon(int sizePx)
+    internal static string AllCharsIcon(int sizePx)
     {
         if (_allCharsIconPath == null)
         {
@@ -910,8 +910,7 @@ public static class EncounterTooltipHelper
 
         // Footer — character omitted (each row shows its character context via icon).
         var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
-        if (filterCtx.Length > 0)
-            sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
@@ -991,8 +990,7 @@ public static class EncounterTooltipHelper
 
         // Footer — character omitted (each row shows its character context inline).
         var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
-        if (filterCtx.Length > 0)
-            sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
@@ -1032,6 +1030,11 @@ public static class EncounterTooltipHelper
     private static string ColBadRelative(string text, double value, double baseline, int n,
         double baselineFloor = 0, double kScale = 1.0)
     {
+        // Exact match → no deviation to express. Guards against the baselineFloor
+        // synthesizing a ratio (e.g. value=0/baseline=0 with floor=0.1 computes
+        // pctOfBaseline=0 which reads as "30% below baseline" after damping).
+        if (value == baseline)
+            return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
         if (baseline <= 0 && baselineFloor <= 0)
             return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
         double effectiveBaseline = Math.Max(baseline, baselineFloor);
@@ -1125,10 +1128,8 @@ public static class EncounterTooltipHelper
             : "All chars";
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
         var categoryLower = categoryLabel.ToLowerInvariant();
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline {categoryLower} pool dmg: {baselineDmgAbs}");
-        if (filterCtx.Length > 0)
-            sb.Append($"\n{filterCtx}");
-        sb.Append("[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatBaselineLine($"Baseline {categoryLower} pool dmg: {baselineDmgAbs}"));
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }

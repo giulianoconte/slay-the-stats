@@ -160,7 +160,13 @@ internal static class TooltipHelper
 
         // When there is no data, fold the message into the header and hide the table label so the
         // panel collapses to a single line (VBoxContainer excludes invisible children from layout).
-        header.Text = $"[b]Stats[/b]                    [color=#606060]SlayTheStats[/color]";
+        // "Stats" title on the left; "SlayTheStats" brand on the right, rendered at
+        // BrandSize (smaller than the title) in FooterGrey. Alignment is done with
+        // literal spaces — not ideal, but restructuring the stolen panel into an
+        // HBox risks breaking the tooltip's size/layout flow (panel and children are
+        // reused across shows). The encounter tooltip uses a structural HBox because
+        // it builds its panel from scratch.
+        header.Text = $"[b]Stats[/b]                    [font_size={ThemeStyle.BrandSize}][color={ThemeStyle.FooterGrey}]SlayTheStats[/color][/font_size]";
         table.Text  = tableText;
         // The PanelContainer is placed freely in the root (not inside a layout), so it won't
         // auto-resize when child content changes height. ResetSize() on both labels and the panel
@@ -412,6 +418,30 @@ internal static class TooltipHelper
         label.AddThemeConstantOverride("line_separation", Fonts.LineSep);
     }
 
+    /// <summary>
+    /// Wraps a filter-context string in the standard tooltip footer style
+    /// (Kreon regular, 16px, FooterGrey). Used by card/relic/encounter
+    /// tooltips to render the active-filter line below the stats table.
+    /// Returns empty if the input is empty.
+    /// </summary>
+    internal static string FormatFooter(string filterCtx)
+    {
+        if (string.IsNullOrEmpty(filterCtx)) return "";
+        return $"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color={ThemeStyle.FooterGrey}]{filterCtx}[/color][/font_size][/font]";
+    }
+
+    /// <summary>
+    /// Wraps baseline-body text (e.g. "Baseline Pick% 35%, Win% 48%") in the
+    /// same footer style as FormatFooter. Separate entry point so callers can
+    /// build the baseline line independently of the filter line (they often
+    /// render on separate lines below the table).
+    /// </summary>
+    internal static string FormatBaselineLine(string body)
+    {
+        if (string.IsNullOrEmpty(body)) return "";
+        return $"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color={ThemeStyle.FooterGrey}]{body}[/color][/font_size][/font]";
+    }
+
     /// <summary>Wraps text in a BBCode color tag based on sample size. Bolds at n≥16 when bold font is loaded.</summary>
     internal static string ColN(string text, int n) => n switch
     {
@@ -463,7 +493,7 @@ internal static class TooltipHelper
     /// </summary>
     internal static string ColWR(string text, double pct, int n, double baseline = 50.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        if (n <= 3 || double.IsNaN(baseline)) return $"[color={NeutralShade}]{text}[/color]";
         var level = SigLevel(Significance(pct, baseline, n, KWin));
         if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
         var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
@@ -476,7 +506,7 @@ internal static class TooltipHelper
     /// </summary>
     internal static string ColBuys(string text, double pct, int n, double baseline = 20.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        if (n <= 3 || double.IsNaN(baseline)) return $"[color={NeutralShade}]{text}[/color]";
         var level = SigLevel(Significance(pct, baseline, n, KWin));
         if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
         var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
@@ -491,7 +521,7 @@ internal static class TooltipHelper
     /// </summary>
     internal static string ColPR(string text, double pct, int n, double baseline = 100.0 / 3.0)
     {
-        if (n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        if (n <= 3 || double.IsNaN(baseline)) return $"[color={NeutralShade}]{text}[/color]";
         var level = SigLevel(Significance(pct, baseline, n, KWin * KPickFactor));
         if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
         var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;

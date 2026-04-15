@@ -72,6 +72,23 @@ public class CharacterStat
 }
 
 /// <summary>
+/// Per-run summary appended once per processed run. Used for filter-aware
+/// baselines (character WR / global WR) where the aggregated Characters
+/// table loses the asc/version/profile context.
+/// </summary>
+public class RunSummary
+{
+    [JsonPropertyName("character")]     public string Character { get; set; } = "";
+    [JsonPropertyName("ascension")]     public int Ascension { get; set; } = 0;
+    [JsonPropertyName("game_mode")]     public string GameMode { get; set; } = "standard";
+    [JsonPropertyName("build_version")] public string BuildVersion { get; set; } = "";
+    [JsonPropertyName("profile")]       public string Profile { get; set; } = "default";
+    [JsonPropertyName("won")]           public bool Won { get; set; } = false;
+    [JsonPropertyName("reward_screens_offered")] public int RewardScreensOffered { get; set; } = 0;
+    [JsonPropertyName("reward_screens_skipped")] public int RewardScreensSkipped { get; set; } = 0;
+}
+
+/// <summary>
 /// Full stats database, keyed by card ID (e.g. "CARD.STRIKE_R") or "SKIP",
 /// then by RunContext key (e.g. "CHARACTER.IRONCLAD|0|1").
 /// </summary>
@@ -87,7 +104,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 3; // bumped from 2: added CharacterStartingHp
+    public const int CurrentSchemaVersion = 5; // bumped from 4: added RewardScreensOffered/Skipped to RunSummary for filter-aware pick-rate baseline
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
@@ -117,6 +134,15 @@ public class StatsDb
     /// Used to normalize damage values into Dmg% for cross-character comparison.
     /// </summary>
     [JsonPropertyName("character_starting_hp")] public Dictionary<string, int> CharacterStartingHp { get; set; } = new();
+    /// <summary>
+    /// Per-run summaries appended at run-completion time. Used by
+    /// <see cref="StatsAggregator.GetCharacterWR"/> / <see cref="StatsAggregator.GetGlobalWR"/>
+    /// to produce filter-aware baselines (asc range / version range / profile)
+    /// that the aggregated Characters table cannot express. Old DBs (schema &lt; 4)
+    /// deserialize with an empty list — callers fall back to the Characters
+    /// aggregate when Runs is empty.
+    /// </summary>
+    [JsonPropertyName("runs")] public List<RunSummary> Runs { get; set; } = new();
     public static StatsDb Load(string path, Action<string>? warn = null)
     {
         try
@@ -177,6 +203,7 @@ public class StatsDb
         Encounters.Clear();
         EncounterMeta.Clear();
         CharacterStartingHp.Clear();
+        Runs.Clear();
     }
 
     public CharacterStat GetOrCreateCharacter(string character, string gameMode)

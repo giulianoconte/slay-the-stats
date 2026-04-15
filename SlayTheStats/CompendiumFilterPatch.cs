@@ -16,7 +16,7 @@ namespace SlayTheStats;
 public static partial class CompendiumFilterPatch
 {
     // ── Shared colours (game palette from StsColors) ──────────────────────
-    private static readonly Color Cream       = new("FFF6E2");        // primary text
+    private static readonly Color Cream       = new("FEF6E2");        // primary text
     private static readonly Color Gold        = new("EFC851");        // titles, highlights
     private static readonly Color MutedButton = new(0.85f, 0.75f, 0.55f, 1f);
     private static readonly Color HoverButton = new(1f, 0.9f, 0.7f, 1f);
@@ -1525,8 +1525,13 @@ public static partial class CompendiumFilterPatch
             vbox.AddChild(classRow);
             classRow.AddChild(MakeLabel("Class:", 120));
 
-            classValues = new List<string> { "", SlayTheStatsConfig.ClassFilterClassSpecific };
-            var classLabels = new List<string> { "All", "Match class card" };
+            // "All" (empty string) intentionally omitted — cross-class stats on a class
+            // card are low-signal (few runs introduce other-class cards) and misleading
+            // (mixes in runs where the card was never relevant). Users who really want
+            // to see e.g. an Ironclad card's Silent stats can pick "Silent" explicitly.
+            // Legacy "" values are migrated to "__class__" in SlayTheStatsConfig.Sanitize.
+            classValues = new List<string> { SlayTheStatsConfig.ClassFilterClassSpecific };
+            var classLabels = new List<string> { "Auto" };
             foreach (var ch in GetOrderedCharacters(MainFile.Db))
             {
                 classValues.Add(ch);
@@ -1550,7 +1555,7 @@ public static partial class CompendiumFilterPatch
             classSelect.ItemSelected += (idx) =>
             {
                 var i = (int)idx;
-                SlayTheStatsConfig.ClassFilter = (i >= 0 && i < classValuesLocal.Count) ? classValuesLocal[i] : "";
+                SlayTheStatsConfig.ClassFilter = (i >= 0 && i < classValuesLocal.Count) ? classValuesLocal[i] : SlayTheStatsConfig.ClassFilterClassSpecific;
                 HighlightIfNonDefault(classSelectLocal, SlayTheStatsConfig.IsNonDefault("ClassFilter"));
                 NotifyChanged();
             };

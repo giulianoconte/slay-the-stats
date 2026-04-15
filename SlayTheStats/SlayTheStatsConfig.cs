@@ -358,5 +358,12 @@ internal class SlayTheStatsConfig : SimpleModConfig
         // bound so the dropdowns can find them.
         if (IsGarbageVersionValue(DefaultVersionMin)) DefaultVersionMin = VersionLowest;
         if (IsGarbageVersionValue(DefaultVersionMax)) DefaultVersionMax = VersionHighest;
+
+        // Migrate legacy "All" ClassFilter ("") to "Auto" (__class__). The "All" option
+        // was removed from the filter pane dropdown — users who had it saved would otherwise
+        // land on an invalid state. Auto resolves to the card's owning class for class
+        // cards, or all-chars for colorless/curse/etc., which is what most users want.
+        if (string.IsNullOrEmpty(ClassFilter))        ClassFilter        = ClassFilterClassSpecific;
+        if (string.IsNullOrEmpty(DefaultClassFilter)) DefaultClassFilter = ClassFilterClassSpecific;
     }
 }

@@ -442,7 +442,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var title = new Label();
         title.Text = "SlayTheStats Bestiary";
         title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        title.AddThemeFontSizeOverride("font_size", 26);
+        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
         outerVbox.AddChild(title);
@@ -698,8 +698,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsTitleLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         _statsTitleLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         _statsTitleLabel.AddThemeColorOverride("default_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        _statsTitleLabel.AddThemeFontSizeOverride("normal_font_size", 22);
-        _statsTitleLabel.AddThemeFontSizeOverride("bold_font_size", 22);
+        _statsTitleLabel.AddThemeFontSizeOverride("normal_font_size", ThemeStyle.TitleSecondary);
+        _statsTitleLabel.AddThemeFontSizeOverride("bold_font_size", ThemeStyle.TitleSecondary);
         ApplyKreonFont(_statsTitleLabel, bold: true);
         ApplyTextShadow(_statsTitleLabel);
         _statsTitleLabel.Text = "";
@@ -711,7 +711,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Stats label — used for focused-character and category views (non-scrollable).
         TooltipHelper.TryLoadModFonts();
         _statsLabel = CreateStatsRichTextLabel();
-        _statsLabel.Text = $"[color=#606060]Hover an encounter to see stats[/color]";
+        _statsLabel.Text = $"[color=#686868]Hover an encounter to see stats[/color]";
         statsVbox.AddChild(_statsLabel);
 
         // All-characters scrollable layout: header (sticky) + character rows (scrollable) + baseline (sticky) + footer.
@@ -1014,7 +1014,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         var title = new Label { Text = "Welcome to the Stats Bestiary!" };
         title.AddThemeColorOverride("font_color", new Color(0.95f, 0.78f, 0.32f, 1f));
-        title.AddThemeFontSizeOverride("font_size", 26);
+        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
         vbox.AddChild(title);
@@ -1186,7 +1186,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         var title = new Label { Text = "Stat columns" };
         title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        title.AddThemeFontSizeOverride("font_size", 18);
+        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
         vbox.AddChild(title);
@@ -1227,7 +1227,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             "fought 50 times counts the same as one you've fought 5 times, matching the",
             "game's uniform spawn rates.[/color]",
             "",
-            "[i][color=#9c9c9c]Click ? again to dismiss.[/color][/i]",
+            "[color=#bfb7a6]Click ? again to dismiss.[/color]",
         });
         vbox.AddChild(body);
 
@@ -1350,7 +1350,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _highlightTween?.Kill();
         _highlightTween = null;
 
-        ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
+        ShowSingleLabelStats($"[color=#686868]Hover an encounter to see stats[/color]");
         SetStatsTitle("");
         _hoveredEncounterId = null;
         // Snapshot locked state before clearing — we'll re-apply after the list
@@ -1648,8 +1648,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 lb.AddThemeConstantOverride("shadow_outline_size", 0);
                 break;
             case Button bt:
-                // Buttons use Godot's font outline rather than shadow_offset_x/y. Use a small
-                // outline as the "shadow" so the chip button text reads against any background.
+                // Buttons use font_outline instead of font_shadow_offset because the
+                // shadow offset reads poorly over variable button backgrounds (hover,
+                // pressed, selected states); an outline stays legible on all of them.
                 bt.AddThemeColorOverride("font_outline_color", shadow);
                 bt.AddThemeConstantOverride("outline_size", 4);
                 break;
@@ -2409,7 +2410,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var monsterCounts = meta.MonsterIds
                 .GroupBy(m => m)
                 .Select(g => g.Count() > 1 ? $"{FormatMonsterName(g.Key)} x{g.Count()}" : FormatMonsterName(g.Key));
-            monsterInfo = $"  [color=#6a6a6a]({string.Join(", ", monsterCounts)})[/color]";
+            monsterInfo = $"  [color=#686868]({string.Join(", ", monsterCounts)})[/color]";
         }
         nameLabel.Text = $"{encounterName}{monsterInfo}";
         innerRow.AddChild(nameLabel);
@@ -2694,7 +2695,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_lockedEncounterId != null || _lockedCategory != null) return;
         CancelPendingRender();
         SetStatsTitle("");
-        ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
+        ShowSingleLabelStats($"[color=#686868]Hover an encounter to see stats[/color]");
         ClearMonsterPreview();
     }
 
@@ -2794,7 +2795,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         else
         {
             SetStatsTitle("");
-            ShowSingleLabelStats($"[color=#606060]Hover an encounter to see stats[/color]");
+            ShowSingleLabelStats($"[color=#686868]Hover an encounter to see stats[/color]");
             ClearMonsterPreview();
         }
     }
@@ -2806,7 +2807,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap))
         {
             SetStatsTitle(EncounterCategory.FormatName(encounterId));
-            ShowSingleLabelStats("[color=#606060]No data[/color]");
+            ShowSingleLabelStats("[color=#686868]No data[/color]");
             return;
         }
 

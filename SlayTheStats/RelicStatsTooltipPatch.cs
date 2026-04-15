@@ -116,9 +116,9 @@ internal static class RelicHoverHelper
                 var actStats = StatsAggregator.AggregateRelicsByAct(
                     MainFile.Db.Relics[lookupId], filter);
                 var wrBaseline = effectiveChar != null
-                    ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar)
-                    : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
+                    ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter)
+                    : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
                 statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(filter) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter);
             }
 
@@ -273,15 +273,18 @@ internal static class RelicHoverHelper
         sb.Append(DataCell(cTotRuns, ColPadInner));
         sb.Append(CardHoverShowPatch.FormatBuysFractionCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline, ColPadInner));
         sb.Append(DataCell(cTotWr, ColPadLast));
+
         sb.Append("[/table]");
 
+        // Baseline line below the table (plain text — avoids in-table column overflow).
+        // NaN baselines (filter matched zero runs/contexts) render as "—".
+        var wrStr       = double.IsNaN(wrBaseline)          ? "—" : $"{Math.Round(wrBaseline):F0}%";
+        var buysBaseStr = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
+        var baselineText = $"(baseline)    Buys {buysBaseStr}    Win% {wrStr}";
+        sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
+
         var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";
-        var wrStr       = $"{Math.Round(wrBaseline):F0}%";
-        var buysBaseStr = $"{Math.Round(shopBuyRateBaseline):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
-        if (filterCtx.Length > 0)
-            sb.Append($"\n{filterCtx}");
-        sb.Append("[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }

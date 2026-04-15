@@ -57,9 +57,9 @@ public static class CardHoverShowPatch
                 var showBuysLayout      = IsColorlessCard(__instance.CardModel);
                 var contextMap          = GetContextMap(lookupId, groupUpgrades);
                 var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
-                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
-                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
+                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
+                var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db, filter);
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
                 statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter);
             }
 
@@ -353,8 +353,7 @@ public static class CardHoverShowPatch
         var filterCtx = BuildFilterContext(characterLabel, filter);
         var sb = new StringBuilder();
         sb.Append($"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]");
-        if (filterCtx.Length > 0)
-            sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]{filterCtx}[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
         return sb.ToString();
     }
 
@@ -795,15 +794,21 @@ public static class CardHoverShowPatch
         sb.Append(FractionCell(cTotNum, $"{totOffered}", ColPadInner));
         sb.Append(DataCell(cTotPr, ColPadInner));
         sb.Append(DataCell(cTotWr, ColPadLast));
+
         sb.Append("[/table]");
 
+        // Baseline line below the table (plain text — avoids in-table column overflow).
+        // NaN baselines (filter matched zero runs/contexts) render as "—".
+        // Baseline character is already implied by the filter-context footer (which
+        // renders the active character icon + name), so the baseline line itself
+        // doesn't need a "character" marker — just "(baseline)" is enough.
+        var prBaseStr = double.IsNaN(pickRateBaseline) ? "—" : $"{Math.Round(pickRateBaseline):F0}%";
+        var wrStr     = double.IsNaN(characterWR)     ? "—" : $"{Math.Round(characterWR):F0}%";
+        var baselineText = $"(baseline)    Pick% {prBaseStr}    Win% {wrStr}";
+        sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
+
         var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
-        var prBaseStr = $"{Math.Round(pickRateBaseline):F0}%";
-        var wrStr     = $"{Math.Round(characterWR):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Pick% {prBaseStr}, Win% {wrStr}");
-        if (filterCtx.Length > 0)
-            sb.Append($"\n{filterCtx}");
-        sb.Append("[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
@@ -866,15 +871,18 @@ public static class CardHoverShowPatch
         sb.Append(DataCell(cTotRuns, ColPadInner));
         sb.Append(FormatBuysFractionCell(totShopBought, totShopSeen, totBuysPct, shopBuyRateBaseline, ColPadInner));
         sb.Append(DataCell(cTotWr, ColPadLast));
+
         sb.Append("[/table]");
 
+        // Baseline line below the table (plain text — avoids in-table column overflow).
+        // NaN baselines (filter matched zero runs/contexts) render as "—".
+        var wrStr        = double.IsNaN(characterWR)         ? "—" : $"{Math.Round(characterWR):F0}%";
+        var buysBaseStr  = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
+        var baselineText = $"(baseline)    Buys {buysBaseStr}    Win% {wrStr}";
+        sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
+
         var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";
-        var wrStr        = $"{Math.Round(characterWR):F0}%";
-        var buysBaseStr  = $"{Math.Round(shopBuyRateBaseline):F0}%";
-        sb.Append($"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color=#686868]Baseline Buys {buysBaseStr}, Win% {wrStr}");
-        if (filterCtx.Length > 0)
-            sb.Append($"\n{filterCtx}");
-        sb.Append("[/color][/font_size][/font]");
+        sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
@@ -1021,9 +1029,9 @@ public static class InspectCardDisplayPatch
                 var showBuysLayout      = CardHoverShowPatch.IsColorlessCard(model as CardModel);
                 var contextMap          = CardHoverShowPatch.GetContextMap(lookupId, groupUpgrades);
                 var actStats            = StatsAggregator.AggregateByAct(contextMap, inspFilter);
-                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db);
-                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
+                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: inspFilter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: inspFilter);
+                var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db, inspFilter);
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, inspFilter);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(inspFilter)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline, inspFilter);
@@ -1118,8 +1126,8 @@ public static class MerchantCardCreateHoverTipPatch
                 // In the shop, always use the Runs/Buys layout regardless of card class
                 var contextMap          = CardHoverShowPatch.GetContextMap(lookupId, groupUpgrades);
                 var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
-                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar) : StatsAggregator.GetGlobalWR(MainFile.Db);
-                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db);
+                var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
+                var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(filter)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline, filter);

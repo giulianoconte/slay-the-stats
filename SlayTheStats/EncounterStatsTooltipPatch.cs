@@ -618,8 +618,8 @@ internal static class EncounterStatsHover
         var brandLabel = new Label();
         brandLabel.Name = "SlayTheStatsBrand";
         brandLabel.Text = "SlayTheStats";
-        brandLabel.AddThemeColorOverride("font_color", new Color(0.376f, 0.376f, 0.376f, 1f)); // #606060
-        brandLabel.AddThemeFontSizeOverride("font_size", 14);
+        brandLabel.AddThemeColorOverride("font_color", new Color(0.408f, 0.408f, 0.408f, 1f)); // #686868
+        brandLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.BrandSize);
         brandLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
         if (kreonRegular != null) brandLabel.AddThemeFontOverride("font", kreonRegular);
         ApplyTooltipShadow(brandLabel);

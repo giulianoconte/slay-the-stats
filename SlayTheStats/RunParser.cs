@@ -114,6 +114,11 @@ public static class RunParser
         var campfireUpgradesThisRun    = new List<(string cardId, RunContext context)>();
         var eventRelicUpgradesThisRun  = new List<(string cardId, RunContext context)>();
 
+        // Per-run reward-screen counters — mirror db.TotalRewardScreens / db.TotalSkips
+        // so RunSummary can carry them for filter-aware pick-rate baselines.
+        int rewardScreensOfferedThisRun = 0;
+        int rewardScreensSkippedThisRun = 0;
+
         // Encounter tracking
         var encountersThisRun = new HashSet<(string encounterId, string contextKey)>();
         string? lastEncounterId = null;
@@ -213,9 +218,11 @@ public static class RunParser
                             if (cardChoices.Count > 0)
                             {
                                 db.TotalRewardScreens++;
+                                rewardScreensOfferedThisRun++;
                                 if (!anyPicked)
                                 {
                                     db.TotalSkips++;
+                                    rewardScreensSkippedThisRun++;
                                     allChoices.Add((SkipId, true, false, context));
                                 }
                             }
@@ -544,6 +551,22 @@ public static class RunParser
             if (!db.HighestWonAscensions.TryGetValue(character, out var prev) || ascension > prev)
                 db.HighestWonAscensions[character] = ascension;
         }
+
+        // Per-run summary — feeds filter-aware WR baselines. This sits inside
+        // ProcessRun, which is only called after the ProcessedRuns idempotency
+        // check in ProcessNewRuns, so each .run file contributes exactly one
+        // RunSummary even across re-parses.
+        db.Runs.Add(new RunSummary
+        {
+            Character    = character,
+            Ascension    = ascension,
+            GameMode     = gameMode,
+            BuildVersion = buildVersion,
+            Profile      = profile,
+            Won          = won,
+            RewardScreensOffered = rewardScreensOfferedThisRun,
+            RewardScreensSkipped = rewardScreensSkippedThisRun,
+        });
     }
 
     /// <summary>
