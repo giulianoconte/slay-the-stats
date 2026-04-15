@@ -79,15 +79,46 @@ internal static class TooltipHelper
         vbox.Name = "VBoxContainer";
         vbox.AddThemeConstantOverride("separation", 2);
 
-        var header = new RichTextLabel();
-        header.Name               = "HeaderLabel";
-        header.BbcodeEnabled      = true;
-        header.FitContent         = true;
-        header.AutowrapMode       = TextServer.AutowrapMode.Off;
-        header.ScrollActive       = false;
-        header.SelectionEnabled   = false;
-        header.ShortcutKeysEnabled = false;
-        vbox.AddChild(header);
+        // Header: HBox with title (left) + expanding spacer + brand (right) + fixed-
+        // width right pad. HBox handles the layout natively so we avoid the
+        // anchor+min-size confusion that an anchored plain Label triggers on first
+        // layout (observed as the panel expanding to full screen height on first show).
+        // The encounter tooltip uses anchors because its labels are RichTextLabels
+        // with FitContent=true — plain Labels don't auto-size and mis-layout under
+        // the same anchoring pattern.
+        const int BrandRightPadPx = 24;
+        var headerRow = new HBoxContainer();
+        headerRow.Name = "HeaderRow";
+        headerRow.AddThemeConstantOverride("separation", 0);
+        headerRow.MouseFilter = Control.MouseFilterEnum.Ignore;
+        vbox.AddChild(headerRow);
+
+        var titleLabel = new Label();
+        titleLabel.Name        = "TitleLabel";
+        titleLabel.Text        = "Stats";
+        titleLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        headerRow.AddChild(titleLabel);
+
+        var headerSpacer = new Control();
+        headerSpacer.Name                = "HeaderSpacer";
+        headerSpacer.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        headerSpacer.MouseFilter         = Control.MouseFilterEnum.Ignore;
+        headerRow.AddChild(headerSpacer);
+
+        var brandLabel = new Label();
+        brandLabel.Name                = "SlayTheStatsBrand";
+        brandLabel.Text                = "SlayTheStats";
+        brandLabel.MouseFilter         = Control.MouseFilterEnum.Ignore;
+        // Top-align within the HBox row — row height = title's (larger) height,
+        // so this keeps the smaller brand flush with the title's top edge.
+        brandLabel.VerticalAlignment = VerticalAlignment.Top;
+        headerRow.AddChild(brandLabel);
+
+        var rightPad = new Control();
+        rightPad.Name              = "BrandRightPad";
+        rightPad.CustomMinimumSize = new Vector2(BrandRightPadPx, 0);
+        rightPad.MouseFilter       = Control.MouseFilterEnum.Ignore;
+        headerRow.AddChild(rightPad);
 
         var table = new RichTextLabel();
         table.Name                = "StatsLabel";
@@ -148,31 +179,34 @@ internal static class TooltipHelper
         var panel = GetPanelPublic();
         if (panel == null) return;
 
-        var header = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/HeaderLabel");
-        var table  = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/StatsLabel");
-        if (header == null || table == null) return;
+        var titleLabel = panel.GetNodeOrNull<Label>("VBoxContainer/HeaderRow/TitleLabel");
+        var brandLabel = panel.GetNodeOrNull<Label>("VBoxContainer/HeaderRow/SlayTheStatsBrand");
+        var table      = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/StatsLabel");
+        if (titleLabel == null || brandLabel == null || table == null) return;
 
-        if (!_headerStyleApplied) { ApplyHeaderStyle(header); _headerStyleApplied = true; }
-        if (!_tableStyleApplied)  { ApplyTableStyle(table);   _tableStyleApplied  = true; }
+        bool firstStyle = !_headerStyleApplied;
+        if (!_headerStyleApplied) { ApplyHeaderLabelStyles(titleLabel, brandLabel); _headerStyleApplied = true; }
+        if (!_tableStyleApplied)  { ApplyTableStyle(table); _tableStyleApplied  = true; }
 
         if (_stolenPanelStyle == null) _stolenPanelStyle = BuildPanelStyle();
         panel.AddThemeStyleboxOverride("panel", _stolenPanelStyle);
 
-        // When there is no data, fold the message into the header and hide the table label so the
-        // panel collapses to a single line (VBoxContainer excludes invisible children from layout).
-        // "Stats" title on the left; "SlayTheStats" brand on the right, rendered at
-        // BrandSize (smaller than the title) in FooterGrey. Alignment is done with
-        // literal spaces — not ideal, but restructuring the stolen panel into an
-        // HBox risks breaking the tooltip's size/layout flow (panel and children are
-        // reused across shows). The encounter tooltip uses a structural HBox because
-        // it builds its panel from scratch.
-        header.Text = $"[b]Stats[/b]                    [font_size={ThemeStyle.BrandSize}][color={ThemeStyle.FooterGrey}]SlayTheStats[/color][/font_size]";
-        table.Text  = tableText;
+        // Header labels are static ("Stats" / "SlayTheStats") and set at panel
+        // construction; only the table text varies per show.
+        table.Text = tableText;
         // The PanelContainer is placed freely in the root (not inside a layout), so it won't
-        // auto-resize when child content changes height. ResetSize() on both labels and the panel
+        // auto-resize when child content changes height. ResetSize() on labels and the panel
         // forces the full chain to recalculate from the new content minimum size.
+        // Explicit per-label ResetSize calls ensure the Label children in the header HBox
+        // don't carry stale (default-font) min sizes into the panel's combined min size.
+        titleLabel.ResetSize();
+        brandLabel.ResetSize();
         table.ResetSize();
         panel.ResetSize();
+        // On first style application, Label min-size recomputation from newly-applied
+        // fonts can lag by one frame, causing the panel to lock in an oversized min
+        // size. A deferred ResetSize catches the updated metrics on the next layout pass.
+        if (firstStyle) panel.CallDeferred("reset_size");
 
         var root = (Engine.GetMainLoop() as SceneTree)?.Root;
         if (panel.GetParent() != root)
@@ -385,19 +419,31 @@ internal static class TooltipHelper
         }));
     }
 
-    private static void ApplyHeaderStyle(RichTextLabel label)
+    /// <summary>
+    /// Themes the restructured header's two Labels. Title takes the game-stolen
+    /// bold title font + size + shadow; brand takes Kreon regular at BrandSize
+    /// in FooterGrey with the same shadow. Mirrors EncounterStatsTooltipPatch's
+    /// header styling so card/relic and encounter tooltips read consistently.
+    /// </summary>
+    private static void ApplyHeaderLabelStyles(Label titleLabel, Label brandLabel)
     {
-        // RichTextLabel uses different override keys than Label.
-        // default_color is the base colour; [b] tags use bold_font; [color=] overrides in BBCode.
-        label.AddThemeColorOverride("default_color", Fonts.Title);
-        if (Fonts.Bold   != null) label.AddThemeFontOverride("bold_font",   Fonts.Bold);
-        if (Fonts.Normal != null) label.AddThemeFontOverride("normal_font", Fonts.Normal);
-        label.AddThemeFontSizeOverride("bold_font_size",   Fonts.Size);
-        label.AddThemeFontSizeOverride("normal_font_size", Fonts.Size);
-        label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
-        label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
-        label.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
-        label.AddThemeConstantOverride("line_separation",  Fonts.LineSep);
+        // Title — bold, gold, game-stolen title size.
+        titleLabel.AddThemeColorOverride("font_color", Fonts.Title);
+        if (Fonts.Bold != null) titleLabel.AddThemeFontOverride("font", Fonts.Bold);
+        titleLabel.AddThemeFontSizeOverride("font_size", Fonts.Size);
+        titleLabel.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
+        titleLabel.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
+        titleLabel.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
+
+        // Brand — Kreon regular, BrandSize, FooterGrey. Font_color on the Label
+        // directly (no BBCode in a plain Label).
+        var brandColor = new Color(0.408f, 0.408f, 0.408f, 1f); // #686868 (ThemeStyle.FooterGrey)
+        brandLabel.AddThemeColorOverride("font_color", brandColor);
+        if (Fonts.Normal != null) brandLabel.AddThemeFontOverride("font", Fonts.Normal);
+        brandLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.BrandSize);
+        brandLabel.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
+        brandLabel.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
+        brandLabel.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
     }
 
     private static void ApplyTableStyle(RichTextLabel label)

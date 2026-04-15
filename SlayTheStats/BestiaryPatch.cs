@@ -1049,7 +1049,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             "  • [b]Var[/b]  — variance of damage taken. High variance = swingy / inconsistent encounter.",
             "  • [b]Turns[/b] — average turns the fight lasts.",
             "  • [b]Pots[/b]  — average potions used per fight.",
-            "  • [b]Deaths[/b] — runs that ended at this encounter / total times fought. Color intensity grows with sample size.",
+            "  • [b]Deaths[/b] — runs that ended at this encounter / total runs. Color intensity grows with sample size.",
         });
         vbox.AddChild(body);
 
@@ -1206,7 +1206,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyKreonFont(body);
         body.Text = string.Join('\n', new[]
         {
-            "[b][color=#efc851]N[/color][/b] — times fought. Color intensity grows with sample size.",
+            "[b][color=#efc851]Runs[/color][/b] — runs that encountered this. Color intensity grows with sample size.",
             "",
             "[b][color=#efc851]Dmg[/color][/b] — the [i]median[/i] damage taken across matching fights — half of fights",
             "dealt more, half dealt less. Tints orange above the category baseline, teal below.",
@@ -1221,7 +1221,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             "",
             "[b][color=#efc851]Turns[/color][/b] — average turns the fight lasts.",
             "[b][color=#efc851]Pots[/color][/b] — average potions used per fight.",
-            "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total times fought.",
+            "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total runs.",
             "",
             "[color=#9c9c9c]Pool rows (baselines) weight each encounter equally — an encounter you've",
             "fought 50 times counts the same as one you've fought 5 times, matching the",
@@ -3999,7 +3999,7 @@ internal static class EncounterSorting
     public static string Label(EncounterSortMode mode) => mode switch
     {
         EncounterSortMode.Name         => "Name",
-        EncounterSortMode.Seen         => "Times Fought",
+        EncounterSortMode.Seen         => "Runs",
         EncounterSortMode.DeathRate    => "Death%",
         EncounterSortMode.MedianDamage => "Dmg",
         EncounterSortMode.Spread       => "Spread",

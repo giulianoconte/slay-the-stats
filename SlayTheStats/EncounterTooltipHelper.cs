@@ -121,7 +121,7 @@ public static class EncounterTooltipHelper
         var hdr = new StringBuilder();
         hdr.Append("[table=8]");
         AppendDescriptorCell(hdr, " ", isHeader: true);
-        AppendHeaderCell(hdr, "Fought", WP.Fought);
+        AppendHeaderCell(hdr, "Runs",    WP.Fought);
         AppendHeaderCell(hdr, "Dmg%",    WP.Dmg);
         AppendHeaderCell(hdr, "Mid 50%", WP.Mid50);
         AppendHeaderCell(hdr, "Spread",  WP.Spread);
@@ -238,7 +238,7 @@ public static class EncounterTooltipHelper
 
         // Header row
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Fought", WP.Fought);
+        AppendHeaderCell(sb, "Runs",    WP.Fought);
         AppendHeaderCell(sb, "Dmg%",    WP.Dmg);
         AppendHeaderCell(sb, "Mid 50%", WP.Mid50);
         AppendHeaderCell(sb, "Spread",  WP.Spread);
@@ -878,7 +878,7 @@ public static class EncounterTooltipHelper
 
         // Header row — empty descriptor cell + 6 column headers
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Fought", NormalCellPadding);
+        AppendHeaderCell(sb, "Runs",    NormalCellPadding);
         AppendHeaderCell(sb, "Dmg",     TightCellPadding);
         AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
         AppendHeaderCell(sb, "Spread",  NormalCellPadding);
@@ -939,7 +939,7 @@ public static class EncounterTooltipHelper
 
         // Header row
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Fought", NormalCellPadding);
+        AppendHeaderCell(sb, "Runs",    NormalCellPadding);
 
         AppendHeaderCell(sb, "Dmg",     TightCellPadding);
         AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
@@ -1106,7 +1106,7 @@ public static class EncounterTooltipHelper
 
         sb.Append("[table=5]");
         // Header row
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]N[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Runs[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Dmg[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Mid 50%[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Turns[/color][/right][/cell]");
