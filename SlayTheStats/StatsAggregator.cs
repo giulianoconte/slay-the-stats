@@ -89,6 +89,32 @@ public class AggregationFilter
     }
 
     /// <summary>
+    /// Returns true if an EventVisit passes all filters. Mirrors the
+    /// RunSummary overload; EventVisit embeds its own context instead of
+    /// keying into a map so this uses the visit's own fields directly.
+    /// </summary>
+    public bool Matches(EventVisit v)
+    {
+        if (Characters != null && Characters.Count > 0)
+        {
+            if (!Characters.Contains(v.Character)) return false;
+        }
+        else if (Character != null && v.Character != Character) return false;
+
+        if (GameMode != null && v.GameMode != GameMode) return false;
+
+        if (AscensionMin != null && v.Ascension < AscensionMin) return false;
+        if (AscensionMax != null && v.Ascension > AscensionMax) return false;
+
+        if (VersionMin != null && CompareVersions(v.BuildVersion, VersionMin) < 0) return false;
+        if (VersionMax != null && CompareVersions(v.BuildVersion, VersionMax) > 0) return false;
+
+        if (Profile != null && v.Profile != Profile) return false;
+
+        return true;
+    }
+
+    /// <summary>
     /// Compares two version strings semantically (e.g. "v0.4.10" > "v0.4.9").
     /// Strips leading 'v' prefix. Returns negative if a &lt; b, 0 if equal, positive if a &gt; b.
     /// </summary>
@@ -923,6 +949,49 @@ public static class StatsAggregator
         var sorted = ascensions.ToList();
         sorted.Sort();
         return sorted;
+    }
+
+    // --- Event aggregation ---
+
+    /// <summary>
+    /// Aggregate stats for one event under a filter. Unlike encounters,
+    /// events are sliced by option_path in addition to context — each
+    /// option_path has its own Picks/Wins/deltas. Totals are across all
+    /// matching visits regardless of which option was taken.
+    /// </summary>
+    public static EventAggregate AggregateEvent(StatsDb db, string eventId, AggregationFilter? filter = null)
+    {
+        var agg = new EventAggregate { EventId = eventId, Options = new Dictionary<string, EventOptionAggregate>() };
+        if (!db.EventVisits.TryGetValue(eventId, out var visits)) return agg;
+
+        // Single pass: each visit's TotalVisits increments once (the
+        // denominator for all option pick-rates — same model as shop pick%
+        // where denominator = times-shop-seen regardless of affordability).
+        // Each terminal segment in the visit's option_path gets +1 pick /
+        // +1 win. Option keys that the game reuses across depths (Slippery
+        // Bridge's OVERCOME, Abyssal Baths' LINGER) merge into one bucket —
+        // accepted lossiness per design decision.
+        foreach (var v in filter == null ? visits : visits.Where(filter.Matches))
+        {
+            agg.TotalVisits++;
+            if (v.Won) agg.TotalWins++;
+
+            foreach (var key in v.OptionPath)
+            {
+                var term = EventIdHelpers.TerminalOptionOfKey(key);
+                if (string.IsNullOrEmpty(term)) continue;
+
+                if (!agg.Options.TryGetValue(term, out var bucket))
+                {
+                    bucket = new EventOptionAggregate { OptionKey = term };
+                    agg.Options[term] = bucket;
+                }
+                bucket.Picks++;
+                if (v.Won) bucket.Wins++;
+            }
+        }
+
+        return agg;
     }
 
     /// <summary>

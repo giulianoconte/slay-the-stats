@@ -116,6 +116,57 @@ public static class AncientEvents
     public static bool IsAncient(string eventId) => Ids.Contains(eventId);
 }
 
+/// <summary>
+/// Read-time aggregate for one event under a filter. <see cref="Options"/>
+/// holds per-option breakdowns keyed by the terminal option name (e.g.
+/// "CLIMB", "FIGHT"). Totals sum across all matching visits regardless of
+/// option. Computed by <c>StatsAggregator.AggregateEvent</c>.
+/// </summary>
+public class EventAggregate
+{
+    public string EventId = "";
+    public int TotalVisits;
+    public int TotalWins;
+    public double WinRate => TotalVisits > 0 ? (double)TotalWins / TotalVisits : 0.0;
+    public Dictionary<string, EventOptionAggregate> Options = new();
+}
+
+/// <summary>
+/// Per-option aggregate slice within an <see cref="EventAggregate"/>.
+/// Delta lists carry the raw per-visit values so medians and means can be
+/// computed on demand, matching the encounter-stats pattern (sum + list).
+/// </summary>
+public class EventOptionAggregate
+{
+    public string OptionKey = "";
+    public int Picks;
+    public int Wins;
+    public List<int> HpDeltas    = new(); // hp_healed - damage_taken
+    public List<int> MaxHpDeltas = new(); // max_hp_gained - max_hp_lost
+    public List<int> GoldDeltas  = new(); // gold_gained - gold_spent - gold_stolen - gold_lost
+
+    public double WinRate => Picks > 0 ? (double)Wins / Picks : 0.0;
+
+    public double HpDeltaMean()     => Mean(HpDeltas);
+    public double? HpDeltaMedian()  => Median(HpDeltas);
+    public double MaxHpDeltaMean()  => Mean(MaxHpDeltas);
+    public double? MaxHpDeltaMedian()  => Median(MaxHpDeltas);
+    public double GoldDeltaMean()   => Mean(GoldDeltas);
+    public double? GoldDeltaMedian() => Median(GoldDeltas);
+
+    private static double Mean(List<int> xs) => xs.Count == 0 ? 0.0 : xs.Average();
+
+    private static double? Median(List<int> xs)
+    {
+        if (xs.Count == 0) return null;
+        var sorted = xs.OrderBy(v => v).ToList();
+        int n = sorted.Count;
+        return n % 2 == 1
+            ? sorted[n / 2]
+            : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+    }
+}
+
 public static class EventIdHelpers
 {
     /// <summary>
@@ -141,10 +192,16 @@ public static class EventIdHelpers
     /// <c>OPTION</c>. Falls back to the full key if parsing fails.
     /// </summary>
     public static string TerminalOption(List<string> optionPath)
+        => optionPath.Count == 0 ? "" : TerminalOptionOfKey(optionPath[^1]);
+
+    /// <summary>
+    /// Extracts the <c>OPTION</c> segment from a single
+    /// <c>EVENT_ID.pages.PAGE.options.OPTION.title</c> title key. Falls back
+    /// to the raw key when it doesn't match the expected shape.
+    /// </summary>
+    public static string TerminalOptionOfKey(string key)
     {
-        if (optionPath.Count == 0) return "";
-        var key = optionPath[^1];
-        // <EVENT>.pages.<PAGE>.options.<OPTION>.title
+        if (string.IsNullOrEmpty(key)) return "";
         var parts = key.Split('.');
         var optionsIdx = Array.IndexOf(parts, "options");
         if (optionsIdx >= 0 && optionsIdx + 1 < parts.Length)
