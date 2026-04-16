@@ -126,6 +126,16 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
+            Set(cfg, "Key",          "open_filter_settings");
+            Set(cfg, "Label",        "Filter Settings");
+            Set(cfg, "Type",         EnumVal("Button"));
+            Set(cfg, "ButtonText",   "Open");
+            Set(cfg, "Description",  "Open the SlayTheStats filter pane (same controls as the Card Library / Relic Collection filter button). Changes take effect immediately; click 'Save Defaults' inside the pane to persist them across restarts.");
+            Set(cfg, "OnChanged",    new Action<object>(_ => CompendiumFilterPatch.OpenStandalonePane()));
+        }));
+
+        list.Add(Entry(cfg =>
+        {
             Set(cfg, "Key",          "color_blind_mode");
             Set(cfg, "Label",        "Color Blind Mode");
             Set(cfg, "Type",         EnumVal("Toggle"));
@@ -196,45 +206,22 @@ internal static class ModConfigBridge
 
         list.Add(Entry(cfg =>
         {
-            Set(cfg, "Key",          "bestiary_button_disabled");
-            Set(cfg, "Label",        "Disable Stats Bestiary Button");
-            Set(cfg, "Type",         EnumVal("Toggle"));
-            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.BestiaryButtonDisabled);
-            Set(cfg, "Description",  "Hide the Stats Bestiary button from the compendium bottom row. Requires a game restart to take effect.");
+            Set(cfg, "Key",          "encounter_stats_mode");
+            Set(cfg, "Label",        "Encounter Stats (requires restart)");
+            Set(cfg, "Type",         EnumVal("Dropdown"));
+            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.EncounterStatsRestartRequired.ToString());
+            Set(cfg, "Options",      new[] { "BestiaryAndTooltips", "Tooltips", "Disabled" });
+            Set(cfg, "Description",  "Controls which encounter-stats surfaces are enabled. BestiaryAndTooltips: Stats Bestiary button in compendium + in-combat hover tooltip. Tooltips: tooltip only, bestiary button hidden. Disabled: both off. Requires a game restart to take effect.");
             Set(cfg, "OnChanged",    new Action<object>(v =>
             {
-                SlayTheStatsConfig.BestiaryButtonDisabled = Convert.ToBoolean(v);
+                if (Enum.TryParse<SlayTheStatsConfig.EncounterStatsMode>(Convert.ToString(v), out var m))
+                    SlayTheStatsConfig.EncounterStatsRestartRequired = m;
                 ModConfig.SaveDebounced<SlayTheStatsConfig>();
             }));
         }));
 
-        list.Add(Entry(cfg =>
-        {
-            Set(cfg, "Key",          "in_combat_encounter_tooltip_disabled");
-            Set(cfg, "Label",        "Disable In-Combat Encounter Tooltip");
-            Set(cfg, "Type",         EnumVal("Toggle"));
-            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.InCombatEncounterTooltipDisabled);
-            Set(cfg, "Description",  "Suppress the floating encounter stats tooltip that appears above enemies on hover during combat. The Stats Bestiary still works regardless.");
-            Set(cfg, "OnChanged",    new Action<object>(v =>
-            {
-                SlayTheStatsConfig.InCombatEncounterTooltipDisabled = Convert.ToBoolean(v);
-                ModConfig.SaveDebounced<SlayTheStatsConfig>();
-            }));
-        }));
-
-        list.Add(Entry(cfg =>
-        {
-            Set(cfg, "Key",          "bestiary_static_sprites");
-            Set(cfg, "Label",        "Bestiary: Static Sprites (GPU-Friendly)");
-            Set(cfg, "Type",         EnumVal("Toggle"));
-            Set(cfg, "DefaultValue", (object)SlayTheStatsConfig.BestiaryStaticSprites);
-            Set(cfg, "Description",  "Render bestiary monster previews as static captured sprites instead of live Spine animations. First hover still draws once to capture the image, then the SubViewport is freed. Dramatically lower GPU cost at the expense of idle animation. Recommended for weaker GPUs.");
-            Set(cfg, "OnChanged",    new Action<object>(v =>
-            {
-                SlayTheStatsConfig.BestiaryStaticSprites = Convert.ToBoolean(v);
-                ModConfig.SaveDebounced<SlayTheStatsConfig>();
-            }));
-        }));
+        // BestiaryPreviewMode is exposed in the in-bestiary settings pane
+        // (not the mod-settings page) so it sits next to the surface it affects.
 
         list.Add(Entry(cfg =>
         {
@@ -296,6 +283,7 @@ internal static class ModConfigBridge
             SyncOne(modValues, "tutorial_seen",             SlayTheStatsConfig.TutorialSeen);
             SyncOne(modValues, "data_directory",            SlayTheStatsConfig.DataDirectory);
             SyncOne(modValues, "debug_mode",                SlayTheStatsConfig.DebugMode);
+            SyncOne(modValues, "encounter_stats_mode",      SlayTheStatsConfig.EncounterStatsRestartRequired.ToString());
         }
         catch (Exception e)
         {

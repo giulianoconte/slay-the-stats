@@ -25,6 +25,14 @@ public partial class FilterPanelContainer : PanelContainer
     /// </summary>
     public Control? AssociatedButton { get; set; }
 
+    /// <summary>
+    /// Optional sibling pane (e.g. a bestiary-specific settings pane) that is
+    /// shown alongside this one. Clicks inside the sibling's rect are NOT
+    /// treated as outside-clicks, so the user can interact with the sibling
+    /// without dismissing this pane.
+    /// </summary>
+    public Control? AssociatedSiblingPane { get; set; }
+
     public override void _Input(InputEvent ev)
     {
         if (!Visible) return;
@@ -41,6 +49,14 @@ public partial class FilterPanelContainer : PanelContainer
         if (AssociatedButton != null
             && GodotObject.IsInstanceValid(AssociatedButton)
             && AssociatedButton.GetGlobalRect().HasPoint(globalMouse))
+            return;
+
+        // Clicks on an associated sibling pane (bestiary settings, etc.) stay
+        // inside the logical unit and should not dismiss this pane.
+        if (AssociatedSiblingPane != null
+            && GodotObject.IsInstanceValid(AssociatedSiblingPane)
+            && AssociatedSiblingPane.Visible
+            && AssociatedSiblingPane.GetGlobalRect().HasPoint(globalMouse))
             return;
 
         Visible = false;

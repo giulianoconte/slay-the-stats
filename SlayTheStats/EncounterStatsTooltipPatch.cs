@@ -291,7 +291,7 @@ internal static class EncounterStatsHover
     private static void ShowFor(NCreature creature, string encounterId)
     {
         // User opted out via the mod config — never build/show the in-combat tooltip.
-        if (SlayTheStatsConfig.InCombatEncounterTooltipDisabled) return;
+        if (!SlayTheStatsConfig.InCombatTooltipEnabled) return;
 
         // Look up the hitbox via reflection rather than the public Hitbox getter, in case the
         // property name varies across game builds.

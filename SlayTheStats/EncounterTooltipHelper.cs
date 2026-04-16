@@ -9,7 +9,7 @@ namespace SlayTheStats;
 /// Spread (of Dmg%), Turns, Pots, Deaths. Damage values are normalized by the
 /// character's starting max HP so cross-character rows are comparable.
 ///
-/// In-combat single-row: N | Dmg | Mid 50% | Turns | Deaths (raw damage, no Dmg% —
+/// In-combat single-row: Runs | Dmg | Mid 50% | Spread | Turns (raw damage, no Dmg% —
 /// single-character context where HP normalization isn't needed).
 ///
 /// Coloration:
@@ -1109,8 +1109,8 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Runs[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Dmg[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Mid 50%[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Spread[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Turns[/color][/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Deaths[/color][/right][/cell]");
 
         if (stat.Fought > 0)
             AppendCombatDataCells(sb, stat, deathRateBaseline, dmgPctBaseline, iqrcBaseline);
@@ -1134,12 +1134,11 @@ public static class EncounterTooltipHelper
         return sb.ToString();
     }
 
-    /// <summary>Appends 5 data cells for the in-combat encounter table: N | Dmg | Mid 50% | Turns | Deaths.</summary>
+    /// <summary>Appends 6 data cells for the in-combat encounter table: Runs | Dmg | Mid 50% | Spread | Turns.</summary>
     private static void AppendCombatDataCells(StringBuilder sb, EncounterEvent stat,
         double deathRateBaseline, double dmgPctBaseline, double iqrcBaseline)
     {
         int n = stat.Fought;
-        double deathRate = 100.0 * stat.Died / n;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
         double avgDmgPct = stat.DmgPctSum / n * 100.0;
         double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
@@ -1149,14 +1148,14 @@ public static class EncounterTooltipHelper
         var cN      = TooltipHelper.ColN($"{n}", n);
         var cDmg    = ColBad($"{dmgMedian:F0}", avgDmgPct, n, dmgPctBaseline);
         var cIqr    = FormatIqrCellInner(fIqr, iqr, dmgMedian, n, iqrcBaseline);
+        var cSpread = FormatSpreadCell(iqr, dmgMedian, n, iqrcBaseline);
         var cTurns  = $"[color={TooltipHelper.NeutralShade}]{avgTurns:F1}[/color]";
-        var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBaseline);
 
         sb.Append($"[cell {CombatCellPadding}][right]{cN}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cIqr}[/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right]{cSpread}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cTurns}[/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right]{cDeaths}[/right][/cell]");
     }
 
     /// <summary>IQR cell content without padding — just the colored text for use inside [cell] tags.</summary>

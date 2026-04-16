@@ -77,7 +77,7 @@ public static class BestiaryButtonPatch
         try
         {
             // User opted out via the mod config — skip injection entirely.
-            if (SlayTheStatsConfig.BestiaryButtonDisabled) return;
+            if (!SlayTheStatsConfig.BestiaryEnabled) return;
 
             // Anchor next to the existing bottom-row buttons (Statistics, Run History) rather than
             // the locked game bestiary button at the top.
@@ -234,6 +234,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// "Score by:" row covers per-character scoring, and group-upgrades is a card-only
     /// concern).</summary>
     private PanelContainer? _filterPane;
+    /// <summary>Bestiary-specific settings pane (preview mode, future extras). Shown
+    /// alongside <see cref="_filterPane"/> whenever the SlayTheStats filter button
+    /// is toggled open; positioned directly above the filter pane.</summary>
+    private PanelContainer? _bestiarySettingsPane;
     private HBoxContainer? _statsColumnHeaderRow;
     private VBoxContainer? _encounterList;
     private RichTextLabel? _statsLabel;
@@ -276,7 +280,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <see cref="_lruOrder"/> so moves to head are O(1).</summary>
     private readonly Dictionary<string, LinkedListNode<string>> _lruNodes = new();
     /// <summary>Static-sprite cache used when
-    /// <see cref="SlayTheStatsConfig.BestiaryStaticSprites"/> is on. First
+    /// <see cref="SlayTheStatsConfig.BestiaryPreviewMode"/> = Static. First
     /// hover of each encounter still builds a SubViewport and captures its
     /// texture into an ImageTexture a few frames later; subsequent hovers
     /// display the captured texture directly, no viewport involved. Keyed by
@@ -883,6 +887,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         AddChild(_filterPane);
         CompendiumFilterPatch.RegisterPane(_filterPane);
 
+        BuildAndAttachBestiarySettingsPane();
+
         // Filter toggle button — uses the same shared helper as the relic
         // page (CompendiumFilterPatch.CreateAndAttachStyledFilterButton) so
         // the cloned NCardViewSortButton lands at the bottom-left with the
@@ -941,6 +947,120 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         if (SlayTheStatsConfig.DebugMode)
             MainFile.Logger.Info($"[SlayTheStats] Bestiary filter pane attached (styled={(_filterButton is NCardViewSortButton)}, active={CompendiumFilterPatch.HasActiveFilters()})");
+    }
+
+    /// <summary>
+    /// Builds a small bestiary-specific settings pane (preview mode selector, etc.) and
+    /// wires it to follow the main filter pane's visibility. Positioned directly above
+    /// the filter pane after each show so both read as a stacked unit.
+    /// </summary>
+    private void BuildAndAttachBestiarySettingsPane()
+    {
+        if (_filterPane == null) return;
+
+        var pane = new FilterPanelContainer();
+        pane.Name = "SlayTheStatsBestiarySettingsPane";
+        pane.Visible = false;
+        pane.ZIndex = 90;
+        pane.AnchorLeft = 0f;
+        pane.AnchorTop = 0f;
+        pane.AnchorRight = 0f;
+        pane.AnchorBottom = 0f;
+        pane.AddThemeStyleboxOverride("panel", CompendiumFilterPatch.BuildPanelStyle());
+        pane.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 14);
+        margin.AddThemeConstantOverride("margin_right", 14);
+        margin.AddThemeConstantOverride("margin_top", 14);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
+        pane.AddChild(margin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 8);
+        margin.AddChild(vbox);
+
+        // Title row (mirrors CompendiumFilterPatch.BuildFilterPane's title layout).
+        var titleRow = new HBoxContainer();
+        titleRow.AddThemeConstantOverride("separation", 8);
+        vbox.AddChild(titleRow);
+
+        var title = new Label();
+        title.Text = "Bestiary Settings";
+        title.AddThemeColorOverride("font_color", new Color("EFC851")); // Gold
+        title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        CompendiumFilterPatch.ApplyGameFont(title, 24);
+        titleRow.AddChild(title);
+
+        CompendiumFilterPatch.AddSeparator(vbox);
+
+        // ── Preview on/off checkbox (cloned game-native tickbox style) ──
+        // Note: the BestiaryPreviewMode enum still has a Static value for a
+        // possible post-v1.0.0 feature, but the UI here is binary (Live / None)
+        // for v0.3.0 to keep the surface simple.
+        var previewCheckbox = CompendiumFilterPatch.BuildStyledCheckbox(
+            "Show monster preview",
+            SlayTheStatsConfig.BestiaryPreviewEnabled,
+            ticked =>
+            {
+                SlayTheStatsConfig.BestiaryPreviewMode = ticked
+                    ? SlayTheStatsConfig.BestiaryPreviewModeEnum.Live
+                    : SlayTheStatsConfig.BestiaryPreviewModeEnum.None;
+                try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+                catch (Exception ex) { MainFile.Logger.Warn($"[SlayTheStats] Preview mode save failed: {ex.Message}"); }
+                if (_hoveredEncounterId != null)
+                    RenderMonsterPreview(_hoveredEncounterId);
+            });
+        vbox.AddChild(previewCheckbox);
+
+        AddChild(pane);
+        _bestiarySettingsPane = pane;
+
+        // Link the two panes so click-outside dismissal considers both as one
+        // logical unit, in either direction.
+        if (_filterPane is FilterPanelContainer fFilter)
+            fFilter.AssociatedSiblingPane = pane;
+        pane.AssociatedSiblingPane = _filterPane;
+        pane.AssociatedButton = _filterButton;
+
+        _filterPane.VisibilityChanged += () =>
+        {
+            if (_bestiarySettingsPane == null || _filterPane == null) return;
+            if (_filterPane.Visible)
+            {
+                // Keep invisible this frame; the deferred callback positions it
+                // and flips visibility once we can read filterPane.GlobalPosition.
+                _bestiarySettingsPane.Visible = false;
+                RepositionBestiarySettingsPaneAboveFilterPane();
+            }
+            else
+            {
+                _bestiarySettingsPane.Visible = false;
+            }
+        };
+    }
+
+    /// <summary>
+    /// Places the settings pane so its bottom edge sits a small gap above the
+    /// filter pane's top edge, horizontally aligned to the filter pane's left.
+    /// Reads the filter pane's GlobalPosition after its RepositionPaneNextToButton
+    /// has run; deferred so the filter pane has finished its own layout.
+    /// </summary>
+    private void RepositionBestiarySettingsPaneAboveFilterPane()
+    {
+        Callable.From(() =>
+        {
+            if (_bestiarySettingsPane == null || _filterPane == null) return;
+            if (!_filterPane.Visible) return;
+            const float gap = 8f;
+            var fpGlobal = _filterPane.GlobalPosition;
+            var fpSize = _filterPane.Size;
+            var spSize = _bestiarySettingsPane.GetCombinedMinimumSize();
+            _bestiarySettingsPane.Size = spSize;
+            _bestiarySettingsPane.GlobalPosition = new Vector2(fpGlobal.X, fpGlobal.Y - spSize.Y - gap);
+            _bestiarySettingsPane.Visible = true;
+            MainFile.Logger.Info($"[SlayTheStats] BestiarySettingsPane reposition: fpGlobal={fpGlobal} fpSize={fpSize} spSize={spSize} → spGlobal={_bestiarySettingsPane.GlobalPosition} spPosition={_bestiarySettingsPane.Position}");
+        }).CallDeferred();
     }
 
     // ───────────────────────── Tutorial overlay ─────────────────────────
@@ -1853,24 +1973,85 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _sortTabRow.AddChild(btn);
         }
 
-        // Raw / Significance toggle chip — only meaningful for stat-based
-        // sort modes. Name sorts alphabetically regardless; Seen is the raw
-        // sample count and has no baseline comparison. For the three rate/
-        // average modes, significance sorts by z-score vs the category
-        // baseline, so well-sampled encounters with meaningful deviation
+        // ── Rank by: Raw / Significance chips ──
+        // Only meaningful for stat-based sort modes. Name sorts alphabetically
+        // regardless; Seen is the raw sample count and has no baseline comparison.
+        // For the three rate/average modes, significance sorts by z-score vs the
+        // category baseline, so well-sampled encounters with meaningful deviation
         // surface above low-N noise.
-        var gap = new Control { CustomMinimumSize = new Vector2(12, 0) };
+        var gap = new Control { CustomMinimumSize = new Vector2(16, 0) };
         _sortTabRow.AddChild(gap);
+
+        var rankLabel = new Label();
+        rankLabel.Text = "Rank by:";
+        rankLabel.AddThemeColorOverride("font_color", new Color(0.88f, 0.86f, 0.80f, 1f));
+        rankLabel.AddThemeFontSizeOverride("font_size", 14);
+        ApplyKreonFont(rankLabel);
+        _sortTabRow.AddChild(rankLabel);
+
+        var rawBtn = MakeChipButton(
+            "Raw",
+            !_sortBySignificance,
+            () =>
+            {
+                if (!_sortBySignificance) return;
+                _sortBySignificance = false;
+                SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
+                RefreshEncounterList();
+            });
+        _sortTabRow.AddChild(rawBtn);
+
         var sigBtn = MakeChipButton(
-            _sortBySignificance ? "Sig" : "Raw",
+            "Significance",
             _sortBySignificance,
             () =>
             {
-                _sortBySignificance = !_sortBySignificance;
+                if (_sortBySignificance) return;
+                _sortBySignificance = true;
                 SaveBestiaryState(_selectedBiome, _sortMode, _sortDescending, _sortCharacter, _sortBySignificance);
                 RefreshEncounterList();
             });
         _sortTabRow.AddChild(sigBtn);
+
+        // "?" help chip — hover shows a tooltip explaining both Raw and Significance.
+        var rankHelp = BuildRankByHelpButton();
+        _sortTabRow.AddChild(rankHelp);
+    }
+
+    private Button BuildRankByHelpButton()
+    {
+        var btn = new Button
+        {
+            Text = "?",
+            CustomMinimumSize = new Vector2(24, 24),
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            FocusMode = Control.FocusModeEnum.None,
+            TooltipText =
+                "Raw: sort by the raw metric value. Encounters with few fights can rank high " +
+                "purely from sample-size noise.\n\n" +
+                "Significance: sort by z-score vs the category baseline. Well-sampled encounters " +
+                "whose metric meaningfully deviates from the pool baseline surface above low-N noise.",
+        };
+
+        var style = new StyleBoxFlat();
+        style.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
+        style.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
+        style.SetBorderWidthAll(1);
+        style.SetCornerRadiusAll(12);
+        style.ContentMarginLeft = style.ContentMarginRight = 5;
+        style.ContentMarginTop = style.ContentMarginBottom = 0;
+        btn.AddThemeStyleboxOverride("normal", style);
+        var hover = (StyleBoxFlat)style.Duplicate();
+        hover.BorderColor = new Color(0.918f, 0.745f, 0.318f, 0.95f);
+        hover.BgColor = new Color(0.15f, 0.16f, 0.22f, 1f);
+        btn.AddThemeStyleboxOverride("hover", hover);
+
+        btn.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
+        btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        btn.AddThemeFontSizeOverride("font_size", 14);
+        ApplyKreonFont(btn, bold: true);
+        ApplyTextShadow(btn);
+        return btn;
     }
 
     private string BuildSortLabel(EncounterSortMode mode, bool selected)
@@ -2529,9 +2710,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void ScheduleMonsterPreviewRender(string encounterId)
     {
         // Cache hit (either mode): instant render, skip debounce.
-        bool staticHit = SlayTheStatsConfig.BestiaryStaticSprites &&
+        bool staticHit = SlayTheStatsConfig.BestiaryPreviewStatic &&
                          _staticSpriteCache.ContainsKey(encounterId);
-        bool liveHit   = !SlayTheStatsConfig.BestiaryStaticSprites &&
+        bool liveHit   = !SlayTheStatsConfig.BestiaryPreviewStatic &&
                          _liveViewports.ContainsKey(encounterId);
         if (staticHit || liveHit)
         {
@@ -3119,9 +3300,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ClearMonsterPreview();
         if (_renderArea == null) return;
 
+        // Preview disabled entirely — no render path runs.
+        if (!SlayTheStatsConfig.BestiaryPreviewEnabled) return;
+
         // GPU-friendly mode: static-sprite cache hit. Display the baked
         // ImageTexture directly, no SubViewport involved.
-        if (SlayTheStatsConfig.BestiaryStaticSprites &&
+        if (SlayTheStatsConfig.BestiaryPreviewStatic &&
             _staticSpriteCache.TryGetValue(encounterId, out var bakedTex) &&
             bakedTex != null)
         {
@@ -3130,7 +3314,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         // Live-animation mode: cache hit reuses the live SubViewport.
-        if (!SlayTheStatsConfig.BestiaryStaticSprites &&
+        if (!SlayTheStatsConfig.BestiaryPreviewStatic &&
             _liveViewports.TryGetValue(encounterId, out var cachedViewport) &&
             GodotObject.IsInstanceValid(cachedViewport))
         {
@@ -3401,7 +3585,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             cursor += sb.Size.X + MonsterPreviewGap;
         }
 
-        if (SlayTheStatsConfig.BestiaryStaticSprites)
+        if (SlayTheStatsConfig.BestiaryPreviewStatic)
         {
             // GPU-friendly path: show the live viewport temporarily, then a
             // few frames later capture its texture into an ImageTexture,

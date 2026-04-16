@@ -170,7 +170,6 @@ internal static class TooltipHelper
 
     internal static void ShowPanel(string tableText, Control? holder = null, float? widthOverride = null)
     {
-        MainFile.Logger.Info($"[SlayTheStats] ShowPanel gen={ShowGen}→{ShowGen + 1} activeHover={HasActiveHover}");
         ShowGen++;
         HasActiveHover = true;
         ActiveWidth = widthOverride ?? TooltipWidth;
@@ -191,6 +190,20 @@ internal static class TooltipHelper
         if (_stolenPanelStyle == null) _stolenPanelStyle = BuildPanelStyle();
         panel.AddThemeStyleboxOverride("panel", _stolenPanelStyle);
 
+        // Pin the panel's min width BEFORE assigning BBCode text. The position
+        // follower also sets this every _Process, but that runs after ShowPanel
+        // — which means the RichTextLabel would otherwise compute its FitContent
+        // height against a degenerate ~1px width and balloon to thousands of px.
+        panel.CustomMinimumSize = new Vector2(ActiveWidth, 0);
+        // Also pin the table's min width: setting the panel's min propagates up,
+        // not down, so child layout won't give the table a real width until end
+        // of frame. Giving the table its own explicit min width lets BBCode
+        // FitContent measure the correct wrapped height immediately.
+        var contentPad = _stolenPanelStyle is StyleBoxFlat sbf
+            ? sbf.ContentMarginLeft + sbf.ContentMarginRight
+            : 16f;
+        table.CustomMinimumSize = new Vector2(ActiveWidth - contentPad, 0);
+
         // Header labels are static ("Stats" / "SlayTheStats") and set at panel
         // construction; only the table text varies per show.
         table.Text = tableText;
@@ -203,10 +216,6 @@ internal static class TooltipHelper
         brandLabel.ResetSize();
         table.ResetSize();
         panel.ResetSize();
-        // On first style application, Label min-size recomputation from newly-applied
-        // fonts can lag by one frame, causing the panel to lock in an oversized min
-        // size. A deferred ResetSize catches the updated metrics on the next layout pass.
-        if (firstStyle) panel.CallDeferred("reset_size");
 
         var root = (Engine.GetMainLoop() as SceneTree)?.Root;
         if (panel.GetParent() != root)
@@ -228,8 +237,30 @@ internal static class TooltipHelper
             root?.AddChild(follower);
         }
 
-        if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = true;
-        panel.Visible = true;
+        // On first style application, Label min-size recomputation from the newly-applied
+        // fonts lags by a frame. Showing the panel immediately would render one frame of
+        // oversized tooltip before the deferred reset_size snaps it to the correct height.
+        // Defer both the reset AND the visibility flip so the panel only appears with correct
+        // metrics. Subsequent shows use cached metrics and can flip visibility synchronously.
+        if (firstStyle)
+        {
+            // First show: BBCode content height is still 0 this frame (table.Text was
+            // just assigned and FitContent hasn't laid out yet). Defer the visibility
+            // flip so the panel only appears once the table has measured its content.
+            panel.CallDeferred("reset_size");
+            var p = panel;
+            var s = _shadow;
+            Callable.From(() =>
+            {
+                p.Visible = true;
+                if (s != null && GodotObject.IsInstanceValid(s)) s.Visible = true;
+            }).CallDeferred();
+        }
+        else
+        {
+            if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = true;
+            panel.Visible = true;
+        }
     }
 
     /// <summary>

@@ -559,6 +559,17 @@ public static partial class CompendiumFilterPatch
                     MainFile.Logger.Warn($"[SlayTheStats] Failed to repoint tickbox _hsv: {e.Message}");
                 }
             }
+
+
+            // Default label color is white (matches how the filter pane's
+            // highlightGroupUpgrades resets to Colors.White when at default).
+            // Caller can override via a post-clone highlight callback.
+            var lblForColor = clone.GetNodeOrNull<Control>("Label") ?? clone.FindChild("Label", true, false) as Control;
+            if (lblForColor != null)
+            {
+                lblForColor.AddThemeColorOverride("font_color", Colors.White);
+                lblForColor.Modulate = Colors.White;
+            }
         };
 
         return clone;
@@ -1330,9 +1341,14 @@ public static partial class CompendiumFilterPatch
     {
         // Local helper invoked at the end of every filter mutation. Wraps the existing sidebar
         // suffix refresh and forwards to any caller-supplied callback.
+        // Assigned when the Save Defaults button is built near the bottom of the pane;
+        // invoked from NotifyChanged so the button's "dirty" green highlight tracks live.
+        Action? refreshSaveDefaultsHighlight = null;
+
         void NotifyChanged()
         {
             RefreshAllSortButtonStates();
+            refreshSaveDefaultsHighlight?.Invoke();
             onFilterChanged?.Invoke();
         }
 
@@ -1664,7 +1680,7 @@ public static partial class CompendiumFilterPatch
             SyncAllControls();
             NotifyChanged();
         }));
-        row1.AddChild(MakeActionButton("Save Defaults", () =>
+        var saveDefaultsBtn = MakeActionButton("Save Defaults", () =>
         {
             SlayTheStatsConfig.SaveDefaults();
             try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
@@ -1674,7 +1690,19 @@ public static partial class CompendiumFilterPatch
             }
             SyncAllControls();
             NotifyChanged();
-        }));
+        });
+        row1.AddChild(saveDefaultsBtn);
+        // Mirrors the same green highlight the per-field controls use when a filter
+        // differs from its saved default — pulls the Save Defaults button into focus
+        // whenever there's something worth saving.
+        refreshSaveDefaultsHighlight = () =>
+        {
+            if (!GodotObject.IsInstanceValid(saveDefaultsBtn)) return;
+            var dirty = HasActiveFilters();
+            saveDefaultsBtn.AddThemeColorOverride("font_color", dirty ? ActiveFilterColor : Cream);
+            saveDefaultsBtn.AddThemeColorOverride("font_hover_color", dirty ? ActiveFilterColor : Gold);
+        };
+        refreshSaveDefaultsHighlight();
 
         // ── Sync callback: refresh all controls from config when pane opens ──
         _syncCallbacks.Add(() =>
@@ -1701,6 +1729,7 @@ public static partial class CompendiumFilterPatch
             }
             setGroupUpgrades?.Invoke(SlayTheStatsConfig.GroupCardUpgrades);
             highlightGroupUpgrades();
+            refreshSaveDefaultsHighlight?.Invoke();
         });
 
         return pane;
@@ -1712,7 +1741,7 @@ public static partial class CompendiumFilterPatch
     /// Builds the panel background using the game's stone tooltip texture.
     /// Falls back to a dark flat style if the texture can't be loaded.
     /// </summary>
-    private static StyleBox BuildPanelStyle()
+    internal static StyleBox BuildPanelStyle()
     {
         var tex = ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
         if (tex != null)
@@ -1746,7 +1775,7 @@ public static partial class CompendiumFilterPatch
     /// compendium UI text — without it our pane labels look anemic on the
     /// stone tooltip background.
     /// </summary>
-    private static void ApplyGameFont(Control control, int size = 18)
+    internal static void ApplyGameFont(Control control, int size = 18)
     {
         var font = TooltipHelper.Fonts.Bold ?? TooltipHelper.Fonts.Normal;
         if (font != null)
@@ -1757,7 +1786,7 @@ public static partial class CompendiumFilterPatch
         control.AddThemeConstantOverride("shadow_offset_y", 1);
     }
 
-    private static Label MakeLabel(string text, float minWidth = 0)
+    internal static Label MakeLabel(string text, float minWidth = 0)
     {
         var label = new Label();
         label.Text = text;
@@ -1892,6 +1921,33 @@ public static partial class CompendiumFilterPatch
     /// rarity filters (NCardRarityTickbox). CheckBox draws a tickbox on the
     /// left of the label, unlike CheckButton which draws a slider toggle.
     /// </summary>
+    /// <summary>
+    /// Builds a "Group card upgrades"-style checkbox for reuse outside BuildFilterPane
+    /// (e.g. the bestiary settings pane). Prefers the cached game-native
+    /// NLibraryStatTickbox template; falls back to a plain CheckBox if not cached yet.
+    /// Returns the control to add to the parent container.
+    /// </summary>
+    internal static Control BuildStyledCheckbox(string label, bool initialValue, Action<bool> onToggle)
+    {
+        // Warm the template from a cold NCardLibrary instance if the user hasn't
+        // opened the card library this session — same three-strategy resolver used
+        // by ResolveSortButtonTemplate. Without this the bestiary / relic page
+        // would always fall back to the unstyled CheckBox.
+        if (_tickboxTemplate == null || !GodotObject.IsInstanceValid(_tickboxTemplate))
+            WarmTemplatesFromColdCardLibrary();
+
+        if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
+        {
+            var clone = CloneTickbox(_tickboxTemplate, label, initialValue);
+            clone.Toggled += (box) => onToggle(box.IsTicked);
+            return clone;
+        }
+
+        var fallback = MakeCheckButton(label, initialValue);
+        fallback.Toggled += (pressed) => onToggle(pressed);
+        return fallback;
+    }
+
     private static CheckBox MakeCheckButton(string text, bool initial)
     {
         var cb = new CheckBox();
@@ -1938,7 +1994,7 @@ public static partial class CompendiumFilterPatch
         return btn;
     }
 
-    private static void AddSeparator(VBoxContainer vbox)
+    internal static void AddSeparator(VBoxContainer vbox)
     {
         var sep = new HSeparator();
         sep.AddThemeConstantOverride("separation", 4);

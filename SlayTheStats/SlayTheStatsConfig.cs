@@ -48,29 +48,48 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool BestiaryTutorialSeen { get; set; } = false;
 
     /// <summary>
-    /// When true, the Stats Bestiary button is not injected into the compendium
-    /// bottom row (and the bestiary submenu becomes unreachable from the menu).
-    /// For users who don't want the extra button.
+    /// Encounter-stats surfaces toggle: controls which of the two encounter-stats
+    /// entrypoints (bestiary page + in-combat enemy hover tooltip) are enabled.
+    /// Requires a game restart because the bestiary button injection happens at
+    /// NCompendiumSubmenu._Ready time.
     /// </summary>
-    public static bool BestiaryButtonDisabled { get; set; } = false;
+    public enum EncounterStatsMode
+    {
+        BestiaryAndTooltips,
+        Tooltips,
+        Disabled,
+    }
+
+    public static EncounterStatsMode EncounterStatsRestartRequired { get; set; } = EncounterStatsMode.BestiaryAndTooltips;
+
+    /// <summary>True iff the bestiary submenu button should be injected.</summary>
+    public static bool BestiaryEnabled => EncounterStatsRestartRequired == EncounterStatsMode.BestiaryAndTooltips;
+
+    /// <summary>True iff the in-combat enemy-hover stats tooltip should render.</summary>
+    public static bool InCombatTooltipEnabled => EncounterStatsRestartRequired != EncounterStatsMode.Disabled;
 
     /// <summary>
-    /// When true, the in-combat encounter stats tooltip (the floating panel that
-    /// appears above hovered enemies) is suppressed entirely. The bestiary stats
-    /// page still works regardless.
+    /// How the bestiary's monster preview area is rendered.
+    /// Live: live Spine SubViewport with idle animation (highest GPU cost).
+    /// Static: first hover captures a static sprite into an ImageTexture, then
+    /// the SubViewport is freed — dramatic GPU cost drop, no idle animation.
+    /// None: no preview rendering at all (lowest GPU cost, for players who
+    /// only care about the stats table).
     /// </summary>
-    public static bool InCombatEncounterTooltipDisabled { get; set; } = false;
+    public enum BestiaryPreviewModeEnum
+    {
+        Live,
+        Static,
+        None,
+    }
 
-    /// <summary>
-    /// GPU-friendly bestiary mode: when true, the bestiary monster preview uses
-    /// captured static sprites (baked ImageTextures) instead of a live Spine
-    /// SubViewport pipeline. First hover still does one burst of Spine render
-    /// to capture the image, then the SubViewport is freed and all subsequent
-    /// hovers display the cached static texture. Sacrifices idle animation for
-    /// a dramatic drop in GPU cost — recommended for players whose GPU
-    /// struggles with the live pipeline.
-    /// </summary>
-    public static bool BestiaryStaticSprites { get; set; } = false;
+    public static BestiaryPreviewModeEnum BestiaryPreviewMode { get; set; } = BestiaryPreviewModeEnum.Live;
+
+    /// <summary>Shorthand: true iff the preview area should render static sprites (not live, not off).</summary>
+    public static bool BestiaryPreviewStatic => BestiaryPreviewMode == BestiaryPreviewModeEnum.Static;
+
+    /// <summary>Shorthand: true iff the preview area renders at all (Live or Static).</summary>
+    public static bool BestiaryPreviewEnabled => BestiaryPreviewMode != BestiaryPreviewModeEnum.None;
 
     /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
@@ -292,9 +311,9 @@ internal class SlayTheStatsConfig : SimpleModConfig
         if (ascMin > 0)  filter.AscensionMin = ascMin;
         if (ascMax < 20) filter.AscensionMax = ascMax;
 
-        if (!IsBadVersionSentinel(versionMin))
+        if (!IsUnboundedFilterVersion(versionMin))
             filter.VersionMin = versionMin;
-        if (!IsBadVersionSentinel(versionMax))
+        if (!IsUnboundedFilterVersion(versionMax))
             filter.VersionMax = versionMax;
         if (!string.IsNullOrEmpty(profile))
             filter.Profile = profile;
@@ -302,7 +321,15 @@ internal class SlayTheStatsConfig : SimpleModConfig
         return filter;
     }
 
-    private static bool IsBadVersionSentinel(string? value)
+    /// <summary>
+    /// Test whether a version string should be treated as "no bound" when
+    /// building a filter. Returns true for empty, invalid, or the named
+    /// <see cref="BadVersionSentinels"/> (including <see cref="VersionLowest"/>
+    /// and <see cref="VersionHighest"/>). Differs from
+    /// <see cref="IsInvalidPersistedVersion"/>, which is the persist-time check
+    /// and (correctly) keeps the no-bound sentinels as valid values.
+    /// </summary>
+    private static bool IsUnboundedFilterVersion(string? value)
     {
         if (string.IsNullOrEmpty(value)) return true;
         foreach (var s in BadVersionSentinels)
@@ -320,11 +347,11 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// Critically, the "no bound" sentinels <see cref="VersionLowest"/> and
     /// <see cref="VersionHighest"/> are NOT garbage — they're how the user
     /// expresses "auto-track the lowest/highest version in the data". They
-    /// differ from <see cref="IsBadVersionSentinel"/>, which is the "should
-    /// this be treated as an unbounded filter?" test used during filter
-    /// construction and (correctly) includes the no-bound sentinels.
+    /// differ from <see cref="IsUnboundedFilterVersion"/>, which is the
+    /// "should this be treated as an unbounded filter?" test used during
+    /// filter construction and (correctly) includes the no-bound sentinels.
     /// </summary>
-    private static bool IsGarbageVersionValue(string? value)
+    private static bool IsInvalidPersistedVersion(string? value)
     {
         if (string.IsNullOrEmpty(value)) return true;
         // Valid bound sentinels — keep as-is.
@@ -351,13 +378,13 @@ internal class SlayTheStatsConfig : SimpleModConfig
         // of the stored default, even though BuildSafeFilter still produced
         // the right unbounded filter — so stats rendered correctly but the
         // filter pane UI lied.
-        if (IsGarbageVersionValue(VersionMin)) VersionMin = VersionLowest;
-        if (IsGarbageVersionValue(VersionMax)) VersionMax = VersionHighest;
+        if (IsInvalidPersistedVersion(VersionMin)) VersionMin = VersionLowest;
+        if (IsInvalidPersistedVersion(VersionMax)) VersionMax = VersionHighest;
         // Same story for the persisted *defaults*: if they were wiped by a
         // previous build's buggy Sanitize, restore them to the appropriate
         // bound so the dropdowns can find them.
-        if (IsGarbageVersionValue(DefaultVersionMin)) DefaultVersionMin = VersionLowest;
-        if (IsGarbageVersionValue(DefaultVersionMax)) DefaultVersionMax = VersionHighest;
+        if (IsInvalidPersistedVersion(DefaultVersionMin)) DefaultVersionMin = VersionLowest;
+        if (IsInvalidPersistedVersion(DefaultVersionMax)) DefaultVersionMax = VersionHighest;
 
         // Migrate legacy "All" ClassFilter ("") to "Auto" (__class__). The "All" option
         // was removed from the filter pane dropdown — users who had it saved would otherwise
