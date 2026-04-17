@@ -94,11 +94,45 @@ public static class LoadRunPatch
 [HarmonyPatch(typeof(NMainMenu), "_Ready")]
 public static class MainMenuReadyPatch
 {
-    static void Postfix()
+    private static bool _devBannerShown;
+
+    static void Postfix(NMainMenu __instance)
     {
         CardHoverShowPatch.RunCharacter = null;
         CardHoverShowPatch.IsInRun = false;
         if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: RunCharacter cleared, IsInRun=false");
         RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info(msg); }, msg => MainFile.Logger.Warn(msg));
+
+        if (!BuildInfo.IsRelease && !_devBannerShown)
+        {
+            _devBannerShown = true;
+            ShowDevBuildBanner(__instance);
+        }
+    }
+
+    private static void ShowDevBuildBanner(NMainMenu menu)
+    {
+        var label = new Godot.RichTextLabel
+        {
+            BbcodeEnabled = true,
+            Text = $"[center][outline_size=3][outline_color=#000000][color=#ffd700]SlayTheStats DEV {StatsDb.CurrentModVersion}[/color] [color=#ffffff]—[/color] [color=#66ff66]{BuildInfo.BuildDate}[/color] [color=#ffffff]—[/color] [color=#3388ff]{BuildInfo.BuildTime}[/color][/outline_color][/outline_size][/center]",
+            FitContent = true,
+            ScrollActive = false,
+            HorizontalAlignment = Godot.HorizontalAlignment.Center,
+            AnchorLeft = 0f,
+            AnchorRight = 1f,
+            AnchorTop = 0f,
+            AnchorBottom = 0f,
+            OffsetTop = 12f,
+            GrowHorizontal = Godot.Control.GrowDirection.Both,
+        };
+        label.AddThemeColorOverride("default_color", new Godot.Color(1f, 1f, 1f, 1f));
+        label.AddThemeFontSizeOverride("normal_font_size", 18);
+        menu.AddChild(label);
+
+        var tween = label.CreateTween();
+        tween.TweenInterval(10.0);
+        tween.TweenProperty(label, "modulate:a", 0.0f, 1.0);
+        tween.TweenCallback(Godot.Callable.From(label.QueueFree));
     }
 }

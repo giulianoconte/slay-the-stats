@@ -137,6 +137,29 @@
         <Message Text="Skipping Godot .pck export because GodotPath is not configured." Importance="high"/>
     </Target>
 
+    <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+        <PropertyGroup>
+            <_BuildDate>$([System.DateTimeOffset]::Now.ToString("yyyy-MM-dd"))</_BuildDate>
+            <_BuildTime>$([System.DateTimeOffset]::Now.ToString("h:mm tt").ToLower())</_BuildTime>
+            <_IsRelease>false</_IsRelease>
+            <_IsRelease Condition="'$(Configuration)' == 'Release'">true</_IsRelease>
+            <_BuildInfoPath>$(IntermediateOutputPath)BuildInfo.g.cs</_BuildInfoPath>
+        </PropertyGroup>
+        <ItemGroup>
+            <_BuildInfoLine Include="namespace SlayTheStats%3B" />
+            <_BuildInfoLine Include="internal static class BuildInfo" />
+            <_BuildInfoLine Include="{" />
+            <_BuildInfoLine Include="    internal const string BuildDate = %22$(_BuildDate)%22%3B" />
+            <_BuildInfoLine Include="    internal const string BuildTime = %22$(_BuildTime)%22%3B" />
+            <_BuildInfoLine Include="    internal const bool IsRelease = $(_IsRelease)%3B" />
+            <_BuildInfoLine Include="}" />
+        </ItemGroup>
+        <WriteLinesToFile File="$(_BuildInfoPath)" Lines="@(_BuildInfoLine)" Overwrite="true" />
+        <ItemGroup>
+            <Compile Include="$(_BuildInfoPath)" />
+        </ItemGroup>
+    </Target>
+
     <!-- Local overrides (gitignored). Copy local.props.example to local.props to configure. -->
     <Import Project="local.props" Condition="Exists('local.props')" />
 </Project>

@@ -46,6 +46,9 @@ public partial class MainFile : Node
             $"class '{SlayTheStatsConfig.ClassFilter}', profile '{SlayTheStatsConfig.FilterProfile}', " +
             $"groupUpgrades {SlayTheStatsConfig.GroupCardUpgrades})");
 
+        if (!BuildInfo.IsRelease)
+            Logger.Info($"DEV BUILD {StatsDb.CurrentModVersion} (built {BuildInfo.BuildDate} {BuildInfo.BuildTime})");
+
         TooltipHelper.TryLoadModFonts();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
