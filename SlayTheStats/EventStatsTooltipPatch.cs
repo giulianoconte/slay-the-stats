@@ -20,8 +20,8 @@ namespace SlayTheStats;
 // decision earlier — roll its own panel — and that's the proven pattern
 // in this codebase.
 //
-// Render: event name header + [table=4] (Option | Picks | Win% | HP Δ) with
-// the hovered option highlighted in gold. Baseline line + filter footer.
+// Render: event name header + [table=2] (Picks | Win%) for the hovered
+// option. Baseline line + filter footer.
 // ─────────────────────────────────────────────────────────────────────
 
 internal static class EventHoverHelper
@@ -33,9 +33,7 @@ internal static class EventHoverHelper
     private static NinePatchRect?  _shadow;
     private static NEventOptionButton? _activeBtn;
 
-    /// <summary>Tooltip width — wider than card/relic default (348) so the
-    /// 4-column table has breathing room for every option name.</summary>
-    private const float PanelWidth = 480f;
+    private const float PanelWidth = TooltipHelper.TooltipWidth;
 
     /// <summary>Horizontal gap between the option button and our panel.</summary>
     private const float HorizontalGapPx = 12f;
@@ -57,6 +55,7 @@ internal static class EventHoverHelper
             var eventModel = holder.Event;
             if (eventModel == null) return;
             if (eventModel is AncientEventModel) return; // ancient options covered by RelicHoverHelper
+            if (holder.Option?.IsProceed == true) return; // proceed buttons aren't meaningful decisions
 
             var eventId = eventModel.Id.ToString();
             if (AncientEvents.IsAncient(eventId)) return;
@@ -76,7 +75,7 @@ internal static class EventHoverHelper
             EnsurePanel();
             if (_panel == null || _panelLabel == null || _panelNameLabel == null) return;
 
-            _panelNameLabel.Text = $"[b]{EventIdHelpers.FormatName(eventId)}   [/b]"; // trailing space for shadow
+            _panelNameLabel.Text = $"[b]Event Stats   [/b]"; // trailing space for shadow
             _panelLabel.Text     = BuildStatsText(eventId, agg, hoveredOptionKey, characterLabel, wrBaseline, filter);
             _panelNameLabel.ResetSize();
             _panelLabel.ResetSize();
@@ -343,10 +342,8 @@ internal static class EventHoverHelper
 
     /// <summary>
     /// Renders the tooltip body. Shows a single row for the hovered option
-    /// (columns: Option | Picks "N/M" | Win%). If the hovered option has no
-    /// data, falls back to a muted "no data" message with the event baseline.
-    /// Keeps the shared table format so we can easily expand to multiple rows
-    /// later (e.g. to show sibling options alongside the hovered one).
+    /// (columns: Picks "N/M" | Win%). The option identity is implicit — it's
+    /// whichever option the player is hovering.
     /// </summary>
     private static string BuildStatsText(
         string eventId,
@@ -358,17 +355,12 @@ internal static class EventHoverHelper
     {
         var sb = new StringBuilder();
 
-        sb.Append("[table=3]");
-        sb.Append(HdrCell("Option", ColPadOuter));
-        sb.Append(HdrCell("Picks",  ColPadInner));
+        sb.Append("[table=2]");
+        sb.Append(HdrCell("Picks",  ColPadOuter));
         sb.Append(HdrCell("Win%",   ColPadLast));
 
         agg.Options.TryGetValue(hoveredOptionKey, out var opt);
-        string label = string.IsNullOrEmpty(hoveredOptionKey) ? "-" : TitleCase(hoveredOptionKey);
-        string nameCell = $"[color={ThemeStyle.Gold}][b]{label}[/b][/color]";
 
-        // Picks shown as fraction picks/visits (same model as shop pick%
-        // where denominator = times-event-seen, not times-option-offered).
         int picks = opt?.Picks ?? 0;
         int total = agg.TotalVisits;
         string picksCell = picks > 0
@@ -378,13 +370,11 @@ internal static class EventHoverHelper
             ? $"{Math.Round(100.0 * opt!.Wins / picks):F0}%"
             : $"[color={ThemeStyle.NeutralShade}]-[/color]";
 
-        sb.Append(DataCell(nameCell,  ColPadOuter));
-        sb.Append(DataCell(picksCell, ColPadInner));
+        sb.Append(DataCell(picksCell, ColPadOuter));
         sb.Append(DataCell(winCell,   ColPadLast));
 
         sb.Append("[/table]");
 
-        // Baseline: character winrate matching card/relic footer pattern.
         var wrStr = double.IsNaN(wrBaseline) ? "—" : $"{Math.Round(wrBaseline):F0}%";
         sb.Append(TooltipHelper.FormatBaselineLine($"(baseline) Win% {wrStr}"));
 

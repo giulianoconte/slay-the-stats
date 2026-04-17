@@ -812,9 +812,12 @@ public partial class SlayTheStatsPositionFollower : Node
             if (ancientBtn != null && GodotObject.IsInstanceValid(ancientBtn))
             {
                 // Ancient event options use HoverTipAlignment.Left — panel goes to the LEFT.
-                x = ancientBtn.GlobalPosition.X - TooltipHelper.ActiveWidth;
+                // Use the snapshotted anchor position so the button's hover-scale tween
+                // doesn't cause the tooltip to drift.
+                var anchorPos = AncientEventOptionFocusPatch.AnchorGlobal;
+                x = anchorPos.X - TooltipHelper.ActiveWidth;
                 x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.ActiveWidth);
-                p.Position = new Vector2(x, ancientBtn.GlobalPosition.Y);
+                p.Position = new Vector2(x, anchorPos.Y);
             }
             else if (cardHolder != null && GodotObject.IsInstanceValid(cardHolder))
             {

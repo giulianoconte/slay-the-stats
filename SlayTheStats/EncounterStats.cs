@@ -31,26 +31,14 @@ public class EncounterEvent
     [JsonPropertyName("damage_values")]
     public List<int>? DamageValues { get; set; }
 
-    /// <summary>
-    /// Computes the median of <see cref="DamageValues"/>. Returns null if
-    /// the list is null or empty.
-    /// </summary>
-    public double? DamageMedian()
-    {
-        if (DamageValues == null || DamageValues.Count == 0) return null;
-        var sorted = DamageValues.OrderBy(v => v).ToList();
-        int n = sorted.Count;
-        return n % 2 == 1
-            ? sorted[n / 2]
-            : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
-    }
+    [JsonPropertyName("turns_values")]
+    public List<int>? TurnsValues { get; set; }
 
-    /// <summary>
-    /// Computes the 25th and 75th percentiles of
-    /// <see cref="DamageValues"/>. Returns null if the list is null or has
-    /// fewer than 2 entries (percentiles are meaningless for a single
-    /// observation).
-    /// </summary>
+    [JsonPropertyName("potions_values")]
+    public List<int>? PotionsValues { get; set; }
+
+    public double? DamageMedian() => MedianOf(DamageValues);
+
     public (double p25, double p75)? DamageIQR()
     {
         if (DamageValues == null || DamageValues.Count < 2) return null;
@@ -59,9 +47,34 @@ public class EncounterEvent
     }
 
     /// <summary>
-    /// Linear-interpolation percentile on a pre-sorted list. Matches
-    /// numpy's default "linear" interpolation method.
+    /// Returns the percentile rank of <paramref name="value"/> within the
+    /// given per-fight list. Result is 0–100 where 50 = median. Uses the
+    /// "percentage of values strictly less than" formula: rank = count(v &lt; value) / n × 100.
+    /// Returns null if the list is null or empty.
     /// </summary>
+    public static double? PercentileRank(List<int>? values, int value)
+    {
+        if (values == null || values.Count == 0) return null;
+        int below = 0;
+        int equal = 0;
+        foreach (var v in values)
+        {
+            if (v < value) below++;
+            else if (v == value) equal++;
+        }
+        return (below + equal * 0.5) / values.Count * 100.0;
+    }
+
+    private static double? MedianOf(List<int>? values)
+    {
+        if (values == null || values.Count == 0) return null;
+        var sorted = values.OrderBy(v => v).ToList();
+        int n = sorted.Count;
+        return n % 2 == 1
+            ? sorted[n / 2]
+            : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+    }
+
     private static double Percentile(List<int> sorted, double p)
     {
         double rank = p * (sorted.Count - 1);

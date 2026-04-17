@@ -384,10 +384,14 @@ public static class TreasureRoomRelicHolderUnfocusPatch
 public static class AncientEventOptionFocusPatch
 {
     internal static Control? ActiveAncientOptionControl;
+    internal static Vector2 AnchorGlobal;
+    internal static Vector2 AnchorSize;
 
     static void Postfix(NEventOptionButton __instance)
     {
         ActiveAncientOptionControl = __instance;
+        AnchorGlobal = __instance.GlobalPosition;
+        AnchorSize = __instance.Size;
         RelicHoverHelper.ShowAncientOption(__instance);
     }
 }

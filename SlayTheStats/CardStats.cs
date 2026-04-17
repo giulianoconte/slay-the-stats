@@ -104,7 +104,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 6; // bumped from 5: added EventVisits/EventMeta for v1.0.0 event tracking
+    public const int CurrentSchemaVersion = 7; // bumped from 6: added TurnsValues/PotionsValues per-fight lists
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>

@@ -510,6 +510,8 @@ public static class RunParser
                         enc.DamageTakenSum   += damageTaken;
                         enc.DamageTakenSqSum += damageTaken * damageTaken;
                         (enc.DamageValues ??= new List<int>()).Add(damageTaken);
+                        (enc.TurnsValues ??= new List<int>()).Add(turnsTaken);
+                        (enc.PotionsValues ??= new List<int>()).Add(potionCount);
                         enc.HpEnteringSum    += hpEntering;
                         enc.MaxHpSum         += maxHp;
                         enc.PotionsUsedSum   += potionCount;

@@ -1183,12 +1183,12 @@ public static class EncounterTooltipHelper
         total.PotionsUsedSum   += stat.PotionsUsedSum;
         total.DmgPctSum        += stat.DmgPctSum;
         total.DmgPctSqSum      += stat.DmgPctSqSum;
-        // Merge per-fight damage lists for median/IQR on the "All" row.
-        if (stat.DamageValues != null && stat.DamageValues.Count > 0)
-        {
-            total.DamageValues ??= new List<int>();
-            total.DamageValues.AddRange(stat.DamageValues);
-        }
+        if (stat.DamageValues is { Count: > 0 })
+            (total.DamageValues ??= new List<int>()).AddRange(stat.DamageValues);
+        if (stat.TurnsValues is { Count: > 0 })
+            (total.TurnsValues ??= new List<int>()).AddRange(stat.TurnsValues);
+        if (stat.PotionsValues is { Count: > 0 })
+            (total.PotionsValues ??= new List<int>()).AddRange(stat.PotionsValues);
     }
 
     private static string FormatAscensionPrefix(int? ascMin, int? ascMax)
