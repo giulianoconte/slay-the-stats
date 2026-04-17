@@ -141,6 +141,7 @@
         <PropertyGroup>
             <_BuildDate>$([System.DateTimeOffset]::Now.ToString("yyyy-MM-dd"))</_BuildDate>
             <_BuildTime>$([System.DateTimeOffset]::Now.ToString("h:mm tt").ToLower())</_BuildTime>
+            <_BuildUtc>$([System.DateTime]::UtcNow.ToString("o"))</_BuildUtc>
             <_IsRelease>false</_IsRelease>
             <_IsRelease Condition="'$(Configuration)' == 'Release'">true</_IsRelease>
             <_BuildInfoPath>$(IntermediateOutputPath)BuildInfo.g.cs</_BuildInfoPath>
@@ -151,6 +152,7 @@
             <_BuildInfoLine Include="{" />
             <_BuildInfoLine Include="    internal const string BuildDate = %22$(_BuildDate)%22%3B" />
             <_BuildInfoLine Include="    internal const string BuildTime = %22$(_BuildTime)%22%3B" />
+            <_BuildInfoLine Include="    internal const string BuildUtc = %22$(_BuildUtc)%22%3B" />
             <_BuildInfoLine Include="    internal const bool IsRelease = $(_IsRelease)%3B" />
             <_BuildInfoLine Include="}" />
         </ItemGroup>

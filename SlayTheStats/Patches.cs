@@ -110,12 +110,24 @@ public static class MainMenuReadyPatch
         }
     }
 
+    private static string FormatBuildAge()
+    {
+        var age = DateTime.UtcNow - DateTime.Parse(BuildInfo.BuildUtc, null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var parts = new System.Collections.Generic.List<string>();
+        if (age.Days > 0) parts.Add($"{age.Days}d");
+        if (age.Hours > 0) parts.Add($"{age.Hours}h");
+        if (age.Minutes > 0) parts.Add($"{age.Minutes}m");
+        parts.Add($"{age.Seconds}s");
+        return string.Join(" ", parts);
+    }
+
     private static void ShowDevBuildBanner(NMainMenu menu)
     {
+        var ageText = FormatBuildAge();
         var label = new Godot.RichTextLabel
         {
             BbcodeEnabled = true,
-            Text = $"[center][outline_size=3][outline_color=#000000][color=#ffd700]SlayTheStats DEV {StatsDb.CurrentModVersion}[/color] [color=#ffffff]—[/color] [color=#66ff66]{BuildInfo.BuildDate}[/color] [color=#ffffff]—[/color] [color=#3388ff]{BuildInfo.BuildTime}[/color][/outline_color][/outline_size][/center]",
+            Text = $"[center][outline_size=3][outline_color=#000000][color=#ffd700]SlayTheStats DEV {StatsDb.CurrentModVersion}[/color] [color=#ffffff]—[/color] [color=#66ff66]{BuildInfo.BuildDate}[/color] [color=#ffffff]—[/color] [color=#3388ff]{BuildInfo.BuildTime}[/color] [color=#ffffff]({ageText} ago)[/color][/outline_color][/outline_size][/center]",
             FitContent = true,
             ScrollActive = false,
             HorizontalAlignment = Godot.HorizontalAlignment.Center,
