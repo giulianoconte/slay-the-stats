@@ -49,6 +49,7 @@ public partial class MainFile : Node
         TooltipHelper.TryLoadModFonts();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
+        DebugTestData.InjectIfDebug(Db);
         // RunParser.ProcessNewRuns is called from MainMenuReadyPatch (NMainMenu._Ready),
         // which fires on boot and after every run ends.
     }

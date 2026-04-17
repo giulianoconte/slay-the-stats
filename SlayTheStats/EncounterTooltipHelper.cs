@@ -369,6 +369,23 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell expand=3 {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
     }
 
+    /// <summary>Reference string that sets the minimum descriptor column width.
+    /// Emitted in a 1px-tall invisible sizing row at the top of every focused-view
+    /// table so Godot's BBCode table layout locks the descriptor column width and
+    /// the data columns stay fixed as the user hovers different encounters.</summary>
+    private const string DescriptorSizingRef =
+        "\u00A0\u00A0\u00A0vs Act 9 elites (baseline)";
+
+    /// <summary>Appends an invisible 1px-tall row whose descriptor cell sets the minimum
+    /// column width for the entire table. Data cells are empty. Must be emitted right
+    /// after the opening [table=8] tag, before the header row.</summary>
+    private static void AppendSizingRow(StringBuilder sb)
+    {
+        sb.Append($"[cell expand=3 {DescriptorCellPadding}][font_size=1]{KreonRegFontTag}{DescriptorSizingRef}{KreonRegClose}[/font_size][/cell]");
+        for (int i = 0; i < 7; i++)
+            sb.Append($"[cell {NormalCellPadding}][font_size=1] [/font_size][/cell]");
+    }
+
     /// <summary>Column header cell. Uses the same monospace font as data cells (via
     /// the RichTextLabel's theme override) so auto-sized column widths align with
     /// the data rows below. Right-aligned to sit over right-aligned numbers.</summary>
@@ -875,6 +892,7 @@ public static class EncounterTooltipHelper
         var (medianBase, iqrcBase, deathRateBase, turnsBase, potsBase) = DeriveBaselines(baselineSource);
 
         sb.Append("[table=8]");
+        AppendSizingRow(sb);
 
         // Header row — empty descriptor cell + 6 column headers
         AppendDescriptorCell(sb, " ", isHeader: true);
@@ -936,6 +954,7 @@ public static class EncounterTooltipHelper
         var catColor = category != null ? EncounterIcons.CategoryColorHex(category) : null;
 
         sb.Append("[table=8]");
+        AppendSizingRow(sb);
 
         // Header row
         AppendDescriptorCell(sb, " ", isHeader: true);
@@ -1094,9 +1113,7 @@ public static class EncounterTooltipHelper
 
     internal static string BuildEncounterStatsTextSingleRow(
         EncounterEvent stat,
-        double deathRateBaseline,
-        double dmgPctBaseline,
-        double iqrcBaseline,
+        PoolMetrics poolBaseline,
         double dmgBaseline,
         string? character,
         string categoryLabel,
@@ -1113,7 +1130,10 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Turns[/color][/right][/cell]");
 
         if (stat.Fought > 0)
-            AppendCombatDataCells(sb, stat, deathRateBaseline, dmgPctBaseline, iqrcBaseline);
+        {
+            var (medianBase, iqrcBase, _, turnsBase, _) = DeriveBaselines(poolBaseline);
+            AppendCombatDataCells(sb, stat, medianBase, iqrcBase, turnsBase);
+        }
         else
         {
             for (int i = 0; i < 5; i++)
@@ -1134,38 +1154,32 @@ public static class EncounterTooltipHelper
         return sb.ToString();
     }
 
-    /// <summary>Appends 6 data cells for the in-combat encounter table: Runs | Dmg | Mid 50% | Spread | Turns.</summary>
+    /// <summary>Appends 5 data cells for the in-combat encounter table: Runs | Dmg | Mid 50% | Spread | Turns.
+    /// Coloration matches the bestiary focused-view row 1: Dmg via ColBadRelative on absolute median,
+    /// Mid 50% neutral, Spread via ColBadLog, Turns via ColBadRelative.</summary>
     private static void AppendCombatDataCells(StringBuilder sb, EncounterEvent stat,
-        double deathRateBaseline, double dmgPctBaseline, double iqrcBaseline)
+        double medianBaseline, double iqrcBaseline, double turnsBaseline)
     {
         int n = stat.Fought;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
-        double avgDmgPct = stat.DmgPctSum / n * 100.0;
         double dmgMedian = stat.DamageMedian() ?? (double)stat.DamageTakenSum / n;
         var iqr = stat.DamageIQR();
         string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
 
         var cN      = TooltipHelper.ColN($"{n}", n);
-        var cDmg    = ColBad($"{dmgMedian:F0}", avgDmgPct, n, dmgPctBaseline);
-        var cIqr    = FormatIqrCellInner(fIqr, iqr, dmgMedian, n, iqrcBaseline);
+        var cDmg    = ColBadRelative($"{dmgMedian:F0}", dmgMedian, medianBaseline, n);
+        var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread = FormatSpreadCell(iqr, dmgMedian, n, iqrcBaseline);
-        var cTurns  = $"[color={TooltipHelper.NeutralShade}]{avgTurns:F1}[/color]";
+        var cTurns  = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBaseline, n);
 
         sb.Append($"[cell {CombatCellPadding}][right]{cN}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cDmg}[/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right]{cIqr}[/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right]{cMid50}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cSpread}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cTurns}[/right][/cell]");
     }
 
-    /// <summary>IQR cell content without padding — just the colored text for use inside [cell] tags.</summary>
-    private static string FormatIqrCellInner(string formattedIqr, (double p25, double p75)? iqr, double? median, int n, double iqrcBaseline)
-    {
-        if (!iqr.HasValue || median == null)
-            return $"[color={TooltipHelper.NeutralShade}]{formattedIqr}[/color]";
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
-        return ColBad(formattedIqr, iqrc * 100, n, iqrcBaseline * 100);
-    }
+
 
     internal static string NoDataText(string? characterLabel, int? ascensionMin, int? ascensionMax)
     {

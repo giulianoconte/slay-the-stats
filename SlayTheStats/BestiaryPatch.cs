@@ -214,7 +214,7 @@ public static class BestiaryButtonPatch
 
 public partial class NBestiaryStatsSubmenu : NSubmenu
 {
-    private HBoxContainer? _biomeTabRow;
+    private HFlowContainer? _biomeTabRow;
     private HBoxContainer? _sortTabRow;
     private HBoxContainer? _sortCharRow;
     /// <summary>SlayTheStats filter button anchored at the bottom-left of the bestiary
@@ -229,6 +229,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <summary>The active column-legend popup, if any. Tracked so the toggle handler
     /// can find and free it on second click.</summary>
     private PanelContainer? _legendPopup;
+    private Button? _rankByHelpButton;
+    private PanelContainer? _rankByPopup;
     /// <summary>Shared filter pane built via CompendiumFilterPatch.BuildFilterPane with
     /// the class dropdown and group-card-upgrades toggle suppressed (the bestiary's
     /// "Score by:" row covers per-character scoring, and group-upgrades is a card-only
@@ -414,7 +416,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // position) doesn't overlap the encounter list
         var margin = new MarginContainer();
         margin.SetAnchorsPreset(LayoutPreset.FullRect);
-        margin.AddThemeConstantOverride("margin_left", 200);
+        margin.AddThemeConstantOverride("margin_left", 220);
         margin.AddThemeConstantOverride("margin_right", 40);
         margin.AddThemeConstantOverride("margin_top", 24);
         margin.AddThemeConstantOverride("margin_bottom", 24);
@@ -468,11 +470,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var leftSection = new VBoxContainer();
         leftSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         leftSection.SizeFlagsVertical = SizeFlags.ExpandFill;
-        // Stretch ratio tuned so the right-hand table + preview pane gets most
-        // of the horizontal budget: encounter list is compact (icons + names)
-        // while the stats table wants room for descriptors, 6 data columns, and
-        // a sensible-sized monster preview underneath.
-        leftSection.SizeFlagsStretchRatio = 0.85f;
+        // Stretch ratio gives the encounter list the majority of the horizontal
+        // budget while leaving the right panel enough room for all table columns
+        // (including Deaths) without clipping.
+        leftSection.SizeFlagsStretchRatio = 1.1f;
         leftSection.AddThemeConstantOverride("separation", 4);
         contentSplit.AddChild(leftSection);
 
@@ -480,8 +481,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // The SlayTheStats filter button is NOT inserted here — it's placed at the
         // bottom-left of the submenu (matching NRelicCollection's anchored position) so
         // every compendium page shows the button in the same on-screen spot.
-        _biomeTabRow = new HBoxContainer();
-        _biomeTabRow.AddThemeConstantOverride("separation", 8);
+        _biomeTabRow = new HFlowContainer();
+        _biomeTabRow.AddThemeConstantOverride("h_separation", 8);
+        _biomeTabRow.AddThemeConstantOverride("v_separation", 4);
         leftSection.AddChild(_biomeTabRow);
 
         // ── Sort tabs ──
@@ -647,11 +649,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         contentSplit.AddChild(new VSeparator());
 
-        // Right panel: stats (fixed height) + horizontal separator (fixed) + render area (fills rest)
+        // Right panel: stats (fixed height) + horizontal separator (fixed) + render area (fills rest).
+        // ClipContents prevents the stats table's minimum width from inflating the
+        // panel beyond its stretch-ratio share. The 2:1 ratio gives the encounter
+        // list ~2/3 of the width and the right panel ~1/3, which at 1080p makes the
+        // preview area approximately square.
         var rightPanel = new VBoxContainer();
         rightPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         rightPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
-        rightPanel.SizeFlagsStretchRatio = 1.25f;
+        rightPanel.SizeFlagsStretchRatio = 1.0f;
+        rightPanel.ClipContents = true;
         rightPanel.AddThemeConstantOverride("separation", 8);
         contentSplit.AddChild(rightPanel);
 
@@ -1214,6 +1221,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         label.BbcodeEnabled = true;
         label.FitContent = true;
         label.ScrollActive = false;
+        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         label.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         label.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
@@ -1524,7 +1532,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             // fixed CategoryIconRowHeightPx and lets larger icons overflow vertically into
             // the row margin, so we don't need the row to be as tall as the icon itself.
             catRow.CustomMinimumSize = new Vector2(0, CategoryRowMinHeightPx);
-            catRow.AddThemeConstantOverride("separation", 8);
+            catRow.AddThemeConstantOverride("separation", 2);
             catRow.MouseFilter = MouseFilterEnum.Ignore;
             // Vertically center children inside the row.
             catRow.Alignment = BoxContainer.AlignmentMode.Center;
@@ -1540,7 +1548,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             arrowLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
             arrowLabel.VerticalAlignment = VerticalAlignment.Center;
             arrowLabel.HorizontalAlignment = HorizontalAlignment.Center;
-            arrowLabel.CustomMinimumSize = new Vector2(20, 0);
+            arrowLabel.CustomMinimumSize = new Vector2(14, 0);
             ApplyKreonFont(arrowLabel);
             ApplyTextShadow(arrowLabel);
             catRow.AddChild(arrowLabel);
@@ -1616,10 +1624,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             };
             catWrap.GuiInput += (InputEvent ev) =>
             {
-                // Click region for collapse/expand: arrow + icon. 20(arrow) + 8(sep)
-                // + 62(icon column) = 90px. Matches the encounter row layout so the
+                // Click region for collapse/expand: arrow + icon. 14(arrow) + 2(sep)
+                // + 62(icon column) = 78px. Matches the encounter row layout so the
                 // clickable collapse area visually lines up with the icon column.
-                const float CollapseThreshold = 90f;
+                const float CollapseThreshold = 78f;
                 if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
                 {
                     if (mb.Position.X < CollapseThreshold)
@@ -1697,6 +1705,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 ScheduleMonsterPreviewRender(capturedLockedId);
             }).CallDeferred();
         }
+
+        // Bottom spacer so the last encounter rows clear the SlayTheStats filter
+        // button anchored at the bottom-left of the submenu.
+        var bottomSpacer = new Control
+        {
+            CustomMinimumSize = new Vector2(0, 48),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        _encounterList.AddChild(bottomSpacer);
 
         // Force the scroll container to recompute its content limit so scroll bounds match
         // the actual list size for the current biome (not the largest biome we've shown).
@@ -1809,7 +1826,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // column + 8px HBox separation = 90px before the highlight panel starts, plus
         // the highlight panel's left content margin (RowMarginLeftPx). The header row
         // itself has separation=6, so subtract that from the spacer.
-        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(84 + RowMarginLeftPx, 0) });
+        // 14(arrow) + 2(gap) + 62(icon col) + 2(gap) = 80, plus the highlight panel's left content margin.
+        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(80 + RowMarginLeftPx, 0) });
         _statsColumnHeaderRow.AddChild(encounterHeader);
 
         var spacer = new Control();
@@ -2013,9 +2031,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             });
         _sortTabRow.AddChild(sigBtn);
 
-        // "?" help chip — hover shows a tooltip explaining both Raw and Significance.
-        var rankHelp = BuildRankByHelpButton();
-        _sortTabRow.AddChild(rankHelp);
+        _rankByHelpButton = BuildRankByHelpButton();
+        _sortTabRow.AddChild(_rankByHelpButton);
     }
 
     private Button BuildRankByHelpButton()
@@ -2023,22 +2040,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var btn = new Button
         {
             Text = "?",
-            CustomMinimumSize = new Vector2(24, 24),
+            CustomMinimumSize = new Vector2(28, 28),
             SizeFlagsVertical = SizeFlags.ShrinkCenter,
             FocusMode = Control.FocusModeEnum.None,
-            TooltipText =
-                "Raw: sort by the raw metric value. Encounters with few fights can rank high " +
-                "purely from sample-size noise.\n\n" +
-                "Significance: sort by z-score vs the category baseline. Well-sampled encounters " +
-                "whose metric meaningfully deviates from the pool baseline surface above low-N noise.",
+            TooltipText = "What do Raw and Significance mean?",
         };
 
         var style = new StyleBoxFlat();
         style.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
         style.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
         style.SetBorderWidthAll(1);
-        style.SetCornerRadiusAll(12);
-        style.ContentMarginLeft = style.ContentMarginRight = 5;
+        style.SetCornerRadiusAll(14);
+        style.ContentMarginLeft = style.ContentMarginRight = 6;
         style.ContentMarginTop = style.ContentMarginBottom = 0;
         btn.AddThemeStyleboxOverride("normal", style);
         var hover = (StyleBoxFlat)style.Duplicate();
@@ -2048,10 +2061,108 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         btn.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
         btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        btn.AddThemeFontSizeOverride("font_size", 14);
+        btn.AddThemeFontSizeOverride("font_size", 16);
         ApplyKreonFont(btn, bold: true);
         ApplyTextShadow(btn);
+
+        btn.Pressed += () =>
+        {
+            SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+            ToggleRankByPopup();
+        };
         return btn;
+    }
+
+    private void ToggleRankByPopup()
+    {
+        if (_rankByPopup != null && GodotObject.IsInstanceValid(_rankByPopup))
+        {
+            _rankByPopup.QueueFree();
+            _rankByPopup = null;
+            return;
+        }
+        BuildRankByPopup();
+    }
+
+    private void BuildRankByPopup()
+    {
+        if (_rankByHelpButton == null) return;
+
+        var popup = new PanelContainer { Name = "SlayTheStatsBestiaryRankByPopup" };
+        popup.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
+        popup.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+        popup.MouseFilter = MouseFilterEnum.Stop;
+        popup.ZIndex = 95;
+
+        var margin = new MarginContainer();
+        margin.AddThemeConstantOverride("margin_left", 18);
+        margin.AddThemeConstantOverride("margin_right", 18);
+        margin.AddThemeConstantOverride("margin_top", 14);
+        margin.AddThemeConstantOverride("margin_bottom", 14);
+        popup.AddChild(margin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 6);
+        margin.AddChild(vbox);
+
+        var title = new Label { Text = "Ranking modes" };
+        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
+        ApplyKreonFont(title, bold: true);
+        ApplyTextShadow(title);
+        vbox.AddChild(title);
+
+        var body = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent    = true,
+            ScrollActive  = false,
+            AutowrapMode  = TextServer.AutowrapMode.WordSmart,
+            MouseFilter   = MouseFilterEnum.Ignore,
+            CustomMinimumSize = new Vector2(420, 0),
+        };
+        body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+        body.AddThemeFontSizeOverride("normal_font_size", 16);
+        body.AddThemeFontSizeOverride("bold_font_size", 16);
+        ApplyKreonFont(body);
+        body.Text = string.Join('\n', new[]
+        {
+            "[b][color=#efc851]Raw[/color][/b] — sort by the raw metric value (e.g. median damage,",
+            "death rate). Encounters with very few fights can rank high purely from",
+            "sample-size noise.",
+            "",
+            "[b][color=#efc851]Significance[/color][/b] — sort by z-score vs the category baseline.",
+            "Well-sampled encounters whose metric meaningfully deviates from the pool",
+            "baseline surface above low-N noise. An encounter with 25 damage at n=30",
+            "ranks higher than one with 40 damage at n=3.",
+            "",
+            "[color=#bfb7a6]Click ? again to dismiss.[/color]",
+        });
+        vbox.AddChild(body);
+
+        AddChild(popup);
+        _rankByPopup = popup;
+
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredPosition;
+        void DeferredPosition()
+        {
+            tree.ProcessFrame -= DeferredPosition;
+            if (!GodotObject.IsInstanceValid(popup) || !GodotObject.IsInstanceValid(_rankByHelpButton))
+                return;
+
+            var btnRect = _rankByHelpButton.GetGlobalRect();
+            var popupSize = popup.GetCombinedMinimumSize();
+            var viewport = popup.GetViewport();
+            var vpSize = viewport?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+
+            float x = Math.Clamp(btnRect.Position.X + btnRect.Size.X - popupSize.X,
+                                 16f, Math.Max(16f, vpSize.X - popupSize.X - 16f));
+            float y = Math.Clamp(btnRect.Position.Y + btnRect.Size.Y + 8f,
+                                 16f, Math.Max(16f, vpSize.Y - popupSize.Y - 16f));
+            popup.AnchorLeft = popup.AnchorRight = popup.AnchorTop = popup.AnchorBottom = 0f;
+            popup.GlobalPosition = new Vector2(x, y);
+        }
     }
 
     private string BuildSortLabel(EncounterSortMode mode, bool selected)
@@ -2115,8 +2226,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         foreach (var id in extraChars)
             options.Add((id, LoadCharacterIconTexture(id)));
 
-        foreach (var (id, icon) in options)
+        foreach (var (id, rawIcon) in options)
         {
+            var icon = rawIcon ?? GenerateFallbackCharIcon(id);
             if (icon == null) continue;
             bool selected = id == _sortCharacter;
             var capturedId = id;
@@ -2229,6 +2341,28 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             : characterId;
         var path = $"res://images/ui/top_panel/character_icon_{name.ToLowerInvariant()}.png";
         return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+    }
+
+    private static readonly Dictionary<string, ImageTexture> s_fallbackIcons = new();
+
+    /// <summary>Generates a colored square with the character's initial letter as a
+    /// fallback icon for modded/fake characters that lack a game sprite.</summary>
+    private static Texture2D? GenerateFallbackCharIcon(string? characterId)
+    {
+        if (characterId == null) return null;
+        if (s_fallbackIcons.TryGetValue(characterId, out var cached)) return cached;
+
+        int hash = characterId.GetHashCode();
+        float hue = ((hash & 0x7FFFFFFF) % 360) / 360f;
+        var color = Color.FromHsv(hue, 0.5f, 0.7f);
+
+        const int size = 48;
+        var img = Image.CreateEmpty(size, size, false, Image.Format.Rgba8);
+        img.Fill(color);
+
+        var tex = ImageTexture.CreateFromImage(img);
+        s_fallbackIcons[characterId] = tex;
+        return tex;
     }
 
     private Button MakeChipButton(string text, bool selected, Action onPressed, Texture2D? icon = null)
@@ -2517,17 +2651,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         int rowHeight = category == "boss" ? BossRowHeightPx : RowHeightPx;
         var row = new HBoxContainer();
         row.CustomMinimumSize = new Vector2(0, rowHeight);
-        // Match the category header row's separation so the icon column lines up.
-        row.AddThemeConstantOverride("separation", 8);
+        row.AddThemeConstantOverride("separation", 2);
         row.MouseFilter = MouseFilterEnum.Ignore;
         row.Alignment = BoxContainer.AlignmentMode.Center;
         wrap.AddChild(row);
 
         MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta);
 
-        // Lead spacer mirrors the width of the category header's collapse arrow (20px) so
+        // Lead spacer mirrors the width of the category header's collapse arrow so
         // the icon column and highlight panel align with category rows.
-        var leadSpacer = new Control { CustomMinimumSize = new Vector2(20, 0) };
+        var leadSpacer = new Control { CustomMinimumSize = new Vector2(14, 0) };
         row.AddChild(leadSpacer);
 
         if (category == "boss")

@@ -385,10 +385,8 @@ internal static class EncounterStatsHover
         var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
         var characterLabel = effectiveChar != null ? FormatCharacterName(effectiveChar) : "All";
 
-        double deathRateBaseline = StatsAggregator.GetEncounterDeathRateBaseline(MainFile.Db, filter, category, biome);
-        double dmgPctBaseline    = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, biome);
-        double iqrcBaseline      = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, biome);
-        double dmgBaseline       = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
+        var poolBaseline = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, biome);
+        double dmgBaseline = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);
 
         var combined = new EncounterEvent();
         foreach (var stat in actStats.Values)
@@ -397,7 +395,7 @@ internal static class EncounterStatsHover
         string statsText = combined.Fought == 0
             ? EncounterTooltipHelper.NoDataText(characterLabel, filter.AscensionMin, filter.AscensionMax)
             : EncounterTooltipHelper.BuildEncounterStatsTextSingleRow(
-                combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline, dmgBaseline,
+                combined, poolBaseline, dmgBaseline,
                 effectiveChar, categoryLabel, filter);
 
         var encounterName = TruncateEncounterNameIfTooLong(EncounterCategory.FormatName(encounterId));
