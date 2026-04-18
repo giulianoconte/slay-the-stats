@@ -116,166 +116,66 @@ public static class EncounterTooltipHelper
         // Compute the All row baselines from per-character metrics.
         var allBaseline = ComputeAllRowBaselines(perCharMetrics);
 
-        // --- Header table ---
+        // Build header + character rows + baseline as ONE [table=8]. A single table
+        // guarantees consistent column widths by construction (Godot sizes columns from
+        // the same content pool), avoiding the drift we saw with three independent tables.
+        // When content exceeds the available height, everything scrolls together — the
+        // header and baseline rows scroll with the character rows.
+        const int AllCharsDescExpand = 2;
         var WP = new WideColumnPaddings();
-        var hdr = new StringBuilder();
-        hdr.Append("[table=8]");
-        AppendDescriptorCell(hdr, " ", isHeader: true);
-        AppendHeaderCell(hdr, "Runs",    WP.Fought);
-        AppendHeaderCell(hdr, "Dmg%",    WP.Dmg);
-        AppendHeaderCell(hdr, "Mid 50%", WP.Mid50);
-        AppendHeaderCell(hdr, "Spread",  WP.Spread);
-        AppendHeaderCell(hdr, "Turns",   WP.Turns);
-        AppendHeaderCell(hdr, "Potions", WP.Pots);
-        AppendHeaderCell(hdr, "Deaths",  WP.Deaths);
-        hdr.Append("[/table]");
-
-        // --- Pass 2: render character rows colored against All baselines ---
         var body = new StringBuilder();
         body.Append("[table=8]");
 
+        // Header row
+        AppendDescriptorCell(body, " ", isHeader: true, expand: AllCharsDescExpand);
+        AppendHeaderCell(body, "Runs",    WP.Fought);
+        AppendHeaderCell(body, "Dmg%",    WP.Dmg);
+        AppendHeaderCell(body, "Mid 50%", WP.Mid50);
+        AppendHeaderCell(body, "Spread",  WP.Spread);
+        AppendHeaderCell(body, "Turns",   WP.Turns);
+        AppendHeaderCell(body, "Potions", WP.Pots);
+        AppendHeaderCell(body, "Deaths",  WP.Deaths);
+
+        // Character rows
         foreach (var (charId, stat, startingHp, descriptor) in charEntries)
         {
-            AppendDescriptorCell(body, descriptor);
+            AppendDescriptorCell(body, descriptor, expand: AllCharsDescExpand);
             AppendAllCharsDataCells(body, stat, startingHp, allBaseline);
         }
-
         foreach (var descriptor in emptyEntries)
         {
-            AppendDescriptorCell(body, descriptor);
+            AppendDescriptorCell(body, descriptor, expand: AllCharsDescExpand);
             AppendEmptyDataCells(body, wide: true);
         }
 
+        // Baseline (All) row
+        var allIcon = AllCharsIcon(22);
+        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)", expand: AllCharsDescExpand);
+        if (perCharMetrics.Count > 0)
+            AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
+        else
+            AppendEmptyDataCells(body, wide: true);
+
         body.Append("[/table]");
 
-        // --- Baseline (All) row table ---
-        var baseline = new StringBuilder();
-        baseline.Append("[table=8]");
-        var allIcon = AllCharsIcon(22);
-        AppendDescriptorCell(baseline, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)");
-        if (perCharMetrics.Count > 0)
-            AppendAllRowFromPerCharMetrics(baseline, perCharMetrics, totalFought);
-        else
-            AppendEmptyDataCells(baseline, wide: true);
-        baseline.Append("[/table]");
-
-        // --- Footer ---
+        // --- Footer (kept separate so it can stay sticky below the scroll area) ---
         var footer = new StringBuilder();
         var filterCtx = filter != null
             ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
             : "";
-        // Use FormatFooter but strip the leading newline since this footer appears standalone (no table above).
         var footerStr = TooltipHelper.FormatFooter(filterCtx);
         if (footerStr.StartsWith("\n")) footerStr = footerStr.Substring(1);
         footer.Append(footerStr);
 
         return new AllCharsTableParts
         {
-            Header = hdr.ToString(),
+            Header = "",
             CharacterRows = body.ToString(),
-            BaselineRow = baseline.ToString(),
+            BaselineRow = "",
             Footer = footer.ToString(),
         };
     }
 
-    /// <summary>Builds the all-characters encounter stats as a single [table=8] block.
-    /// All rows (header, per-character, baseline) share one table so columns align.
-    /// Used by surfaces that don't need a scrollable split layout.</summary>
-    internal static string BuildEncounterStatsText(
-        Dictionary<string, EncounterEvent> charStats,
-        double deathRateBaseline,
-        double dmgPctBaseline,
-        double iqrcBaseline,
-        int? ascensionMin,
-        int? ascensionMax,
-        string categoryLabel,
-        AggregationFilter? filter = null,
-        string? characterLabel = null)
-    {
-        var startingHps = MainFile.Db.CharacterStartingHp;
-
-        // --- Pass 1: collect per-character metrics for the All (baseline) row ---
-        var perCharMetrics = new List<AllCharsPerCharMetrics>();
-        var charEntries = new List<(string charId, EncounterEvent stat, int startingHp, string descriptor)>();
-        var emptyEntries = new List<string>();
-        int totalFought = 0, totalDied = 0;
-
-        var rendered = new HashSet<string>();
-        foreach (var (charId, label) in CharacterOrder)
-        {
-            rendered.Add(charId);
-            var icon = CharacterIcon(charId, 30);
-            var descriptor = $"{icon}{KreonBoldFontTag}{label}[/font]";
-            if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
-            {
-                int startingHp = startingHps.GetValueOrDefault(charId, 0);
-                CollectPerCharMetrics(perCharMetrics, stat, startingHp);
-                charEntries.Add((charId, stat, startingHp, descriptor));
-                totalFought += stat.Fought;
-                totalDied += stat.Died;
-            }
-            else
-                emptyEntries.Add(descriptor);
-        }
-        foreach (var (charId, stat) in charStats.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-        {
-            if (rendered.Contains(charId) || stat.Fought == 0) continue;
-            var icon = CharacterIcon(charId, 30);
-            var label = FormatUnknownCharLabel(charId);
-            int startingHp = startingHps.GetValueOrDefault(charId, 0);
-            CollectPerCharMetrics(perCharMetrics, stat, startingHp);
-            charEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/font]"));
-            totalFought += stat.Fought;
-            totalDied += stat.Died;
-        }
-
-        var allBaseline = ComputeAllRowBaselines(perCharMetrics);
-
-        // --- Single [table=8]: header + char rows + baseline ---
-        var WP = new WideColumnPaddings();
-        var sb = new StringBuilder();
-        sb.Append("[table=8]");
-
-        // Header row
-        AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    WP.Fought);
-        AppendHeaderCell(sb, "Dmg%",    WP.Dmg);
-        AppendHeaderCell(sb, "Mid 50%", WP.Mid50);
-        AppendHeaderCell(sb, "Spread",  WP.Spread);
-        AppendHeaderCell(sb, "Turns",   WP.Turns);
-        AppendHeaderCell(sb, "Potions", WP.Pots);
-        AppendHeaderCell(sb, "Deaths",  WP.Deaths);
-
-        // Character data rows
-        foreach (var (charId, stat, startingHp, descriptor) in charEntries)
-        {
-            AppendDescriptorCell(sb, descriptor);
-            AppendAllCharsDataCells(sb, stat, startingHp, allBaseline);
-        }
-        foreach (var descriptor in emptyEntries)
-        {
-            AppendDescriptorCell(sb, descriptor);
-            AppendEmptyDataCells(sb, wide: true);
-        }
-
-        // Baseline (All) row
-        var allIcon = AllCharsIcon(22);
-        AppendDescriptorCell(sb, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)");
-        if (perCharMetrics.Count > 0)
-            AppendAllRowFromPerCharMetrics(sb, perCharMetrics, totalFought);
-        else
-            AppendEmptyDataCells(sb, wide: true);
-
-        sb.Append("[/table]");
-
-        // Footer
-        var filterCtx = filter != null
-            ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
-            : "";
-        sb.Append(TooltipHelper.FormatFooter(filterCtx));
-
-        return sb.ToString();
-    }
 
     // Section colors for focused-character view. Row descriptors (labels like
     // "All (baseline)", pool names, character names) get Cream — they are the
@@ -315,24 +215,35 @@ public static class EncounterTooltipHelper
     //     Turns/Potions/Deaths) sit close together as a group.
     //   • Normal: gap between Fought↔Dmg and Spread↔Turns — separates groups.
     //   • Descriptor: gap between the descriptor column and Fought.
-    private const string TightCellPadding      = "padding=3,0,3,0";   // within a triple
-    private const string NormalCellPadding      = "padding=8,0,8,0";   // between groups
-    private const string DescriptorCellPadding  = "padding=0,0,8,0";   // descriptor → Fought
+    private const string TightCellPadding      = "padding=0,0,0,0";   // 0 inter-data-col padding — rely on content widths
+    private const string NormalCellPadding      = "padding=6,0,6,0";   // legacy — kept for wide (all-chars) table
+    private const string DescriptorCellPadding  = "padding=0,0,0,0";   // descriptor → Fought (gap comes entirely from FoughtCellPadding's left)
+    /// <summary>First data column (Runs/Fought) in the focused-view table. LEFT padding
+    /// is the only inter-column gap we add — it separates the descriptor column from
+    /// the data block. RIGHT padding is 0 so data columns are as tight as possible;
+    /// inter-data-col spacing comes entirely from the text content minimums.</summary>
+    private const string FoughtCellPadding      = "padding=2,0,0,0";
     // Wider padding for the all-characters table — character icons + "%" suffixes need more room.
     private const string WideNormalCellPadding   = "padding=18,0,18,0";
     private const string WideTightCellPadding    = "padding=12,0,12,0";
+    /// <summary>First data column (Runs/Fought) in the all-chars table: keep the same
+    /// right padding as WideNormalCellPadding (18) so the gap to Dmg% matches the other
+    /// group separators, but shrink the left padding so Runs values sit closer to the
+    /// character-name descriptor. Pairs with the reduced DescriptorCellPadding right
+    /// padding for a meaningfully tighter visual gap.</summary>
+    private const string WideFoughtCellPadding   = "padding=4,0,18,0";
 
     /// <summary>Per-column padding assignments so each cell-emitter picks the
     /// right tier without hard-coding padding strings inline.</summary>
     private struct ColumnPaddings
     {
-        public readonly string Fought = NormalCellPadding;
+        public readonly string Fought = FoughtCellPadding;
         public readonly string Dmg    = TightCellPadding;
         public readonly string Mid50  = TightCellPadding;
-        public readonly string Spread = NormalCellPadding;
+        public readonly string Spread = TightCellPadding;
         public readonly string Turns  = TightCellPadding;
         public readonly string Pots   = TightCellPadding;
-        public readonly string Deaths = NormalCellPadding;
+        public readonly string Deaths = TightCellPadding;
         public ColumnPaddings() {}
     }
 
@@ -343,7 +254,7 @@ public static class EncounterTooltipHelper
     /// content differences.</summary>
     private struct WideColumnPaddings
     {
-        public readonly string Fought = $"expand=1 {WideNormalCellPadding}";
+        public readonly string Fought = $"expand=1 {WideFoughtCellPadding}";
         public readonly string Dmg    = $"expand=1 {WideTightCellPadding}";
         public readonly string Mid50  = $"expand=1 {WideTightCellPadding}";
         public readonly string Spread = $"expand=1 {WideNormalCellPadding}";
@@ -353,20 +264,21 @@ public static class EncounterTooltipHelper
         public WideColumnPaddings() {}
     }
 
-    private static string EmptyDataCell(string padding, string? color = null)
+    private static string EmptyDataCell(string padding, string? color = null, string align = "right")
     {
         var c = color ?? TooltipHelper.NeutralShade;
-        return $"[cell {padding}][right][color={c}]-[/color][/right][/cell]";
+        return $"[cell {padding}][{align}][color={c}]-[/color][/{align}][/cell]";
     }
 
-    /// <summary>Descriptor cell in the focused-view [table=8] — always the first
-    /// cell of each row. `expand=3` weights the descriptor column so it soaks up
-    /// leftover horizontal space, wrapping long sub-labels across multiple lines
-    /// instead of forcing the data columns to shrink. Kreon proportional font.</summary>
-    private static void AppendDescriptorCell(StringBuilder sb, string text, bool isHeader = false)
+    /// <summary>Descriptor cell in the focused-view / all-chars [table=8] — always the first
+    /// cell of each row. `expand` weights the descriptor column; default 3 soaks up leftover
+    /// horizontal space for long focused-view sub-labels ("vs Act N biome elites (baseline)").
+    /// All-chars view uses expand=2 since character-name descriptors are much shorter and
+    /// `expand=3` leaves a large empty gap between the name and the Runs column.</summary>
+    private static void AppendDescriptorCell(StringBuilder sb, string text, bool isHeader = false, int expand = 3)
     {
         var color = isHeader ? HeaderColor : BaselineSectionColor;
-        sb.Append($"[cell expand=3 {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
+        sb.Append($"[cell expand={expand} {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
     }
 
     /// <summary>Reference string that sets the minimum descriptor column width.
@@ -376,22 +288,42 @@ public static class EncounterTooltipHelper
     private const string DescriptorSizingRef =
         "\u00A0\u00A0\u00A0vs Act 9 elites (baseline)";
 
-    /// <summary>Appends an invisible 1px-tall row whose descriptor cell sets the minimum
-    /// column width for the entire table. Data cells are empty. Must be emitted right
-    /// after the opening [table=8] tag, before the header row.</summary>
+    /// <summary>Appends an invisible 1px-tall row that locks column widths for the
+    /// focused-view table. Uses U+2003 em-space at font_size=1 (≈1px per em-space) to
+    /// set horizontal minimums without visible height. Each data cell uses the SAME
+    /// padding constant as the corresponding real-row column — otherwise column widths
+    /// inflate by the padding mismatch (Godot picks max(sizing, real) cell width).
+    /// Emitted right after the opening [table=8] tag.</summary>
     private static void AppendSizingRow(StringBuilder sb)
     {
-        sb.Append($"[cell expand=3 {DescriptorCellPadding}][font_size=1]{KreonRegFontTag}{DescriptorSizingRef}{KreonRegClose}[/font_size][/cell]");
-        for (int i = 0; i < 7; i++)
-            sb.Append($"[cell {NormalCellPadding}][font_size=1] [/font_size][/cell]");
+        var P = new ColumnPaddings();
+        // Descriptor: long enough for "vs Act 9 elites (baseline)" with icon at font 18.
+        sb.Append($"[cell expand=3 {DescriptorCellPadding}][font_size=1]{EmSpaces(280)}[/font_size][/cell]");
+        // Data col sizing refs — set to the max expected content width (headers or data,
+        // whichever is widest) so columns stay locked across hover-state changes. Headers
+        // generally dominate since "Potions", "Spread", "Turns" are wider than "99.9" etc.
+        AppendSizingDataCell(sb, P.Fought, 40);  // "9999" data
+        AppendSizingDataCell(sb, P.Dmg,    30);  // "Dmg%" header or "100%" data
+        AppendSizingDataCell(sb, P.Mid50,  70);  // "999-999%" data (widest)
+        AppendSizingDataCell(sb, P.Spread, 50);  // "Spread" header
+        AppendSizingDataCell(sb, P.Turns,  45);  // "Turns" header
+        AppendSizingDataCell(sb, P.Pots,   55);  // "Potions" header
+        AppendSizingDataCell(sb, P.Deaths, 55);  // "999/999" data
     }
+
+    private static void AppendSizingDataCell(StringBuilder sb, string padding, int widthPx)
+    {
+        sb.Append($"[cell {padding}][font_size=1]{EmSpaces(widthPx)}[/font_size][/cell]");
+    }
+
+    private static string EmSpaces(int count) => new string('\u2003', count);
 
     /// <summary>Column header cell. Uses the same monospace font as data cells (via
     /// the RichTextLabel's theme override) so auto-sized column widths align with
     /// the data rows below. Right-aligned to sit over right-aligned numbers.</summary>
-    private static void AppendHeaderCell(StringBuilder sb, string name, string padding = NormalCellPadding)
+    private static void AppendHeaderCell(StringBuilder sb, string name, string padding = NormalCellPadding, string align = "right")
     {
-        sb.Append($"[cell {padding}][right][color={HeaderColor}]{name}[/color][/right][/cell]");
+        sb.Append($"[cell {padding}][{align}][color={HeaderColor}]{name}[/color][/{align}][/cell]");
     }
 
     /// <summary>Row 1 (subject encounter) data cells. Colored against the
@@ -434,7 +366,7 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
         sb.Append($"[cell {P.Spread}][right]{cSpread}[/right][/cell]");
-       
+
         sb.Append($"[cell {P.Turns}][right]{cTurns}[/right][/cell]");
         sb.Append($"[cell {P.Pots}][right]{cPots}[/right][/cell]");
         sb.Append($"[cell {P.Deaths}][right]{cDeaths}[/right][/cell]");
@@ -479,7 +411,7 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
         sb.Append($"[cell {P.Spread}][right]{cSpread}[/right][/cell]");
-       
+
         sb.Append($"[cell {P.Turns}][right]{cTurns}[/right][/cell]");
         sb.Append($"[cell {P.Pots}][right]{cPots}[/right][/cell]");
         sb.Append($"[cell {P.Deaths}][right]{cDeaths}[/right][/cell]");
@@ -513,7 +445,7 @@ public static class EncounterTooltipHelper
         var fDeaths    = $"{m.Died}/{n}";
 
         sb.Append($"[cell {P.Fought}][right][color={color}]{fN}[/color][/right][/cell]");
-       
+
         sb.Append($"[cell {P.Dmg}][right][color={color}]{fDmg}[/color][/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right][color={color}]{fIqr}[/color][/right][/cell]");
         sb.Append($"[cell {P.Spread}][right][color={color}]{fSpread}[/color][/right][/cell]");
@@ -894,15 +826,16 @@ public static class EncounterTooltipHelper
         sb.Append("[table=8]");
         AppendSizingRow(sb);
 
-        // Header row — empty descriptor cell + 6 column headers
+        // Header row — empty descriptor cell + 7 column headers. Paddings must match
+        // ColumnPaddings so header cells right-align with data cells below.
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    NormalCellPadding);
+        AppendHeaderCell(sb, "Runs",    FoughtCellPadding);
         AppendHeaderCell(sb, "Dmg",     TightCellPadding);
         AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
-        AppendHeaderCell(sb, "Spread",  NormalCellPadding);
+        AppendHeaderCell(sb, "Spread",  TightCellPadding);
         AppendHeaderCell(sb, "Turns",   TightCellPadding);
         AppendHeaderCell(sb, "Potions", TightCellPadding);
-        AppendHeaderCell(sb, "Deaths",  NormalCellPadding);  // must match ColumnPaddings.Deaths so header right-aligns with data cells
+        AppendHeaderCell(sb, "Deaths",  TightCellPadding);
 
         // Row 1: this encounter, this character — data cells colored against act pool baseline
         AppendDescriptorCell(sb, $"{charIcon}vs {encNameRow1}");
@@ -958,15 +891,13 @@ public static class EncounterTooltipHelper
 
         // Header row
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    NormalCellPadding);
-
+        AppendHeaderCell(sb, "Runs",    FoughtCellPadding);
         AppendHeaderCell(sb, "Dmg",     TightCellPadding);
         AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
-        AppendHeaderCell(sb, "Spread",  NormalCellPadding);
-
+        AppendHeaderCell(sb, "Spread",  TightCellPadding);
         AppendHeaderCell(sb, "Turns",   TightCellPadding);
         AppendHeaderCell(sb, "Potions", TightCellPadding);
-        AppendHeaderCell(sb, "Deaths",  NormalCellPadding);
+        AppendHeaderCell(sb, "Deaths",  TightCellPadding);
 
         var allCharsIcon = AllCharsIcon(22);
         var catPlural = PluralizeCategory(catLower);

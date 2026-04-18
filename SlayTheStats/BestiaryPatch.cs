@@ -107,15 +107,16 @@ public static class BestiaryButtonPatch
             // Override the visible text. Label child is named "Label" inside the scene.
             var labelNode = ((Node)ourButton).GetNodeOrNull<Label>("Label");
             if (labelNode != null)
-                labelNode.Text = "Stats Bestiary";
+                labelNode.Text = "Bestiary Stats";
 
-            // Tint the background panel slightly more orange than the default stone color so
-            // the button reads as "stats bestiary" rather than another generic compendium tile.
-            // CRITICAL: the cloned BgPanel inherits a *shared* ShaderMaterial reference from
-            // the source button. The HSV value parameter on that shader is what drives the
-            // focus / hover / press tweens — and since it's shared, hovering this button
-            // would also light up the original Run History button. Duplicate the material so
-            // the clone has its own instance and the focus animation is isolated.
+            // Tint the background panel with the same steel blue-gray as our card/relic
+            // tooltip background so the compendium button reads as part of the SlayTheStats
+            // family. CRITICAL: the cloned BgPanel inherits a *shared* ShaderMaterial
+            // reference from the source button. The HSV value parameter on that shader is
+            // what drives the focus / hover / press tweens — and since it's shared,
+            // hovering this button would also light up the original Run History button.
+            // Duplicate the material so the clone has its own instance and the focus
+            // animation is isolated.
             var bgPanel = ((Node)ourButton).GetNodeOrNull<Control>("BgPanel");
             if (bgPanel != null)
             {
@@ -129,9 +130,12 @@ public static class BestiaryButtonPatch
                     var hsvField = AccessTools.Field(typeof(NCompendiumBottomButton), "_hsv");
                     hsvField?.SetValue(ourButton, ownMat);
                 }
-                // Earthy dirt tone — darker, desaturated brown so it reads as
-                // "field guide / soil" rather than the bronze-y warm-tan it used to.
-                ((CanvasItem)bgPanel).SelfModulate = new Color(0.65f, 0.59f, 0.52f, 1f);
+                // Blue tint to tie the button to the mod's steel-blue tooltip family.
+                // The BgPanel's shader desaturates / shifts the SelfModulate color (a direct
+                // (0.60, 0.68, 0.88) tooltip blue comes out plum after the shader), so we
+                // bias the channels hard toward blue to land on a true blue after the
+                // shader is done with it.
+                ((CanvasItem)bgPanel).SelfModulate = new Color(0.30f, 0.55f, 1.00f, 1f);
             }
 
             // Replace the icon with a square grid of boss icons (encountered in full color,
@@ -216,7 +220,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 {
     private HFlowContainer? _biomeTabRow;
     private HBoxContainer? _sortTabRow;
-    private HBoxContainer? _sortCharRow;
+    private HFlowContainer? _sortCharRow;
     /// <summary>SlayTheStats filter button anchored at the bottom-left of the bestiary
     /// submenu (mirroring NRelicCollection's filter button position). Cloned from the
     /// game-native NCardViewSortButton template when one is cached, otherwise a plain
@@ -225,12 +229,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <summary>"?" info button next to the encounter title that toggles a popup
     /// describing every stat column. Lives inline in the title row of the right-hand
     /// stats panel.</summary>
-    private Button? _legendButton;
+    private Control? _legendButton;
     /// <summary>The active column-legend popup, if any. Tracked so the toggle handler
     /// can find and free it on second click.</summary>
-    private PanelContainer? _legendPopup;
-    private Button? _rankByHelpButton;
-    private PanelContainer? _rankByPopup;
+    private CanvasLayer? _legendPopup;
+    private Control? _rankByHelpButton;
+    private CanvasLayer? _rankByPopup;
     /// <summary>Shared filter pane built via CompendiumFilterPatch.BuildFilterPane with
     /// the class dropdown and group-card-upgrades toggle suppressed (the bestiary's
     /// "Score by:" row covers per-character scoring, and group-upgrades is a card-only
@@ -416,8 +420,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // position) doesn't overlap the encounter list
         var margin = new MarginContainer();
         margin.SetAnchorsPreset(LayoutPreset.FullRect);
-        margin.AddThemeConstantOverride("margin_left", 220);
-        margin.AddThemeConstantOverride("margin_right", 40);
+        margin.AddThemeConstantOverride("margin_left", 260);
+        margin.AddThemeConstantOverride("margin_right", 12);
         margin.AddThemeConstantOverride("margin_top", 24);
         margin.AddThemeConstantOverride("margin_bottom", 24);
         // Clicks in the margin padding area (left 200px, etc.) that don't hit
@@ -462,7 +466,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // being siblings of contentSplit in outerVbox), so the right panel can start at
         // the top — giving the stats table and monster preview much more vertical room.
         var contentSplit = new HBoxContainer();
-        contentSplit.AddThemeConstantOverride("separation", 16);
+        contentSplit.AddThemeConstantOverride("separation", 8);
         contentSplit.SizeFlagsVertical = SizeFlags.ExpandFill;
         outerVbox.AddChild(contentSplit);
 
@@ -473,7 +477,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Stretch ratio gives the encounter list the majority of the horizontal
         // budget while leaving the right panel enough room for all table columns
         // (including Deaths) without clipping.
-        leftSection.SizeFlagsStretchRatio = 1.1f;
+        leftSection.SizeFlagsStretchRatio = 0.82f;
         leftSection.AddThemeConstantOverride("separation", 4);
         contentSplit.AddChild(leftSection);
 
@@ -506,8 +510,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // to the table it controls. The row itself (_sortCharRow) is still built
         // here in RebuildSortCharRow; we only need to create the HBox container now
         // and add it to the right panel below.
-        _sortCharRow = new HBoxContainer();
-        _sortCharRow.AddThemeConstantOverride("separation", 4);
+        _sortCharRow = new HFlowContainer();
+        _sortCharRow.AddThemeConstantOverride("h_separation", 4);
+        _sortCharRow.AddThemeConstantOverride("v_separation", 4);
 
         // Separator between the top settings and the encounter list. Lives inside
         // leftSection (not outerVbox) so it doesn't span across the right panel —
@@ -663,36 +668,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         contentSplit.AddChild(rightPanel);
 
         // ── Focus character bar (above the stats table) ──
-        // Sits directly above the stats title so the selector is adjacent to the
-        // table it controls. Choosing a character switches the table to focused-
-        // character mode; leaving "All" shows the per-character comparison table.
         // Icon-only selector (Prismatic Gem for Overview + per-character head icons).
-        // No label, no surrounding buttons — selected icon is opaque, unselected dimmed.
-        var focusCharBar = new HBoxContainer();
-        focusCharBar.AddThemeConstantOverride("separation", 8);
-        focusCharBar.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        focusCharBar.AddChild(_sortCharRow);
-        rightPanel.AddChild(focusCharBar);
+        // HFlowContainer so icons wrap to additional rows when many characters are
+        // present. The selector pushes the stats table down as it wraps; the table
+        // absorbs the lost height via its capped content area.
+        _sortCharRow!.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        rightPanel.AddChild(_sortCharRow);
 
-        // Stats label — wrapped in a fixed-height container so the divider below it
-        // doesn't move, and the preview area below is the same height regardless of
-        // which table (focused / category / all-chars) is currently being rendered.
-        // The minimum is the natural height of the tallest case (focused single-
-        // character view, with tightened line_separation and no row-4 extra gap),
-        // so the preview area always ends up the same size it had under the focused
-        // mode before the fixed-height lock was introduced. Shorter modes (all-chars,
-        // category) fit inside this slab and leave empty space at the bottom.
-        var statsBox = new MarginContainer();
-        statsBox.CustomMinimumSize = new Vector2(0, 360);
+        var statsBox = new Control();
+        statsBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         statsBox.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        statsBox.CustomMinimumSize = new Vector2(0, 300);
+        statsBox.ClipContents = true;
         rightPanel.AddChild(statsBox);
 
-        // Wrap title + table in a vbox so the title (Kreon, gold) sits above the monospace
-        // table without sharing fonts with it.
         var statsVbox = new VBoxContainer();
         statsVbox.AddThemeConstantOverride("separation", 4);
-        statsVbox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        statsVbox.SizeFlagsVertical = SizeFlags.ExpandFill;
+        statsVbox.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         statsBox.AddChild(statsVbox);
 
         // Title row: encounter / category name in Kreon gold + a small "?" legend button
@@ -838,12 +830,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 ClearLockedEncounter();
         };
 
-        // Render area — takes all vertical slack below the fixed-height stats label.
-        // Since _statsLabel is ShrinkBegin + CustomMinimumSize.Y = 510, the preview
-        // height is just (rightPanel height − 510 − title/separator). No explicit
-        // CustomMinimumSize here so it can flex with the window size while still
-        // being consistent across modes (stats area height is the same regardless
-        // of which table is rendered).
         _renderArea = new PanelContainer();
         _renderArea.SizeFlagsVertical = SizeFlags.ExpandFill;
         _renderArea.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -1228,6 +1214,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         label.AddThemeFontSizeOverride("normal_font_size", 18);
         label.AddThemeFontSizeOverride("bold_font_size", 18);
         label.AddThemeConstantOverride("line_separation", -6);
+        // Godot's default table_h_separation adds 3-4px between every column on top of
+        // cell padding — set to 0 so our per-cell [padding=L,0,R,0] constants are the
+        // only inter-column spacing.
+        label.AddThemeConstantOverride("table_h_separation", 0);
+        label.AddThemeConstantOverride("table_v_separation", 0);
         var kreonFont = TooltipHelper.GetKreonFont();
         if (kreonFont != null)
         {
@@ -1242,43 +1233,64 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     // ───────────────────────── Column legend popup ─────────────────────────
 
-    private Button BuildLegendButton()
+    /// <summary>Blue-tinted popup panel matching the mod's card/relic tooltip chrome.
+    /// Same `hover_tip.png` 9-slice + steel-blue SelfModulate used by `TooltipHelper`, so
+    /// the legend and rank-by popups read as the same "data" surface family.</summary>
+    private PanelContainer BuildHelpPopupPanel(string name)
     {
-        var btn = new Button
-        {
-            Text = "?",
-            CustomMinimumSize = new Vector2(28, 28),
-            SizeFlagsVertical = SizeFlags.ShrinkCenter,
-            FocusMode = Control.FocusModeEnum.None,
-            TooltipText = "What do these columns mean?",
-        };
-
-        var style = new StyleBoxFlat();
-        style.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
-        style.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
-        style.SetBorderWidthAll(1);
-        style.SetCornerRadiusAll(14);
-        style.ContentMarginLeft = style.ContentMarginRight = 6;
-        style.ContentMarginTop = style.ContentMarginBottom = 0;
-        btn.AddThemeStyleboxOverride("normal", style);
-        var hover = (StyleBoxFlat)style.Duplicate();
-        hover.BorderColor = new Color(0.918f, 0.745f, 0.318f, 0.95f);
-        hover.BgColor = new Color(0.15f, 0.16f, 0.22f, 1f);
-        btn.AddThemeStyleboxOverride("hover", hover);
-
-        btn.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
-        btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        btn.AddThemeFontSizeOverride("font_size", 16);
-        ApplyKreonFont(btn, bold: true);
-        ApplyTextShadow(btn);
-
-        btn.Pressed += () =>
-        {
-            SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
-            ToggleLegendPopup();
-        };
-        return btn;
+        var popup = new PanelContainer { Name = name };
+        popup.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
+        popup.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+        popup.MouseFilter = MouseFilterEnum.Stop;
+        popup.ZIndex = 95;
+        return popup;
     }
+
+    /// <summary>Wraps a help popup in a CanvasLayer with a full-screen transparent
+    /// click-catcher so any click outside the popup dismisses it. The popup itself has
+    /// MouseFilter.Stop so clicks on it don't propagate to the catcher. Returns the
+    /// CanvasLayer so the caller can track it for toggle-dismiss (freeing the layer
+    /// also frees the popup + catcher).</summary>
+    private CanvasLayer WrapPopupForClickOutsideDismiss(PanelContainer popup, Action dismiss)
+    {
+        var layer = new CanvasLayer { Name = popup.Name + "Layer", Layer = 99 };
+
+        var catcher = new Control { Name = "ClickCatcher", MouseFilter = MouseFilterEnum.Stop };
+        catcher.AnchorRight = 1f;
+        catcher.AnchorBottom = 1f;
+        catcher.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed) dismiss();
+        };
+        layer.AddChild(catcher);
+        layer.AddChild(popup);
+        return layer;
+    }
+
+    /// <summary>Text shadow matching the game's description tooltip (stolen values in
+    /// <see cref="TooltipHelper.Fonts"/>). Softer than `ApplyTextShadow` (3px/2px offset),
+    /// which is too far for the popup body text on a tooltip-style blue panel.</summary>
+    private static void ApplyTooltipTextShadow(Control control)
+    {
+        var f = TooltipHelper.Fonts;
+        switch (control)
+        {
+            case RichTextLabel rt:
+                rt.AddThemeColorOverride("font_shadow_color", f.Shadow);
+                rt.AddThemeConstantOverride("shadow_offset_x", f.ShadowX);
+                rt.AddThemeConstantOverride("shadow_offset_y", f.ShadowY);
+                rt.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+            case Label lb:
+                lb.AddThemeColorOverride("font_shadow_color", f.Shadow);
+                lb.AddThemeConstantOverride("shadow_offset_x", f.ShadowX);
+                lb.AddThemeConstantOverride("shadow_offset_y", f.ShadowY);
+                lb.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+        }
+    }
+
+    private Control BuildLegendButton() => BuildHelpButton("What do these columns mean?", ToggleLegendPopup);
 
     private void ToggleLegendPopup()
     {
@@ -1295,28 +1307,22 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_legendButton == null) return;
 
-        var popup = new PanelContainer { Name = "SlayTheStatsBestiaryLegendPopup" };
-        popup.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
-        popup.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
-        popup.MouseFilter = MouseFilterEnum.Stop;
-        popup.ZIndex = 95;
-
-        var margin = new MarginContainer();
-        margin.AddThemeConstantOverride("margin_left", 18);
-        margin.AddThemeConstantOverride("margin_right", 18);
-        margin.AddThemeConstantOverride("margin_top", 14);
-        margin.AddThemeConstantOverride("margin_bottom", 14);
-        popup.AddChild(margin);
+        var popup = BuildHelpPopupPanel("SlayTheStatsBestiaryLegendPopup");
 
         var vbox = new VBoxContainer();
         vbox.AddThemeConstantOverride("separation", 6);
-        margin.AddChild(vbox);
+        // TooltipHelper.BuildPanelStyle has 22/0/16/12 content margins — add 16 on the
+        // right inside the VBox so the text reads with balanced padding on both sides.
+        var innerMargin = new MarginContainer();
+        innerMargin.AddThemeConstantOverride("margin_right", 16);
+        innerMargin.AddChild(vbox);
+        popup.AddChild(innerMargin);
 
         var title = new Label { Text = "Stat columns" };
         title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
         ApplyKreonFont(title, bold: true);
-        ApplyTextShadow(title);
+        ApplyTooltipTextShadow(title);
         vbox.AddChild(title);
 
         var body = new RichTextLabel
@@ -1332,37 +1338,32 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         body.AddThemeFontSizeOverride("normal_font_size", 16);
         body.AddThemeFontSizeOverride("bold_font_size", 16);
         ApplyKreonFont(body);
+        ApplyTooltipTextShadow(body);
         body.Text = string.Join('\n', new[]
         {
             "[b][color=#efc851]Runs[/color][/b] — runs that encountered this. Color intensity grows with sample size.",
             "",
-            "[b][color=#efc851]Dmg[/color][/b] — the [i]median[/i] damage taken across matching fights — half of fights",
-            "dealt more, half dealt less. Tints orange above the category baseline, teal below.",
+            "[b][color=#efc851]Dmg[/color][/b] — the [i]median[/i] damage taken across matching fights — half of fights dealt more, half dealt less. Tints orange above the category baseline, teal below.",
             "",
-            "[b][color=#efc851]Mid 50%[/color][/b] — the interquartile range (p25–p75): the damage window that the",
-            "middle half of all fights fell inside. A narrow range means consistent fights; a wide",
-            "range means high variance.",
+            "[b][color=#efc851]Mid 50%[/color][/b] — the interquartile range (p25–p75): the damage window that the middle half of all fights fell inside. A narrow range means consistent fights; a wide range means high variance.",
             "",
-            "[b][color=#efc851]Spread[/color][/b] — how wide the middle 50% is relative to the typical fight, as a",
-            "percentage (IQR / median). Lower = more consistent, higher = swingier. Tints orange",
-            "when swingier than the category baseline, teal when more consistent.",
+            "[b][color=#efc851]Spread[/color][/b] — how wide the middle 50% is relative to the typical fight, as a percentage (IQR / median). Lower = more consistent, higher = swingier. Tints orange when swingier than the category baseline, teal when more consistent.",
             "",
             "[b][color=#efc851]Turns[/color][/b] — average turns the fight lasts.",
             "[b][color=#efc851]Pots[/color][/b] — average potions used per fight.",
             "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total runs.",
             "",
-            "[color=#9c9c9c]Pool rows (baselines) weight each encounter equally — an encounter you've",
-            "fought 50 times counts the same as one you've fought 5 times, matching the",
-            "game's uniform spawn rates.[/color]",
+            "[color=#9c9c9c]Pool rows (baselines) weight each encounter equally — an encounter you've fought 50 times counts the same as one you've fought 5 times, matching the game's uniform spawn rates.[/color]",
             "",
-            "[color=#bfb7a6]Click ? again to dismiss.[/color]",
+            "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
         });
         vbox.AddChild(body);
 
-        // Anchor next to the legend button (top-right of stats panel). Add as a child of
-        // the bestiary submenu so it floats above the encounter list/stats panel.
-        AddChild(popup);
-        _legendPopup = popup;
+        // Wrap the popup in a CanvasLayer + full-screen click-catcher so clicking
+        // anywhere outside the popup dismisses it.
+        var layer = WrapPopupForClickOutsideDismiss(popup, ToggleLegendPopup);
+        AddChild(layer);
+        _legendPopup = layer;
 
         // Defer position so we can read the button's global rect after layout settles.
         var tree = (SceneTree)Engine.GetMainLoop();
@@ -2035,42 +2036,70 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _sortTabRow.AddChild(_rankByHelpButton);
     }
 
-    private Button BuildRankByHelpButton()
-    {
-        var btn = new Button
-        {
-            Text = "?",
-            CustomMinimumSize = new Vector2(28, 28),
-            SizeFlagsVertical = SizeFlags.ShrinkCenter,
-            FocusMode = Control.FocusModeEnum.None,
-            TooltipText = "What do Raw and Significance mean?",
-        };
+    private Control BuildRankByHelpButton() => BuildHelpButton("What do Raw and Significance mean?", ToggleRankByPopup);
 
-        var style = new StyleBoxFlat();
-        style.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
-        style.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
-        style.SetBorderWidthAll(1);
-        style.SetCornerRadiusAll(14);
-        style.ContentMarginLeft = style.ContentMarginRight = 6;
-        style.ContentMarginTop = style.ContentMarginBottom = 0;
-        btn.AddThemeStyleboxOverride("normal", style);
-        var hover = (StyleBoxFlat)style.Duplicate();
+    /// <summary>Shared factory for the "?" help buttons next to the stats title and the rank-by row.
+    /// Built from a PanelContainer + centered Label rather than a Button because Godot's Button
+    /// vertical-centers text by font ascent + descent (including line height), which leaves the
+    /// "?" glyph visually shifted up-left in a small fixed-size square. PanelContainer + a
+    /// Label with Horizontal/VerticalAlignment=Center gives pixel-centered glyph placement.
+    /// GuiInput dispatches the click to the caller-supplied toggle action.</summary>
+    private Control BuildHelpButton(string tooltip, Action onPressed)
+    {
+        var normal = new StyleBoxFlat();
+        normal.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
+        normal.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
+        normal.SetBorderWidthAll(1);
+        normal.SetCornerRadiusAll(11);
+        normal.ContentMarginLeft = normal.ContentMarginRight = 0;
+        normal.ContentMarginTop = normal.ContentMarginBottom = 0;
+
+        var hover = (StyleBoxFlat)normal.Duplicate();
         hover.BorderColor = new Color(0.918f, 0.745f, 0.318f, 0.95f);
         hover.BgColor = new Color(0.15f, 0.16f, 0.22f, 1f);
-        btn.AddThemeStyleboxOverride("hover", hover);
 
-        btn.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
-        btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        btn.AddThemeFontSizeOverride("font_size", 16);
-        ApplyKreonFont(btn, bold: true);
-        ApplyTextShadow(btn);
-
-        btn.Pressed += () =>
+        var panel = new PanelContainer
         {
-            SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
-            ToggleRankByPopup();
+            CustomMinimumSize = new Vector2(22, 22),
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            TooltipText = tooltip,
+            MouseFilter = MouseFilterEnum.Stop,
         };
-        return btn;
+        panel.AddThemeStyleboxOverride("panel", normal);
+
+        var label = new Label
+        {
+            Text = "?",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        label.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
+        label.AddThemeFontSizeOverride("font_size", 14);
+        ApplyKreonFont(label, bold: true);
+        ApplyTooltipTextShadow(label);
+        panel.AddChild(label);
+
+        panel.MouseEntered += () =>
+        {
+            panel.AddThemeStyleboxOverride("panel", hover);
+            label.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        };
+        panel.MouseExited += () =>
+        {
+            panel.AddThemeStyleboxOverride("panel", normal);
+            label.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
+        };
+        panel.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+            {
+                SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+                onPressed();
+                panel.AcceptEvent();
+            }
+        };
+        return panel;
     }
 
     private void ToggleRankByPopup()
@@ -2088,28 +2117,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_rankByHelpButton == null) return;
 
-        var popup = new PanelContainer { Name = "SlayTheStatsBestiaryRankByPopup" };
-        popup.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
-        popup.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
-        popup.MouseFilter = MouseFilterEnum.Stop;
-        popup.ZIndex = 95;
-
-        var margin = new MarginContainer();
-        margin.AddThemeConstantOverride("margin_left", 18);
-        margin.AddThemeConstantOverride("margin_right", 18);
-        margin.AddThemeConstantOverride("margin_top", 14);
-        margin.AddThemeConstantOverride("margin_bottom", 14);
-        popup.AddChild(margin);
+        var popup = BuildHelpPopupPanel("SlayTheStatsBestiaryRankByPopup");
 
         var vbox = new VBoxContainer();
         vbox.AddThemeConstantOverride("separation", 6);
-        margin.AddChild(vbox);
+        var innerMargin = new MarginContainer();
+        innerMargin.AddThemeConstantOverride("margin_right", 16);
+        innerMargin.AddChild(vbox);
+        popup.AddChild(innerMargin);
 
         var title = new Label { Text = "Ranking modes" };
         title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
         ApplyKreonFont(title, bold: true);
-        ApplyTextShadow(title);
+        ApplyTooltipTextShadow(title);
         vbox.AddChild(title);
 
         var body = new RichTextLabel
@@ -2125,23 +2146,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         body.AddThemeFontSizeOverride("normal_font_size", 16);
         body.AddThemeFontSizeOverride("bold_font_size", 16);
         ApplyKreonFont(body);
+        ApplyTooltipTextShadow(body);
         body.Text = string.Join('\n', new[]
         {
-            "[b][color=#efc851]Raw[/color][/b] — sort by the raw metric value (e.g. median damage,",
-            "death rate). Encounters with very few fights can rank high purely from",
-            "sample-size noise.",
+            "[b][color=#efc851]Raw[/color][/b] — sort by the raw metric value (e.g. median damage, death rate). Encounters with very few fights can rank high purely from sample-size noise.",
             "",
-            "[b][color=#efc851]Significance[/color][/b] — sort by z-score vs the category baseline.",
-            "Well-sampled encounters whose metric meaningfully deviates from the pool",
-            "baseline surface above low-N noise. An encounter with 25 damage at n=30",
-            "ranks higher than one with 40 damage at n=3.",
+            "[b][color=#efc851]Significance[/color][/b] — sort by z-score vs the category baseline. Well-sampled encounters whose metric meaningfully deviates from the pool baseline surface above low-N noise. An encounter with 25 damage at n=30 ranks higher than one with 40 damage at n=3.",
             "",
-            "[color=#bfb7a6]Click ? again to dismiss.[/color]",
+            "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
         });
         vbox.AddChild(body);
 
-        AddChild(popup);
-        _rankByPopup = popup;
+        var layer = WrapPopupForClickOutsideDismiss(popup, ToggleRankByPopup);
+        AddChild(layer);
+        _rankByPopup = layer;
 
         var tree = (SceneTree)Engine.GetMainLoop();
         tree.ProcessFrame += DeferredPosition;
@@ -2511,13 +2529,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         var biomes = GetBiomes();
+        var addedButtons = new List<Button>();
         foreach (var biome in biomes)
         {
             bool selected = biome == _selectedBiome;
 
             var btn = new Button();
             btn.Text = FormatBiomeName(biome);
-            btn.CustomMinimumSize = new Vector2(140, 36);
+            btn.CustomMinimumSize = new Vector2(0, 36);
 
             var tabStyle = new StyleBoxFlat();
             tabStyle.BgColor = selected
@@ -2528,8 +2547,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 : new Color(0.30f, 0.33f, 0.40f, 0.8f);
             tabStyle.SetBorderWidthAll(1);
             tabStyle.SetCornerRadiusAll(4);
-            tabStyle.ContentMarginLeft = 10;
-            tabStyle.ContentMarginRight = 10;
+            tabStyle.ContentMarginLeft = 6;
+            tabStyle.ContentMarginRight = 6;
             tabStyle.ContentMarginTop = 4;
             tabStyle.ContentMarginBottom = 4;
             btn.AddThemeStyleboxOverride("normal", tabStyle);
@@ -2554,7 +2573,27 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 RefreshEncounterList();
             };
             _biomeTabRow.AddChild(btn);
+            addedButtons.Add(btn);
         }
+
+        // All biome tabs get the same width (= max of each button's natural content
+        // width). Defer until after Godot's layout pass so each button has computed
+        // its text-based min size from the font; we then lift every button's
+        // CustomMinimumSize.X to that max for a uniform-width row.
+        Callable.From(() =>
+        {
+            float maxW = 0f;
+            foreach (var b in addedButtons)
+            {
+                if (!GodotObject.IsInstanceValid(b)) continue;
+                maxW = Math.Max(maxW, b.GetMinimumSize().X);
+            }
+            foreach (var b in addedButtons)
+            {
+                if (!GodotObject.IsInstanceValid(b)) continue;
+                b.CustomMinimumSize = new Vector2(maxW, b.CustomMinimumSize.Y);
+            }
+        }).CallDeferred();
     }
 
     // ───────────────────────── Encounter Rows ─────────────────────────
@@ -2984,11 +3023,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : "All";
             SetStatsTitle($"{biomeName} {categoryLabel} Encounter Stats");
 
-            var text = EncounterTooltipHelper.BuildEncounterStatsText(
+            var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
                 combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                 filter.AscensionMin, filter.AscensionMax, categoryLabel,
                 filter: filter);
-            ShowSingleLabelStats(text);
+            ShowAllCharsStats(parts);
 
             ClearMonsterPreview();
             return;
@@ -3207,11 +3246,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
             else
             {
-                var text = EncounterTooltipHelper.BuildEncounterStatsText(
+                var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
                     charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                     filter.AscensionMin, filter.AscensionMax, categoryLabel,
                     filter: filter);
-                ShowSingleLabelStats(text);
+                ShowAllCharsStats(parts);
             }
             return;
         }
@@ -3254,20 +3293,24 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// Reset to 0 when switching to a different encounter or mode.</summary>
     private float _statsCharRowsScroll;
 
-    /// <summary>Switches the stats area to all-characters mode with scrollable character rows.
-    /// The header and baseline rows stay pinned; character rows scroll inside the clipper.</summary>
+    /// <summary>Switches the stats area to all-characters mode. Header + character rows +
+    /// baseline are now rendered as a single [table=8] in `_statsCharRowsLabel`, inside
+    /// the scrollable clipper — everything scrolls together when content exceeds the
+    /// available height. The separate pinned header/baseline labels are hidden. The
+    /// footer (filter context) stays sticky below the scroll area.</summary>
     private void ShowAllCharsStats(EncounterTooltipHelper.AllCharsTableParts parts)
     {
         if (_statsLabel != null) _statsLabel.Visible = false;
 
-        if (_statsHeaderLabel != null) _statsHeaderLabel.Text = parts.Header;
-        if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = true;
-        if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = true;
+        // Header/baseline labels unused now that the single-table consolidation puts
+        // every row inside _statsCharRowsLabel. Kept in the tree to avoid rebuilding UI.
+        if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = false;
+        if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = false;
+        if (_statsBaselineMarginContainer != null) _statsBaselineMarginContainer.Visible = false;
+        if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = false;
+
         if (_statsCharRowsLabel != null) _statsCharRowsLabel.Text = parts.CharacterRows;
         if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = true;
-        if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = true;
-        if (_statsBaselineLabel != null) _statsBaselineLabel.Text = parts.BaselineRow;
-        if (_statsBaselineMarginContainer != null) _statsBaselineMarginContainer.Visible = true;
         if (_statsFooterLabel != null)
         {
             _statsFooterLabel.Text = parts.Footer;
@@ -3292,19 +3335,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         float clipperHeight = _statsCharRowsClipper.Size.Y;
         bool needsScroll = contentHeight > clipperHeight;
 
-        // When content is shorter than available space, shrink the wrapper so
-        // the baseline/footer sit right below the last character row instead
-        // of being pushed to the bottom of the fixed-height stats area.
-        if (!needsScroll)
-        {
-            _statsCharRowsWrapper.SizeFlagsVertical = SizeFlags.ShrinkBegin;
-            _statsCharRowsWrapper.CustomMinimumSize = new Godot.Vector2(0, contentHeight);
-        }
-        else
-        {
-            _statsCharRowsWrapper.SizeFlagsVertical = SizeFlags.ExpandFill;
-            _statsCharRowsWrapper.CustomMinimumSize = new Godot.Vector2(0, 0);
-        }
+        _statsCharRowsWrapper.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _statsCharRowsWrapper.CustomMinimumSize = new Godot.Vector2(0, 0);
 
         // Configure scrollbar range and visibility.
         if (_statsScrollbar != null)
