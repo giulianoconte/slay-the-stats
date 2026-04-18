@@ -64,7 +64,17 @@ Shop purchases (Buys): For colorless cards and relics, the tooltip shows how oft
 
 Colorless Cards, Event Cards, Ancient Relics, Curses, etc are all tracked.
 
-Mod settings (color blind mode, in-run stats toggle, master off switch, debug mode) can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional ModConfig mod (https://www.nexusmods.com/slaythespire2/mods/2). Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above.
+Mod settings can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional ModConfig mod (https://www.nexusmods.com/slaythespire2/mods/2):
+
+- Color Blind Mode -- teal/orange instead of green/red.
+- Show In-Run Stats -- toggle stat tooltips during a run.
+- Disable All Stat Tooltips -- master off switch.
+- Tutorial Seen / Bestiary Tutorial Seen -- toggle off to re-show the welcome overlay next time you open the compendium or the bestiary.
+- Encounter Stats (requires restart) -- dropdown: BestiaryAndTooltips (bestiary button + in-combat tooltip), Tooltips (in-combat only, bestiary button hidden), or Disabled (both off).
+- Data Directory -- override the SlayTheSpire2 data folder path.
+- Debug Mode -- verbose logging for bug reports.
+
+Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above. The bestiary has its own settings pane (bottom-left, next to the filter button) with a toggle to disable the live monster preview if you'd prefer zero GPU cost.
 
 ------------------------------------------------------------------------
 ACCESSIBILITY
@@ -115,8 +125,4 @@ Check the Godot log for [SlayTheStats] entries (close the game first):
 COMING SOON
 ------------------------------------------------------------------------
 
-A custom bestiary:
-
-- Per-encounter stats: average damage taken, turns per fight, deaths, potions used, etc.
-- A new compendium "Bestiary" page with detailed encounter stats. 
-- In-combat enemy tooltips: hover a monster during combat to see your stats against that encounter.
+Event tracking -- per-option stats for non-combat events (Drowning Beacon, Crystal Sphere, Neow, etc.), with historical stats surfaced on the option buttons in-run.

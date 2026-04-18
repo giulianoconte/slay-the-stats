@@ -80,7 +80,17 @@ Filter changes you make while in a run are temporary — they let you slice the 
 
 **Colorless Cards**, **Event Cards**, **Ancient Relics**, **Curses**, etc are all tracked.
 
-Mod settings (color blind mode, in-run stats toggle, master off switch, debug mode) can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) mod. Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium — see [Compendium Filters](#compendium-filters) above.
+Mod settings can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) mod:
+
+- **Color Blind Mode** — teal/orange palette instead of green/red for stat coloring.
+- **Show In-Run Stats** — toggle stat tooltips during a run (card rewards, shop, relic hovers). When off, stats only appear in the compendium.
+- **Disable All Stat Tooltips** — master off switch; turns off every stat tooltip in the game.
+- **Tutorial Seen / Bestiary Tutorial Seen** — toggle off to re-show the corresponding welcome overlay next time you open the compendium or the bestiary.
+- **Encounter Stats (requires restart)** — dropdown with three modes: `BestiaryAndTooltips` (Stats Bestiary button in the compendium + in-combat enemy hover tooltip, default), `Tooltips` (tooltip only, bestiary button hidden), or `Disabled` (both off). Takes effect on next launch.
+- **Data Directory** — override the SlayTheSpire2 data directory path (the folder containing `steam/`). Leave empty to use the platform default.
+- **Debug Mode** — enable verbose logging for bug reports.
+
+Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium — see [Compendium Filters](#compendium-filters) above. The bestiary has its own settings pane (bottom-left, next to the filter button) with a toggle to disable the live monster preview if you'd prefer zero GPU cost.
 
 ### FAQ
 

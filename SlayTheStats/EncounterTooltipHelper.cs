@@ -356,7 +356,7 @@ public static class EncounterTooltipHelper
         var cN       = TooltipHelper.ColN($"{n}", n);
         var cDmg     = ColBadRelative($"{dmgMedian:F0}", dmgMedian, medianBase, n);
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread  = FormatSpreadCell(iqr, dmgMedian, n, iqrcBase);
+        var cSpread  = FormatSpreadCell(IqrcFromBounds(iqr, dmgMedian), n, iqrcBase);
         var cTurns   = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBase, n);
         var cPots    = ColBadRelative($"{avgPots:F1}", avgPots, potsBase, n, PotionBaselineFloor, PotionKScale);
         var cDeaths  = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBase);
@@ -401,7 +401,9 @@ public static class EncounterTooltipHelper
         var cN       = TooltipHelper.ColN($"{n}", n);
         var cDmg     = ColBadRelative($"{subject.Median:F0}", subject.Median, medianBase, n);
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread  = FormatSpreadCell(subject.IQR, subject.Median, n, iqrcBase);
+        // Pool subject: use the pool's avg-of-IQRCs metric directly so the value
+        // compared against the baseline (also avg-of-IQRCs) is apples-to-apples.
+        var cSpread  = FormatSpreadCell(subject.IQR.HasValue ? subject.Iqrc : (double?)null, n, iqrcBase);
         var cTurns   = ColBadRelative($"{subject.AvgTurns:F1}", subject.AvgTurns, turnsBase, n);
         var cPots    = ColBadRelative($"{subject.AvgPots:F1}", subject.AvgPots, potsBase, n, PotionBaselineFloor, PotionKScale);
         var cDeaths  = FormatDeathsCellInner(subject.Died, n, subject.DeathRate, deathRateBase);
@@ -469,14 +471,21 @@ public static class EncounterTooltipHelper
     /// deviations are symmetric — a 4× swingier encounter colors with equal
     /// intensity to one 1/4 as swingy. High = swingy = bad (orange); low =
     /// consistent = good (teal). Returns neutral when there's no data.</summary>
-    private static string FormatSpreadCell((double p25, double p75)? iqr, double? median, int n, double iqrcBaseline)
+    private static string FormatSpreadCell(double? iqrc, int n, double iqrcBaseline)
     {
-        if (!iqr.HasValue || median == null)
+        if (iqrc == null)
             return $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        string text = $"{iqrc.Value * 100:F0}%";
+        return ColBadLog(text, iqrc.Value, iqrcBaseline, n);
+    }
 
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
-        string text = $"{iqrc * 100:F0}%";
-        return ColBadLog(text, iqrc, iqrcBaseline, n);
+    /// <summary>Computes IQRC = (p75 - p25) / max(median, 1) from raw IQR bounds.
+    /// Returns null if IQR or median is unavailable. Used by single-encounter
+    /// callers that store raw per-fight damage values.</summary>
+    private static double? IqrcFromBounds((double p25, double p75)? iqr, double? median)
+    {
+        if (!iqr.HasValue || median == null) return null;
+        return (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
     }
 
     /// <summary>Computes median of dmg% values: each raw DamageValues entry divided by
@@ -657,7 +666,7 @@ public static class EncounterTooltipHelper
         var cN      = TooltipHelper.ColN($"{n}", n);
         var cDmg    = ColBad(fDmgPct, displayDmgPct, n, baselines.DmgPct);
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread = FormatSpreadCell(iqrPct, displayDmgPct, n, baselines.Iqrc);
+        var cSpread = FormatSpreadCell(IqrcFromBounds(iqrPct, displayDmgPct), n, baselines.Iqrc);
         var cTurns  = ColBadRelative(fTurns, avgTurns, baselines.AvgTurns, n);
         var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n, PotionBaselineFloor, PotionKScale);
         var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, baselines.DeathRate);
@@ -947,18 +956,19 @@ public static class EncounterTooltipHelper
 
     /// <summary>
     /// Derives coloration baselines from an encounter-weighted PoolMetrics. Used as
-    /// the reference for coloring the focused encounter row. The median and IQRC
-    /// baselines are derived from the median-aggregated pool values (so a row showing
-    /// "median 23" is colored against the median of per-encounter medians, not the mean
-    /// of per-encounter avg dmg%). The other baselines stay mean-aggregated.
+    /// the reference for coloring the focused encounter row. The median baseline is
+    /// the median of per-encounter medians; the IQRC baseline is the mean of
+    /// per-encounter IQRCs (documented `GetEncounterIqrcBaseline` algorithm, which
+    /// <see cref="StatsAggregator.AggregateMetricsFromEvents"/> pre-computes into
+    /// <c>m.Iqrc</c>). Using <c>m.Iqrc</c> here keeps the focused-view Spread cell
+    /// aligned with the encounter-list per-row Spread coloring (both ratio the
+    /// encounter's own IQRC against the same pool baseline). The other baselines
+    /// stay mean-aggregated.
     /// </summary>
     private static (double medianBase, double iqrcBase, double deathRateBase, double turnsBase, double potsBase) DeriveBaselines(PoolMetrics m)
     {
         if (m.Fought == 0) return (0, 1.0, 10.0, 0, 0);
-        double iqrcBase = 1.0;
-        if (m.IQR.HasValue && m.Median > 0)
-            iqrcBase = (m.IQR.Value.p75 - m.IQR.Value.p25) / m.Median;
-        return (m.Median, iqrcBase, m.DeathRate, m.AvgTurns, m.AvgPots);
+        return (m.Median, m.Iqrc, m.DeathRate, m.AvgTurns, m.AvgPots);
     }
 
     /// <summary>
@@ -987,8 +997,14 @@ public static class EncounterTooltipHelper
             return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
         if (baseline <= 0 && baselineFloor <= 0)
             return $"[color={TooltipHelper.NeutralShade}]{text}[/color]";
+        // Direction comes from the actual baseline; magnitude uses the (possibly
+        // floored) denominator. Otherwise a sub-floor baseline flips direction —
+        // e.g. baseline=0.02, floor=0.1, value=0.05 computes value/floor = 50%
+        // ("below baseline"), but value > baseline semantically means "above".
         double effectiveBaseline = Math.Max(baseline, baselineFloor);
-        double pctOfBaseline = value / effectiveBaseline * 100.0;
+        double sign = value > baseline ? 1.0 : -1.0;
+        double magnitude = Math.Abs(value - baseline) / effectiveBaseline * 100.0;
+        double pctOfBaseline = 100.0 + sign * magnitude;
         double dampenedPct = 100.0 + (pctOfBaseline - 100.0) * kScale;
         return ColBad(text, dampenedPct, n, 100.0);
     }
@@ -1100,7 +1116,7 @@ public static class EncounterTooltipHelper
         var cN      = TooltipHelper.ColN($"{n}", n);
         var cDmg    = ColBadRelative($"{dmgMedian:F0}", dmgMedian, medianBaseline, n);
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread = FormatSpreadCell(iqr, dmgMedian, n, iqrcBaseline);
+        var cSpread = FormatSpreadCell(IqrcFromBounds(iqr, dmgMedian), n, iqrcBaseline);
         var cTurns  = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBaseline, n);
 
         sb.Append($"[cell {CombatCellPadding}][right]{cN}[/right][/cell]");
@@ -1147,7 +1163,11 @@ public static class EncounterTooltipHelper
 
     private static string ColBad(string text, double pct, int n, double baseline)
     {
-        return TooltipHelper.ColWR(text, baseline + (baseline - pct), n, baseline);
+        // Encounter surfaces skip the ≤3-runs filter so low-sample rows still
+        // color (needed for monotonic coloring in the bestiary's sorted list;
+        // see TooltipHelper.ColWR).
+        return TooltipHelper.ColWR(text, baseline + (baseline - pct), n, baseline,
+            skipSmallSampleFilter: true);
     }
 
     internal static void Accumulate(EncounterEvent total, EncounterEvent stat)

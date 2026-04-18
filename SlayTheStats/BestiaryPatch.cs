@@ -392,14 +392,39 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public override void _Ready()
     {
-        BuildUI();
+        // Each step is isolated: if BuildUI throws, we still want the back
+        // button added so the user isn't stranded on a broken page. The back
+        // button must go AFTER BuildUI so it's drawn on top of the full-rect
+        // MarginContainer (which has MouseFilter=Stop as a click-to-unlock
+        // catchall) — otherwise the margin eats the back button's clicks.
+        try
+        {
+            BuildUI();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] NBestiaryStatsSubmenu BuildUI failed: {e}");
+        }
 
-        // Add the game's native back button
-        var backButton = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/back_button")).Instantiate<NBackButton>();
-        backButton.Name = "BackButton";
-        AddChild(backButton);
+        try
+        {
+            var backButton = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/back_button")).Instantiate<NBackButton>();
+            backButton.Name = "BackButton";
+            AddChild(backButton);
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] NBestiaryStatsSubmenu back button init failed: {e.Message}");
+        }
 
-        ConnectSignals();
+        try
+        {
+            ConnectSignals();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] NBestiaryStatsSubmenu ConnectSignals failed: {e.Message}");
+        }
     }
 
     public override void OnSubmenuOpened()
@@ -1125,44 +1150,53 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         vbox.AddThemeConstantOverride("separation", 10);
         margin.AddChild(vbox);
 
-        var title = new Label { Text = "Welcome to the Stats Bestiary!" };
+        var title = new Label { Text = "Welcome to the SlayTheStats Bestiary!" };
         title.AddThemeColorOverride("font_color", new Color(0.95f, 0.78f, 0.32f, 1f));
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
         vbox.AddChild(title);
 
-        // Body — RichTextLabel so we can highlight key terms in gold.
+        // Body — RichTextLabel so we can highlight key terms in gold and inline
+        // the Prismatic Gem icon.
         var body = new RichTextLabel
         {
             BbcodeEnabled = true,
             FitContent    = true,
             ScrollActive  = false,
-            AutowrapMode  = TextServer.AutowrapMode.Off,
+            AutowrapMode  = TextServer.AutowrapMode.WordSmart,
             MouseFilter   = MouseFilterEnum.Ignore,
-            CustomMinimumSize = new Vector2(720, 0),
+            CustomMinimumSize = new Vector2(760, 0),
         };
         body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
         body.AddThemeFontSizeOverride("normal_font_size", 18);
         body.AddThemeFontSizeOverride("bold_font_size",   18);
         ApplyKreonFont(body);
+
+        // Inline Prismatic Gem icon for the "select the <Prismatic Gem>" reference.
+        // Fall back to a plain bold label if the icon path doesn't resolve.
+        var prismaticIcon = EncounterTooltipHelper.AllCharsIcon(22).TrimEnd();
+        if (string.IsNullOrEmpty(prismaticIcon))
+            prismaticIcon = "[b][color=#efc851]Prismatic Gem[/color][/b]";
+
         body.Text = string.Join('\n', new[]
         {
-            "[b][color=#efc851]Encounter list[/color][/b] (left): every monster group you've ever fought, organised by biome and category.",
-            "  • Hover any row to see per-character stats on the right.",
-            "  • Hover a category header (Boss / Elite / Normal …) for an aggregated view.",
-            "  • Click a category header to collapse / expand it.",
+            "Here you can see stats for all the encounters in the game.",
+            "You can disable the bestiary in the Mod Configuration settings (restart required).",
             "",
-            "[b][color=#efc851]Biome tabs[/color][/b] (top): switch between Acts and individual biomes. \"All\" shows everything.",
-            "[b][color=#efc851]Sort by[/color][/b] / [b][color=#efc851]Focus character[/color][/b]: pick how the encounter list is ordered. \"Focus character\" switches the stats table to show detailed per-act context for one character (vs the default multi-character comparison view).",
-            "[b][color=#efc851]Filters[/color][/b] (bottom-left): the SlayTheStats button opens a pane to filter by ascension / version / profile.",
+            "[b][color=#efc851]Left side[/color][/b]: [b][color=#efc851]Biome[/color][/b] / [b][color=#efc851]Act[/color][/b] selectors to filter encounters on top and the list of encounters on the bottom. Change [b][color=#efc851]Sort by[/color][/b] to sort by different metrics like Runs and Damage.",
             "",
-            "[b][color=#efc851]Stat columns:[/color][/b]",
-            "  • [b]Dmg[/b] — average damage taken in this fight. Tints orange if higher than the category baseline, teal if lower.",
-            "  • [b]Var[/b]  — variance of damage taken. High variance = swingy / inconsistent encounter.",
-            "  • [b]Turns[/b] — average turns the fight lasts.",
-            "  • [b]Pots[/b]  — average potions used per fight.",
-            "  • [b]Deaths[/b] — runs that ended at this encounter / total runs. Color intensity grows with sample size.",
+            "[b][color=#efc851]Right side[/color][/b]: [b][color=#efc851]Stats table[/color][/b]. Change the [b][color=#efc851]Character selectors[/color][/b] on top for different tables. To compare characters to each other, select the " + prismaticIcon + ". To compare a character with its average performance, select the character icon.",
+            "",
+            "[b][color=#efc851]Bottom left[/color][/b]: A filter pane for ascensions, profiles, and more. You can disable the monster preview there. Click [b][color=#efc851]Save Defaults[/color][/b] to affect encounter stats seen in run.",
+            "",
+            "[b][color=#efc851]Table metrics[/color][/b]:",
+            "  • [b]Dmg[/b] — median damage taken",
+            "  • [b]Mid 50%[/b] — range of the middle 50% of damage for this encounter. A.k.a the IQR, shown as p25-p75.",
+            "  • [b]Spread[/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight.",
+            "  • [b]Turns[/b] — average turns.",
+            "  • [b]Pots[/b] — average potions.",
+            "  • [b]Deaths[/b] — runs ended by this encounter / total runs.",
         });
         vbox.AddChild(body);
 
@@ -1339,21 +1373,21 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         body.AddThemeFontSizeOverride("bold_font_size", 16);
         ApplyKreonFont(body);
         ApplyTooltipTextShadow(body);
+        // Inline Prismatic Gem icon for the "in the <Prismatic Gem> view" reference.
+        var prismaticIcon = EncounterTooltipHelper.AllCharsIcon(20).TrimEnd();
+        if (string.IsNullOrEmpty(prismaticIcon))
+            prismaticIcon = "[b][color=#efc851]Prismatic Gem[/color][/b]";
+
         body.Text = string.Join('\n', new[]
         {
-            "[b][color=#efc851]Runs[/color][/b] — runs that encountered this. Color intensity grows with sample size.",
+            "[b][color=#efc851]Dmg[/color][/b] — median damage taken.",
+            "[b][color=#efc851]Mid 50%[/color][/b] — range of the middle 50% of damage for this encounter. A.k.a the IQR, shown as p25-p75.",
+            "[b][color=#efc851]Spread[/color][/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight.",
+            "[b][color=#efc851]Turns[/color][/b] — average turns.",
+            "[b][color=#efc851]Pots[/color][/b] — average potions.",
+            "[b][color=#efc851]Deaths[/color][/b] — runs ended by this encounter / total runs.",
             "",
-            "[b][color=#efc851]Dmg[/color][/b] — the [i]median[/i] damage taken across matching fights — half of fights dealt more, half dealt less. Tints orange above the category baseline, teal below.",
-            "",
-            "[b][color=#efc851]Mid 50%[/color][/b] — the interquartile range (p25–p75): the damage window that the middle half of all fights fell inside. A narrow range means consistent fights; a wide range means high variance.",
-            "",
-            "[b][color=#efc851]Spread[/color][/b] — how wide the middle 50% is relative to the typical fight, as a percentage (IQR / median). Lower = more consistent, higher = swingier. Tints orange when swingier than the category baseline, teal when more consistent.",
-            "",
-            "[b][color=#efc851]Turns[/color][/b] — average turns the fight lasts.",
-            "[b][color=#efc851]Pots[/color][/b] — average potions used per fight.",
-            "[b][color=#efc851]Deaths[/color][/b] — runs that ended at this encounter / total runs.",
-            "",
-            "[color=#9c9c9c]Pool rows (baselines) weight each encounter equally — an encounter you've fought 50 times counts the same as one you've fought 5 times, matching the game's uniform spawn rates.[/color]",
+            "[color=#bfb7a6]In the " + prismaticIcon + " (all-characters) view, [b]Dmg[/b] and [b]Mid 50%[/b] are shown as a percentage of each character's max HP so characters with different HP totals compare fairly.[/color]",
             "",
             "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
         });
@@ -1406,8 +1440,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public void Refresh()
     {
-        RestoreBestiaryState();
-        RefreshEncounterList();
+        // Log so we can tell (from a user's log) whether the click-handler ever
+        // reached the submenu. If we reach here but the page still looks empty
+        // it indicates BuildUI failed earlier; otherwise RestoreBestiaryState /
+        // RefreshEncounterList is the culprit.
+        MainFile.Logger.Info($"[SlayTheStats] NBestiaryStatsSubmenu.Refresh called (built={_built}, encList={(_encounterList != null)})");
+        try
+        {
+            RestoreBestiaryState();
+            RefreshEncounterList();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] NBestiaryStatsSubmenu.Refresh failed: {e}");
+        }
     }
 
     /// <summary>Restores persisted bestiary view state from config on first open.
@@ -1437,8 +1483,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _sortMode = mode;
         _sortDescending = SlayTheStatsConfig.BestiarySortDescending;
 
-        var savedChar = SlayTheStatsConfig.BestiarySortCharacter;
-        _sortCharacter = string.IsNullOrEmpty(savedChar) ? null : savedChar;
+        // Table Style (character focus) intentionally does NOT persist across bestiary
+        // opens — always start in Overview (all-characters) mode. Users can switch to a
+        // focused character within the session; that choice is forgotten on reopen.
+        _sortCharacter = null;
 
         _sortBySignificance = SlayTheStatsConfig.BestiarySortBySignificance;
     }
@@ -1450,7 +1498,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         SlayTheStatsConfig.BestiarySelectedBiome = biome ?? "";
         SlayTheStatsConfig.BestiarySortMode = sortMode.ToString();
         SlayTheStatsConfig.BestiarySortDescending = sortDescending;
-        SlayTheStatsConfig.BestiarySortCharacter = sortCharacter ?? "";
+        // BestiarySortCharacter intentionally not written — see RestoreBestiaryState.
         SlayTheStatsConfig.BestiarySortBySignificance = sortBySignificance;
         try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
         catch (Exception e)
@@ -2149,9 +2197,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyTooltipTextShadow(body);
         body.Text = string.Join('\n', new[]
         {
-            "[b][color=#efc851]Raw[/color][/b] — sort by the raw metric value (e.g. median damage, death rate). Encounters with very few fights can rank high purely from sample-size noise.",
+            "[b][color=#efc851]Raw[/color][/b] — sort by raw metric, ignoring sample size.",
             "",
-            "[b][color=#efc851]Significance[/color][/b] — sort by z-score vs the category baseline. Well-sampled encounters whose metric meaningfully deviates from the pool baseline surface above low-N noise. An encounter with 25 damage at n=30 ranks higher than one with 40 damage at n=3.",
+            "[b][color=#efc851]Significance[/color][/b] — sort by significance calculation, taking into account number of fights & deviation. An encounter with +10 damage at n=30 ranks more significant than an encounter with +30 damage at n=5.",
             "",
             "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
         });
@@ -4565,8 +4613,10 @@ internal static class EncounterSorting
             pct = value / baseline * 100.0;
         }
         // ColBad direction (high = bad): swap the deviation around the baseline before
-        // handing to ColWR (which uses high = good).
-        return TooltipHelper.ColWR(raw, 100.0 + (100.0 - pct), fought, 100.0);
+        // handing to ColWR (which uses high = good). Skip the ≤3-runs neutralizer so
+        // the encounter-list color gradient stays monotonic with the significance sort.
+        return TooltipHelper.ColWR(raw, 100.0 + (100.0 - pct), fought, 100.0,
+            skipSmallSampleFilter: true);
     }
 }
 

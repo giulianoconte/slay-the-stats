@@ -1,5 +1,6 @@
 memory/
 agents.md
+CLAUDE.md
 agents.private.md
 SlayTheStats/libs/
 
@@ -26,6 +27,17 @@ SlayTheStats-*.zip
 # Godot
 *.import
 SlayTheStats/dist/
+
+# Build-copy targets when ModsPath resolves to project-relative (e.g. a build
+# invoked with an empty /p:ModsPath= flag). The csproj's CopyToModsFolderOnBuild
+# target drops the built DLL + manifest + fonts into $(ModsPath)SlayTheStats/
+# and BaseLib files into $(ModsPath)BaseLib/. mod_image.png inside
+# SlayTheStats/SlayTheStats/ is a tracked source asset and stays.
+SlayTheStats/SlayTheStats/SlayTheStats.dll
+SlayTheStats/SlayTheStats/SlayTheStats.pck
+SlayTheStats/SlayTheStats/SlayTheStats.json
+SlayTheStats/SlayTheStats/fonts/
+SlayTheStats/BaseLib/
 
 # OS
 .DS_Store

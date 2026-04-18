@@ -569,7 +569,7 @@ internal static class EncounterStatsHover
         // with FitContent reports its content size as its minimum, and the leftover
         // space ended up distributed unpredictably.
         const int HeaderHeightPx = 28;
-        const int BrandRightPadPx = 24;
+        const int BrandRightPadPx = 12;
         var headerRow = new Control();
         headerRow.Name = "HeaderRow";
         headerRow.CustomMinimumSize = new Vector2(0, HeaderHeightPx);

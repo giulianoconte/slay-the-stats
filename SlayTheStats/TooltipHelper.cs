@@ -78,18 +78,21 @@ internal static class TooltipHelper
         var vbox = new VBoxContainer();
         vbox.Name = "VBoxContainer";
         vbox.AddThemeConstantOverride("separation", 2);
+        vbox.MouseFilter = Control.MouseFilterEnum.Ignore;
+        // Force the vbox to fill the panel's content area horizontally so the header
+        // Control's right-anchored brand lands at the right edge.
+        vbox.CustomMinimumSize = new Vector2(TooltipWidth - 22f, 0);
 
-        // Header: HBox with title (left) + expanding spacer + brand (right) + fixed-
-        // width right pad. HBox handles the layout natively so we avoid the
-        // anchor+min-size confusion that an anchored plain Label triggers on first
-        // layout (observed as the panel expanding to full screen height on first show).
-        // The encounter tooltip uses anchors because its labels are RichTextLabels
-        // with FitContent=true — plain Labels don't auto-size and mis-layout under
-        // the same anchoring pattern.
-        const int BrandRightPadPx = 24;
-        var headerRow = new HBoxContainer();
+        // Header is a plain Control (not an HBox) so we can anchor the title label
+        // to the top-left and the brand label to the top-right independently. This
+        // mirrors EncounterStatsTooltipPatch's header so the brand sits flush with
+        // the top edge consistently across card/relic and encounter tooltips.
+        const int HeaderHeightPx  = 28;
+        const int BrandRightPadPx = 12;
+        var headerRow = new Control();
         headerRow.Name = "HeaderRow";
-        headerRow.AddThemeConstantOverride("separation", 0);
+        headerRow.CustomMinimumSize = new Vector2(0, HeaderHeightPx);
+        headerRow.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         headerRow.MouseFilter = Control.MouseFilterEnum.Ignore;
         vbox.AddChild(headerRow);
 
@@ -97,28 +100,32 @@ internal static class TooltipHelper
         titleLabel.Name        = "TitleLabel";
         titleLabel.Text        = "Stats";
         titleLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        titleLabel.AnchorLeft   = 0f;
+        titleLabel.AnchorTop    = 0f;
+        titleLabel.AnchorRight  = 0f;
+        titleLabel.AnchorBottom = 0f;
+        titleLabel.OffsetLeft   = 0;
+        titleLabel.OffsetTop    = 0;
+        titleLabel.VerticalAlignment = VerticalAlignment.Top;
         headerRow.AddChild(titleLabel);
-
-        var headerSpacer = new Control();
-        headerSpacer.Name                = "HeaderSpacer";
-        headerSpacer.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        headerSpacer.MouseFilter         = Control.MouseFilterEnum.Ignore;
-        headerRow.AddChild(headerSpacer);
 
         var brandLabel = new Label();
         brandLabel.Name                = "SlayTheStatsBrand";
         brandLabel.Text                = "SlayTheStats";
         brandLabel.MouseFilter         = Control.MouseFilterEnum.Ignore;
-        // Top-align within the HBox row — row height = title's (larger) height,
-        // so this keeps the smaller brand flush with the title's top edge.
+        // Anchor to top-right so the brand's right edge always sits BrandRightPadPx
+        // inside the header's right edge. VerticalAlignment.Top + OffsetTop=0 nudge
+        // the brand up so its top sits flush with the title — visual symmetry with
+        // the encounter tooltip's header.
+        brandLabel.AnchorLeft   = 1f;
+        brandLabel.AnchorRight  = 1f;
+        brandLabel.AnchorTop    = 0f;
+        brandLabel.AnchorBottom = 0f;
+        brandLabel.GrowHorizontal = Control.GrowDirection.Begin;
+        brandLabel.OffsetRight  = -BrandRightPadPx;
+        brandLabel.OffsetTop    = 0;
         brandLabel.VerticalAlignment = VerticalAlignment.Top;
         headerRow.AddChild(brandLabel);
-
-        var rightPad = new Control();
-        rightPad.Name              = "BrandRightPad";
-        rightPad.CustomMinimumSize = new Vector2(BrandRightPadPx, 0);
-        rightPad.MouseFilter       = Control.MouseFilterEnum.Ignore;
-        headerRow.AddChild(rightPad);
 
         var table = new RichTextLabel();
         table.Name                = "StatsLabel";
@@ -199,10 +206,22 @@ internal static class TooltipHelper
         // not down, so child layout won't give the table a real width until end
         // of frame. Giving the table its own explicit min width lets BBCode
         // FitContent measure the correct wrapped height immediately.
-        var contentPad = _stolenPanelStyle is StyleBoxFlat sbf
-            ? sbf.ContentMarginLeft + sbf.ContentMarginRight
-            : 16f;
+        // Read content margins off the base StyleBox — StyleBoxTexture (stolen /
+        // BuildPanelStyle default) and StyleBoxFlat both expose them. The prior
+        // `is StyleBoxFlat` check missed the texture case and fell through to a
+        // hardcoded 16, leaving the vbox ~6px too wide: the PanelContainer grew
+        // the panel to fit, and the right-anchored brand ended up further from
+        // the visible frame border than its encounter-tooltip twin.
+        float contentPad = _stolenPanelStyle != null
+            ? _stolenPanelStyle.ContentMarginLeft + _stolenPanelStyle.ContentMarginRight
+            : 22f;
         table.CustomMinimumSize = new Vector2(ActiveWidth - contentPad, 0);
+        // Pin the vbox's min width so the header Control's right-anchored brand
+        // label lands at the correct right edge on the very first show. Without
+        // this, vbox takes its min from the narrower content and the anchored
+        // brand sits mid-panel until a later layout pass corrects it.
+        var vbox = panel.GetNodeOrNull<VBoxContainer>("VBoxContainer");
+        if (vbox != null) vbox.CustomMinimumSize = new Vector2(ActiveWidth - contentPad, 0);
 
         // Header labels are static ("Stats" / "SlayTheStats") and set at panel
         // construction; only the table text varies per show.
@@ -568,9 +587,16 @@ internal static class TooltipHelper
     /// shade intensity comes from tanh(k × N × deviation) so both high deviation and
     /// high N push toward vivid colour.
     /// </summary>
-    internal static string ColWR(string text, double pct, int n, double baseline = 50.0)
+    internal static string ColWR(string text, double pct, int n, double baseline = 50.0,
+        bool skipSmallSampleFilter = false)
     {
-        if (n <= 3 || double.IsNaN(baseline)) return $"[color={NeutralShade}]{text}[/color]";
+        // Bestiary / encounter surfaces pass skipSmallSampleFilter=true because their
+        // cells are compared against each other in a sorted list — a 3-run encounter
+        // ranked high by significance must still color so the list stays monotonic.
+        // Card/relic surfaces keep the default filter: stats there stand alone, and
+        // low-n coloration would overstate confidence.
+        if (!skipSmallSampleFilter && n <= 3) return $"[color={NeutralShade}]{text}[/color]";
+        if (double.IsNaN(baseline)) return $"[color={NeutralShade}]{text}[/color]";
         var level = SigLevel(Significance(pct, baseline, n, KWin));
         if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
         var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
