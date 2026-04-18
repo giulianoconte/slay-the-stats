@@ -1,6 +1,7 @@
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes.Screens;
+using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using System.Reflection;
 using System.Text;
 
@@ -12,7 +13,8 @@ namespace SlayTheStats;
 // After combat ends and the reward screen appears, shows a brief
 // tooltip comparing this fight's damage, turns, and potions against
 // the player's historical medians/averages for the same encounter.
-// Auto-dismisses after a configurable duration with a fade-out.
+// Dismissed by clicking the panel or automatically when the player
+// leaves the reward screen (TreeExiting on NRewardsScreen).
 //
 // Data is derived entirely from the RunState's MapPointHistory — the
 // same source the game uses for its own floor stats on the map. This
@@ -23,8 +25,6 @@ namespace SlayTheStats;
 [HarmonyPatch(typeof(NRewardsScreen), "_Ready")]
 public static class PostFightTooltipPatch
 {
-    private const float DisplayDurationSeconds = 10f;
-    private const float FadeOutDurationSeconds = 1.5f;
     private const float TopMarginPx = 20f;
     private const float RightMarginPx = 20f;
 
@@ -32,9 +32,10 @@ public static class PostFightTooltipPatch
     private static RichTextLabel? _nameLabel;
     private static RichTextLabel? _tableLabel;
     private static Label? _brandLabel;
+    private static Label? _hintLabel;
     private static NinePatchRect? _shadow;
-    private static Tween? _dismissTween;
     private static bool _warnedOnce;
+    internal static bool _dismissed;
 
     static void Postfix(NRewardsScreen __instance)
     {
@@ -264,7 +265,7 @@ public static class PostFightTooltipPatch
 
     private static void Show(NRewardsScreen rewardsScreen, string encounterName, string statsText)
     {
-        Hide();
+        Dismiss();
 
         TooltipHelper.TrySceneTheftOnce();
 
@@ -297,10 +298,13 @@ public static class PostFightTooltipPatch
             _shadow.Modulate = new Color(0f, 0f, 0f, 0.25098f);
         }
 
-        // Position in top-right after a deferred frame so the panel has measured its size
-        _panel.CallDeferred("set_visible", true);
-        Callable.From(() => PositionTopRight(rewardsScreen)).CallDeferred();
+        _dismissed = false;
 
+        // Auto-hide when the rewards screen leaves the tree (player moves to next floor)
+        rewardsScreen.TreeExiting += Dismiss;
+
+        // Position in top-right after a deferred frame so the panel has measured its size
+        Callable.From(() => PositionTopRight(rewardsScreen)).CallDeferred();
     }
 
     private static void PositionTopRight(NRewardsScreen rewardsScreen)
@@ -310,8 +314,8 @@ public static class PostFightTooltipPatch
         var viewportSize = _panel.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
         var panelSize = _panel.Size;
 
-        float x = viewportSize.X - panelSize.X - RightMarginPx - panelSize.X * 0.5f;
-        float y = TopMarginPx + panelSize.Y * 0.5f;
+        float x = viewportSize.X - panelSize.X - RightMarginPx;
+        float y = (viewportSize.Y - panelSize.Y) * 0.5f;
 
         _panel.GlobalPosition = new Vector2(x, y);
 
@@ -322,35 +326,18 @@ public static class PostFightTooltipPatch
         }
     }
 
-    private static void ScheduleDismiss(NRewardsScreen rewardsScreen)
+    private static void Dismiss()
     {
-        _dismissTween?.Kill();
-
-        var tree = rewardsScreen.GetTree();
-        if (tree == null) return;
-
-        var timer = tree.CreateTimer(DisplayDurationSeconds);
-        timer.Timeout += () =>
-        {
-            if (_panel == null || !GodotObject.IsInstanceValid(_panel) || !_panel.Visible) return;
-
-            _dismissTween = _panel.CreateTween();
-            _dismissTween.TweenProperty(_panel, "modulate:a", 0f, FadeOutDurationSeconds);
-            if (_shadow != null && GodotObject.IsInstanceValid(_shadow))
-                _dismissTween.Parallel().TweenProperty(_shadow, "modulate:a", 0f, FadeOutDurationSeconds);
-            _dismissTween.TweenCallback(Callable.From(Hide));
-        };
+        _dismissed = true;
+        SetVisible(false);
     }
 
-    private static void Hide()
+    internal static void SetVisible(bool visible)
     {
-        _dismissTween?.Kill();
-        _dismissTween = null;
-
         if (_panel != null && GodotObject.IsInstanceValid(_panel))
-            _panel.Visible = false;
+            _panel.Visible = visible;
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow))
-            _shadow.Visible = false;
+            _shadow.Visible = visible;
     }
 
     private static void BuildPanel()
@@ -365,7 +352,7 @@ public static class PostFightTooltipPatch
         _panel.GuiInput += (InputEvent @event) =>
         {
             if (@event is InputEventMouseButton { Pressed: true })
-                Hide();
+                Dismiss();
         };
         _panel.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
         _panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
@@ -453,6 +440,17 @@ public static class PostFightTooltipPatch
         ApplyTooltipShadow(_tableLabel);
         vbox.AddChild(_tableLabel);
 
+        _hintLabel = new Label();
+        _hintLabel.Name = "PostFightHint";
+        _hintLabel.Text = "(click to dismiss)";
+        _hintLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        _hintLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _hintLabel.AddThemeColorOverride("font_color", new Color(ThemeStyle.HintR, ThemeStyle.HintG, ThemeStyle.HintB, 1f));
+        _hintLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.HintSize);
+        if (kreonRegular != null) _hintLabel.AddThemeFontOverride("font", kreonRegular);
+        ApplyTooltipShadow(_hintLabel);
+        vbox.AddChild(_hintLabel);
+
         var style = TooltipHelper.BuildPanelStyle();
         if (style != null)
             _panel.AddThemeStyleboxOverride("panel", style);
@@ -495,5 +493,25 @@ public static class PostFightTooltipPatch
         var filter = SlayTheStatsConfig.BuildSafeFilterFromDefaults();
         filter.Character = character;
         return filter;
+    }
+}
+
+[HarmonyPatch(typeof(NOverlayStack), nameof(NOverlayStack.HideOverlays))]
+public static class PostFightOverlayHidePatch
+{
+    static void Postfix()
+    {
+        if (!PostFightTooltipPatch._dismissed)
+            PostFightTooltipPatch.SetVisible(false);
+    }
+}
+
+[HarmonyPatch(typeof(NOverlayStack), nameof(NOverlayStack.ShowOverlays))]
+public static class PostFightOverlayShowPatch
+{
+    static void Postfix()
+    {
+        if (!PostFightTooltipPatch._dismissed)
+            PostFightTooltipPatch.SetVisible(true);
     }
 }
