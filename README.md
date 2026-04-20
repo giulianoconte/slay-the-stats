@@ -31,7 +31,7 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 
 1. Install [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) in STS2
 2. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.5 or later) into your mods folder if you haven't already
-3. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll`, `SlayTheStats.json`, `SlayTheStats.pck`, and a `fonts/` subfolder
+3. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll` and `SlayTheStats.json`
 
 ### Uninstalling
 

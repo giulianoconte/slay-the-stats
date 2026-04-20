@@ -1069,7 +1069,8 @@ public static partial class CompendiumFilterPatch
             || SlayTheStatsConfig.IsNonDefault("VersionMax")
             || SlayTheStatsConfig.IsNonDefault("ClassFilter")
             || SlayTheStatsConfig.IsNonDefault("FilterProfile")
-            || SlayTheStatsConfig.IsNonDefault("GroupUpgrades");
+            || SlayTheStatsConfig.IsNonDefault("GroupUpgrades")
+            || SlayTheStatsConfig.IsNonDefault("IncludeMultiplayer");
     }
 
     // ── Filter pane builder ─────────────────────────────────────────────��───
@@ -1663,6 +1664,70 @@ public static partial class CompendiumFilterPatch
             AddSeparator(vbox);
         }
 
+        // ── Multiplayer toggle ──
+        // Mirrors the GroupCardUpgrades tickbox style. Unconditional (present on all
+        // surfaces — card/relic, bestiary, event) because game_mode scoping applies
+        // universally to aggregated stats.
+        Action<bool>? setIncludeMultiplayer;
+        Action highlightIncludeMultiplayer = () => { };
+        {
+            Control includeMultiplayerControl;
+            if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
+            {
+                var clonedTickbox = CloneTickbox(_tickboxTemplate, "Include multiplayer runs", SlayTheStatsConfig.IncludeMultiplayer);
+                clonedTickbox.Toggled += (box) =>
+                {
+                    SlayTheStatsConfig.IncludeMultiplayer = box.IsTicked;
+                    highlightIncludeMultiplayer();
+                    NotifyChanged();
+                };
+                includeMultiplayerControl = clonedTickbox;
+                setIncludeMultiplayer = v => clonedTickbox.IsTicked = v;
+                highlightIncludeMultiplayer = () =>
+                {
+                    if (!GodotObject.IsInstanceValid(clonedTickbox)) return;
+                    var label = (clonedTickbox.GetNodeOrNull<Control>("Label")
+                                ?? clonedTickbox.FindChild("Label", true, false)) as Control;
+                    if (label == null)
+                    {
+                        if (SlayTheStatsConfig.DebugMode)
+                            MainFile.Logger.Warn("[SlayTheStats] highlightIncludeMultiplayer: tickbox Label not found");
+                        return;
+                    }
+                    bool nonDefault = SlayTheStatsConfig.IsNonDefault("IncludeMultiplayer");
+                    var color = nonDefault ? ActiveFilterColor : Colors.White;
+                    label.AddThemeColorOverride("font_color", color);
+                    label.Modulate = Colors.White;
+                };
+            }
+            else
+            {
+                var fallback = MakeCheckButton("Include multiplayer runs", SlayTheStatsConfig.IncludeMultiplayer);
+                fallback.Toggled += (pressed) =>
+                {
+                    SlayTheStatsConfig.IncludeMultiplayer = pressed;
+                    highlightIncludeMultiplayer();
+                    NotifyChanged();
+                };
+                includeMultiplayerControl = fallback;
+                setIncludeMultiplayer = v => fallback.SetPressedNoSignal(v);
+                highlightIncludeMultiplayer = () =>
+                    fallback.AddThemeColorOverride(
+                        "font_color",
+                        SlayTheStatsConfig.IsNonDefault("IncludeMultiplayer") ? ActiveFilterColor : Colors.White);
+            }
+            vbox.AddChild(includeMultiplayerControl);
+            var mpTree = (SceneTree)Engine.GetMainLoop();
+            mpTree.ProcessFrame += DeferredIncludeMultiplayerHighlight;
+            void DeferredIncludeMultiplayerHighlight()
+            {
+                mpTree.ProcessFrame -= DeferredIncludeMultiplayerHighlight;
+                highlightIncludeMultiplayer();
+            }
+
+            AddSeparator(vbox);
+        }
+
         // ── Action buttons ──
         var row1 = new HBoxContainer();
         row1.AddThemeConstantOverride("separation", 8);
@@ -1729,6 +1794,8 @@ public static partial class CompendiumFilterPatch
             }
             setGroupUpgrades?.Invoke(SlayTheStatsConfig.GroupCardUpgrades);
             highlightGroupUpgrades();
+            setIncludeMultiplayer?.Invoke(SlayTheStatsConfig.IncludeMultiplayer);
+            highlightIncludeMultiplayer();
             refreshSaveDefaultsHighlight?.Invoke();
         });
 

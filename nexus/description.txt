@@ -32,7 +32,7 @@ INSTALLATION
 
 1. Install GUMM for STS2 if you haven't already: https://sts2mods.com/godot-universal-mod-manager-for-sts-2/
 2. Download and extract BaseLib (v0.2.5 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
-3. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, SlayTheStats.pck, and a fonts/ subfolder
+3. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll and SlayTheStats.json
 
 ------------------------------------------------------------------------
 COMPENDIUM FILTERS

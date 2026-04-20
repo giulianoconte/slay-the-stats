@@ -214,8 +214,10 @@ internal static class ModConfigBridge
             Set(cfg, "Description",  "Controls which encounter-stats surfaces are enabled. BestiaryAndTooltips: Stats Bestiary button in compendium + in-combat hover tooltip. Tooltips: tooltip only, bestiary button hidden. Disabled: both off. Requires a game restart to take effect.");
             Set(cfg, "OnChanged",    new Action<object>(v =>
             {
+                var old = SlayTheStatsConfig.EncounterStatsRestartRequired;
                 if (Enum.TryParse<SlayTheStatsConfig.EncounterStatsMode>(Convert.ToString(v), out var m))
                     SlayTheStatsConfig.EncounterStatsRestartRequired = m;
+                MainFile.Logger.Info($"[SlayTheStats] EncounterStatsMode changed: {old} -> {SlayTheStatsConfig.EncounterStatsRestartRequired} (restart required to take full effect)");
                 ModConfig.SaveDebounced<SlayTheStatsConfig>();
             }));
         }));

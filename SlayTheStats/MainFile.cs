@@ -44,12 +44,13 @@ public partial class MainFile : Node
             $"(asc {SlayTheStatsConfig.AscensionMin}..{SlayTheStatsConfig.AscensionMax}, " +
             $"ver {SlayTheStatsConfig.VersionMin}..{SlayTheStatsConfig.VersionMax}, " +
             $"class '{SlayTheStatsConfig.ClassFilter}', profile '{SlayTheStatsConfig.FilterProfile}', " +
-            $"groupUpgrades {SlayTheStatsConfig.GroupCardUpgrades})");
+            $"groupUpgrades {SlayTheStatsConfig.GroupCardUpgrades}, " +
+            $"includeMultiplayer {SlayTheStatsConfig.IncludeMultiplayer})");
+        Logger.Info($"Boot: encounter_stats_mode={SlayTheStatsConfig.EncounterStatsRestartRequired} " +
+            $"(BestiaryEnabled={SlayTheStatsConfig.BestiaryEnabled}, InCombatTooltipEnabled={SlayTheStatsConfig.InCombatTooltipEnabled})");
 
         if (!BuildInfo.IsRelease)
             Logger.Info($"DEV BUILD {StatsDb.CurrentModVersion} (built {BuildInfo.BuildDate} {BuildInfo.BuildTime})");
-
-        TooltipHelper.TryLoadModFonts();
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
         DebugTestData.InjectIfDebug(Db);

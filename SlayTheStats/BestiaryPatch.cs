@@ -26,6 +26,7 @@ public static class InjectBestiarySubmenuPatch
 
     private static NBestiaryStatsSubmenu CreateSubmenu(NMainMenuSubmenuStack stack)
     {
+        MainFile.Logger.Info("[SlayTheStats] CreateSubmenu: NMainMenuSubmenuStack first-request, instantiating NBestiaryStatsSubmenu");
         var menu = new NBestiaryStatsSubmenu();
         menu.Visible = false;
         ((Node)stack).AddChild(menu);
@@ -49,6 +50,7 @@ public static class InjectBestiarySubmenuRunPatch
 
     private static NBestiaryStatsSubmenu CreateSubmenu(NRunSubmenuStack stack)
     {
+        MainFile.Logger.Info("[SlayTheStats] CreateSubmenu: NRunSubmenuStack first-request, instantiating NBestiaryStatsSubmenu");
         var menu = new NBestiaryStatsSubmenu();
         menu.Visible = false;
         ((Node)stack).AddChild(menu);
@@ -74,10 +76,15 @@ public static class BestiaryButtonPatch
 
     static void Postfix(NCompendiumSubmenu __instance)
     {
+        MainFile.Logger.Info($"[SlayTheStats] NCompendiumSubmenu._Ready fired (BestiaryEnabled={SlayTheStatsConfig.BestiaryEnabled}, mode={SlayTheStatsConfig.EncounterStatsRestartRequired})");
         try
         {
             // User opted out via the mod config — skip injection entirely.
-            if (!SlayTheStatsConfig.BestiaryEnabled) return;
+            if (!SlayTheStatsConfig.BestiaryEnabled)
+            {
+                MainFile.Logger.Info("[SlayTheStats] BestiaryButtonPatch: skipping button injection (BestiaryEnabled=false)");
+                return;
+            }
 
             // Anchor next to the existing bottom-row buttons (Statistics, Run History) rather than
             // the locked game bestiary button at the top.
@@ -177,6 +184,7 @@ public static class BestiaryButtonPatch
                 NClickableControl.SignalName.Released,
                 Callable.From<NButton>(_ =>
                 {
+                    MainFile.Logger.Info("[SlayTheStats] BestiaryButton clicked");
                     // _stack is an NSubmenuStack base reference — could be either
                     // NMainMenuSubmenuStack (out-of-run compendium) or NRunSubmenuStack
                     // (in-combat compendium). Both override PushSubmenuType<T>() and we have
@@ -184,14 +192,16 @@ public static class BestiaryButtonPatch
                     var stackField = AccessTools.Field(typeof(NSubmenu), "_stack");
                     if (stackField?.GetValue(__instance) is NSubmenuStack stack)
                     {
+                        MainFile.Logger.Info($"[SlayTheStats] BestiaryButton: pushing submenu on {stack.GetType().Name}");
                         try
                         {
                             var submenu = stack.PushSubmenuType<NBestiaryStatsSubmenu>();
+                            MainFile.Logger.Info($"[SlayTheStats] BestiaryButton: push returned submenu={(submenu != null ? "ok" : "null")}");
                             submenu.Refresh();
                         }
                         catch (Exception e)
                         {
-                            MainFile.Logger.Warn($"[SlayTheStats] PushSubmenuType failed: {e.Message}");
+                            MainFile.Logger.Warn($"[SlayTheStats] PushSubmenuType failed: {e}");
                         }
                     }
                     else
@@ -200,6 +210,7 @@ public static class BestiaryButtonPatch
                     }
                 }),
                 0u);
+            MainFile.Logger.Info("[SlayTheStats] BestiaryButtonPatch: button injected into compendium");
         }
         catch (Exception e)
         {
@@ -230,6 +241,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// describing every stat column. Lives inline in the title row of the right-hand
     /// stats panel.</summary>
     private Control? _legendButton;
+    private Control? _tutorialButton;
     /// <summary>The active column-legend popup, if any. Tracked so the toggle handler
     /// can find and free it on second click.</summary>
     private CanvasLayer? _legendPopup;
@@ -392,6 +404,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public override void _Ready()
     {
+        MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu._Ready entered");
         // Each step is isolated: if BuildUI throws, we still want the back
         // button added so the user isn't stranded on a broken page. The back
         // button must go AFTER BuildUI so it's drawn on top of the full-rect
@@ -400,6 +413,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         try
         {
             BuildUI();
+            MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu.BuildUI completed");
         }
         catch (Exception e)
         {
@@ -411,6 +425,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var backButton = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/back_button")).Instantiate<NBackButton>();
             backButton.Name = "BackButton";
             AddChild(backButton);
+            MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu: back button added");
         }
         catch (Exception e)
         {
@@ -420,6 +435,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         try
         {
             ConnectSignals();
+            MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu.ConnectSignals completed");
         }
         catch (Exception e)
         {
@@ -429,6 +445,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public override void OnSubmenuOpened()
     {
+        MainFile.Logger.Info($"[SlayTheStats] NBestiaryStatsSubmenu.OnSubmenuOpened (built={_built}, encList={(_encounterList != null)})");
         base.OnSubmenuOpened();
         // First-time visitors get a one-shot explainer overlay covering the controls and
         // stat columns. Persisted via SlayTheStatsConfig.BestiaryTutorialSeen.
@@ -438,8 +455,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private void BuildUI()
     {
-        if (_built) return;
+        if (_built)
+        {
+            MainFile.Logger.Info("[SlayTheStats] BuildUI: already built, skipping");
+            return;
+        }
         _built = true;
+        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: start");
 
         // Outer margin: extra left padding so the back button (in the slightly-below-middle-left
         // position) doesn't overlap the encounter list
@@ -473,16 +495,26 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         };
         margin.AddChild(outerVbox);
 
-        // ── Title ──
+        // ── Title + tutorial-reopen button ──
+        var bestiaryTitleRow = new HBoxContainer();
+        bestiaryTitleRow.AddThemeConstantOverride("separation", 10);
+        outerVbox.AddChild(bestiaryTitleRow);
+
         var title = new Label();
         title.Text = "SlayTheStats Bestiary";
         title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
-        outerVbox.AddChild(title);
+        bestiaryTitleRow.AddChild(title);
+
+        // "?" next to the title replays the tutorial — forces it to show even
+        // after BestiaryTutorialSeen=true. Same chrome as _legendButton.
+        _tutorialButton = BuildHelpButton("Show the bestiary tutorial", () => MaybeShowBestiaryTutorial(force: true));
+        bestiaryTitleRow.AddChild(_tutorialButton);
 
         outerVbox.AddChild(new HSeparator());
+        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: title added");
 
         // ── Main content: left list | separator | right detail ──
         // contentSplit is created early (right after the title HSep) so the VSeparator
@@ -677,6 +709,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_headerMarginContainer != null)
             _headerMarginContainer.AddThemeConstantOverride("margin_right", (int)(ScrollbarWidth + ScrollbarGap));
 
+        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: left section (encounter list + scrollbar) built");
         contentSplit.AddChild(new VSeparator());
 
         // Right panel: stats (fixed height) + horizontal separator (fixed) + render area (fills rest).
@@ -737,7 +770,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         titleRow.AddChild(_legendButton);
 
         // Stats label — used for focused-character and category views (non-scrollable).
-        TooltipHelper.TryLoadModFonts();
         _statsLabel = CreateStatsRichTextLabel();
         _statsLabel.Text = $"[color=#686868]Hover an encounter to see stats[/color]";
         statsVbox.AddChild(_statsLabel);
@@ -842,6 +874,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsFooterLabel.Visible = false;
         statsVbox.AddChild(_statsFooterLabel);
 
+        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: right panel (stats table + all-chars scroll) built");
         rightPanel.AddChild(new HSeparator());
 
         // Clicks on the right-hand stats / preview area also release a locked row
@@ -875,6 +908,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         renderStyle.SetCornerRadiusAll(4);
         ((PanelContainer)_renderArea).AddThemeStyleboxOverride("panel", renderStyle);
         rightPanel.AddChild(_renderArea);
+        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: render area added");
 
         // ── Filter pane ──
         // Built after the rest of the UI so it sits last in the child list and draws on
@@ -882,6 +916,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // (the bestiary's "Score by:" row covers per-character scoring) and no group-card-
         // upgrades toggle (encounter stats are unaffected by card aggregation).
         BuildAndAttachFilterPane();
+        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: filter pane attached (end of BuildUI)");
     }
 
     private void BuildAndAttachFilterPane()
@@ -1081,35 +1116,64 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }).CallDeferred();
     }
 
-    // ───────────────────────── Tutorial overlay ─────────────────────────
+    // ───────────────────────── Tutorial overlay (multi-phase) ─────────────────────────
+    //
+    // 4 phases: intro (centered, no arrow) → filters (below filter row, arrow up)
+    // → characters (left of char selectors, arrow right) → filter pane (right of
+    // filter button, arrow left). Each phase applies a demo state to the bestiary
+    // (biome/sort/rank/char) so the live table mirrors what the text describes.
+    // Dismissal restores the user's pre-tutorial state and persists
+    // BestiaryTutorialSeen=true so it doesn't replay automatically.
 
-    /// <summary>The active tutorial CanvasLayer, if any. Tracked so the dismiss handler
-    /// can find and free it on click.</summary>
+    private enum BestiaryTutorialPhase { Intro, Filters, Characters, FilterPane }
+
     private CanvasLayer? _bestiaryTutorialLayer;
+    private Control?     _bestiaryTutorialPopup;
+    private Control?     _bestiaryTutorialArrow;
+    private BestiaryTutorialPhase _bestiaryTutorialPhase;
 
-    /// <summary>
-    /// Builds and shows a one-shot explainer overlay covering the bestiary controls and
-    /// stat columns. Persists BestiaryTutorialSeen on dismiss so it never appears again
-    /// unless the user toggles the setting back off in mod config.
-    /// </summary>
-    private void MaybeShowBestiaryTutorial()
+    // Snapshot of the user's pre-tutorial view state so we can restore on dismiss.
+    // Prevents the tutorial from leaving the bestiary in a demo state the user
+    // didn't choose.
+    private bool              _tutorialStateSnapshotted;
+    private string?           _tutorialRestoreBiome;
+    private EncounterSortMode _tutorialRestoreSortMode;
+    private bool              _tutorialRestoreSortDescending;
+    private bool              _tutorialRestoreSortBySignificance;
+    private string?           _tutorialRestoreSortCharacter;
+    private string?           _tutorialRestoreLockedEncounterId;
+
+    /// <summary>Show the tutorial. Auto-fires on first open; force=true replays
+    /// via the "?" button next to the title even after BestiaryTutorialSeen=true.</summary>
+    private void MaybeShowBestiaryTutorial(bool force = false)
     {
         if (_bestiaryTutorialLayer != null && GodotObject.IsInstanceValid(_bestiaryTutorialLayer))
             return;
+        if (!force && SlayTheStatsConfig.BestiaryTutorialSeen)
+            return;
 
-        // Defer one frame so the bestiary's own layout has settled before we draw the
-        // dimmer over it (otherwise the panel can render before the encounter list and
-        // briefly show through).
+        // Snapshot state once per tutorial run so dismiss restores the user's view.
+        _tutorialRestoreBiome              = _selectedBiome;
+        _tutorialRestoreSortMode           = _sortMode;
+        _tutorialRestoreSortDescending     = _sortDescending;
+        _tutorialRestoreSortBySignificance = _sortBySignificance;
+        _tutorialRestoreSortCharacter      = _sortCharacter;
+        _tutorialRestoreLockedEncounterId  = _lockedEncounterId;
+        _tutorialStateSnapshotted          = true;
+
+        // Defer one frame so the bestiary's own layout has settled before we read
+        // target element rects for arrow placement.
         var tree = (SceneTree)Engine.GetMainLoop();
         tree.ProcessFrame += DeferredBuild;
         void DeferredBuild()
         {
             tree.ProcessFrame -= DeferredBuild;
-            BuildBestiaryTutorialPanel();
+            BuildTutorialLayer();
+            StartTutorialPhase(BestiaryTutorialPhase.Intro);
         }
     }
 
-    private void BuildBestiaryTutorialPanel()
+    private void BuildTutorialLayer()
     {
         var layer = new CanvasLayer
         {
@@ -1117,109 +1181,446 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             Layer = 100,
         };
 
-        // Full-screen click-catcher so any click dismisses.
+        // Light dimmer — low alpha so the bestiary stays visible behind the tutorial
+        // (arrows need to point at visible targets). MouseFilter=Stop catches clicks
+        // to advance phases and blocks accidental bestiary interaction.
         var dimmer = new ColorRect
         {
-            Color       = new Color(0, 0, 0, 0.55f),
+            Color       = new Color(0, 0, 0, 0.25f),
             MouseFilter = MouseFilterEnum.Stop,
         };
         dimmer.AnchorRight  = 1f;
         dimmer.AnchorBottom = 1f;
+        dimmer.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed)
+                AdvanceTutorial();
+        };
         layer.AddChild(dimmer);
 
-        // Centered panel — stone-textured to match the rest of the SlayTheStats UI.
+        ((SceneTree)Engine.GetMainLoop())?.Root.AddChild(layer);
+        _bestiaryTutorialLayer = layer;
+    }
+
+    private void AdvanceTutorial()
+    {
+        var next = _bestiaryTutorialPhase + 1;
+        if (!Enum.IsDefined(typeof(BestiaryTutorialPhase), next))
+        {
+            DismissBestiaryTutorial();
+            return;
+        }
+        StartTutorialPhase(next);
+    }
+
+    private void StartTutorialPhase(BestiaryTutorialPhase phase)
+    {
+        _bestiaryTutorialPhase = phase;
+        ApplyTutorialPhaseState(phase);
+
+        if (_bestiaryTutorialPopup != null && GodotObject.IsInstanceValid(_bestiaryTutorialPopup))
+            _bestiaryTutorialPopup.QueueFree();
+        if (_bestiaryTutorialArrow != null && GodotObject.IsInstanceValid(_bestiaryTutorialArrow))
+            _bestiaryTutorialArrow.QueueFree();
+        _bestiaryTutorialPopup = null;
+        _bestiaryTutorialArrow = null;
+
+        var spec = GetTutorialPhaseSpec(phase);
+        var popup = BuildTutorialPopup(spec);
+        _bestiaryTutorialLayer!.AddChild(popup);
+        _bestiaryTutorialPopup = popup;
+
+        if (spec.Target != null && spec.ArrowGlyph != null)
+        {
+            var arrow = BuildTutorialArrow(spec.ArrowGlyph);
+            _bestiaryTutorialLayer.AddChild(arrow);
+            _bestiaryTutorialArrow = arrow;
+        }
+
+        // Defer positioning so the popup has measured its content size and the
+        // bestiary's target elements have reflowed after the state change.
+        var tree = (SceneTree)Engine.GetMainLoop();
+        tree.ProcessFrame += DeferredPosition;
+        void DeferredPosition()
+        {
+            tree.ProcessFrame -= DeferredPosition;
+            PositionTutorialPopup(popup, _bestiaryTutorialArrow, spec);
+        }
+
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.Logger.Info($"[SlayTheStats] Tutorial phase: {phase}");
+    }
+
+    private readonly struct TutorialPhaseSpec
+    {
+        public readonly string Title;
+        public readonly string Body;           // BBCode — supports [img], [color], [b]
+        // Optional inline-"?" row rendered below Body: Label(HelpPrefix) + live
+        // ?-button chrome + Label(HelpSuffix). When both are null the row is
+        // omitted. Lets the tutorial reference the button visually without
+        // just typing a plain "?" character.
+        public readonly string? HelpPrefix;
+        public readonly string? HelpSuffix;
+        public readonly string Hint;
+        public readonly Control? Target;
+        public readonly string? ArrowGlyph;    // ▲ ▼ ◀ ▶ or null for no arrow
+        public readonly TutorialAnchor Anchor; // which side of Target the popup sits on
+        public TutorialPhaseSpec(string title, string body, string? helpPrefix, string? helpSuffix, string hint, Control? target, string? arrowGlyph, TutorialAnchor anchor)
+        {
+            Title = title; Body = body;
+            HelpPrefix = helpPrefix; HelpSuffix = helpSuffix;
+            Hint = hint; Target = target; ArrowGlyph = arrowGlyph; Anchor = anchor;
+        }
+    }
+
+    private enum TutorialAnchor { Center, Below, LeftOf, RightOf }
+
+    private TutorialPhaseSpec GetTutorialPhaseSpec(BestiaryTutorialPhase phase)
+    {
+        // 18px so the inline image sits inside the 20pt line's cap height —
+        // a taller icon inflates RichTextLabel's per-line height measurement and
+        // shows up as extra space at the bottom of the popup.
+        var prismaticIcon = EncounterTooltipHelper.AllCharsIcon(18).TrimEnd();
+        if (string.IsNullOrEmpty(prismaticIcon))
+            prismaticIcon = "[b][color=#efc851]Prismatic Gem[/color][/b]";
+
+        return phase switch
+        {
+            BestiaryTutorialPhase.Intro => new TutorialPhaseSpec(
+                title:      "Welcome to SlayTheStats Bestiary!",
+                body:       "Here you can see stats for all the encounters in the game. You can disable the Bestiary in the Mod Configuration settings.",
+                helpPrefix: null, helpSuffix: null,
+                hint:       "(click to continue)",
+                target:     null, arrowGlyph: null, anchor: TutorialAnchor.Center),
+
+            BestiaryTutorialPhase.Filters => new TutorialPhaseSpec(
+                title:      "Biome filters",
+                body:       "Change biome/act and sorting here. Click an encounter below to see its stats, or click a category to see the whole pool's stats, such as [b][color=#e84ad5]Elite[/color][/b].",
+                helpPrefix: null, helpSuffix: null,
+                hint:       "(click to continue)",
+                target:     _biomeTabRow, arrowGlyph: "\u25B2", anchor: TutorialAnchor.Below),
+
+            BestiaryTutorialPhase.Characters => new TutorialPhaseSpec(
+                title:      "Stats tables",
+                body:       "Select character here or select " + prismaticIcon + " to see a table comparing all characters.",
+                helpPrefix: "Click",
+                helpSuffix: "for details on what the columns mean.",
+                hint:       "(click to continue)",
+                target:     _sortCharRow, arrowGlyph: "\u25B6", anchor: TutorialAnchor.LeftOf),
+
+            BestiaryTutorialPhase.FilterPane => new TutorialPhaseSpec(
+                title:      "Run filters",
+                body:       "Click here to filter by ascension, version, etc. Save defaults to affect in-run encounter stats.",
+                helpPrefix: "Click the",
+                helpSuffix: "at the top of the page to replay this tutorial.",
+                hint:       "(click to finish)",
+                target:     _filterButton, arrowGlyph: "\u25C0", anchor: TutorialAnchor.RightOf),
+
+            _ => default,
+        };
+    }
+
+    private void ApplyTutorialPhaseState(BestiaryTutorialPhase phase)
+    {
+        // Demo starting state for all phases: Overgrowth biome (fall back to
+        // default if not available), Dmg sorted descending, ranked by
+        // Significance, Prismatic Gem (Overview) selected.
+        string? overgrowth = GetBiomes().FirstOrDefault(b => b != null && b.EndsWith("OVERGROWTH"));
+        string? demoBiome  = overgrowth ?? GetDefaultBiome();
+
+        _selectedBiome       = demoBiome;
+        _sortMode            = EncounterSortMode.MedianDamage;
+        _sortDescending      = true;
+        _sortBySignificance  = true;
+        _sortCharacter       = null;  // stay on Prismatic Gem for the whole tutorial
+
+        // Phase 3+ highlight a specific encounter so the stats table reflects
+        // it live. Phase 1/2 don't need a highlight — the arrows point at UI
+        // elements, not encounters.
+        _lockedEncounterId = phase is BestiaryTutorialPhase.Characters or BestiaryTutorialPhase.FilterPane
+            ? PickDemoEncounter()
+            : null;
+
+        RefreshEncounterList();
+
+        // Sync hover state AFTER RefreshEncounterList (which clears
+        // `_hoveredEncounterId = null` near the top of its body). The deferred
+        // `ScheduleMonsterPreviewRender` queued by the refresh fires on the next
+        // frame; its debounce callback gates on `_hoveredEncounterId == enc`, so
+        // the assignment has to happen *after* the refresh, not before.
+        _hoveredEncounterId = _lockedEncounterId;
+    }
+
+    /// <summary>Picks an encounter to highlight for phases 3/4. Prefers
+    /// ENCOUNTER.BYRDONIS_ELITE (a visually distinctive Overgrowth elite);
+    /// falls back to the first Overgrowth encounter present in the meta db;
+    /// finally null if nothing matches.</summary>
+    private static string? PickDemoEncounter()
+    {
+        const string preferred = "ENCOUNTER.BYRDONIS_ELITE";
+        if (MainFile.Db.EncounterMeta.ContainsKey(preferred)) return preferred;
+        foreach (var (id, meta) in MainFile.Db.EncounterMeta)
+            if (meta.Biome != null && meta.Biome.EndsWith("OVERGROWTH"))
+                return id;
+        return null;
+    }
+
+    private Control BuildTutorialPopup(TutorialPhaseSpec spec)
+    {
+        // Panel uses BuildPanelStyle's built-in ContentMargin (22/0/16/12) for
+        // breathing room — same as card/relic tooltips. No outer MarginContainer.
         var panel = new PanelContainer { Name = "SlayTheStatsBestiaryTutorialPanel" };
         panel.AddThemeStyleboxOverride("panel", TooltipHelper.BuildPanelStyle());
         panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
-        panel.MouseFilter  = MouseFilterEnum.Ignore;
-        panel.AnchorLeft   = 0.5f;
-        panel.AnchorRight  = 0.5f;
-        panel.AnchorTop    = 0.5f;
-        panel.AnchorBottom = 0.5f;
-        panel.GrowHorizontal = GrowDirection.Both;
-        panel.GrowVertical   = GrowDirection.Both;
-
-        var margin = new MarginContainer();
-        margin.AddThemeConstantOverride("margin_left",   24);
-        margin.AddThemeConstantOverride("margin_right",  24);
-        margin.AddThemeConstantOverride("margin_top",    20);
-        margin.AddThemeConstantOverride("margin_bottom", 20);
-        panel.AddChild(margin);
+        // Start hidden. PositionTutorialPopup flips Visible=true after the deferred
+        // layout settles — without this the popup renders at (0,0) for one frame
+        // on the first phase, visibly flashing in the top-left before centering.
+        panel.Visible = false;
+        // Stop consumes clicks locally so the panel's own GuiInput fires; without
+        // this the inner labels (default MouseFilter=Stop) eat the click before
+        // anyone sees it. Child controls are set Ignore below.
+        panel.MouseFilter = MouseFilterEnum.Stop;
+        panel.GuiInput += (InputEvent ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed)
+                AdvanceTutorial();
+        };
+        // 700px keeps the longest help row ("Click the [?] at the top of the
+        // page to replay this tutorial.") on a single line. A wrapping suffix
+        // Label can't align its second line under "Click the" — it wraps within
+        // its own bounding box after the glyph — so the simplest fix is to
+        // prevent the wrap in the first place.
+        panel.CustomMinimumSize = new Vector2(700, 0);
 
         var vbox = new VBoxContainer();
-        vbox.AddThemeConstantOverride("separation", 10);
-        margin.AddChild(vbox);
+        vbox.AddThemeConstantOverride("separation", 8);
+        vbox.MouseFilter = MouseFilterEnum.Ignore;
+        panel.AddChild(vbox);
 
-        var title = new Label { Text = "Welcome to the SlayTheStats Bestiary!" };
-        title.AddThemeColorOverride("font_color", new Color(0.95f, 0.78f, 0.32f, 1f));
-        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
+        var title = new Label { Text = spec.Title };
+        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSecondary);
+        title.MouseFilter = MouseFilterEnum.Ignore;
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
         vbox.AddChild(title);
 
-        // Body — RichTextLabel so we can highlight key terms in gold and inline
-        // the Prismatic Gem icon.
-        var body = new RichTextLabel
+        var bodyLabel = new RichTextLabel
         {
             BbcodeEnabled = true,
             FitContent    = true,
             ScrollActive  = false,
             AutowrapMode  = TextServer.AutowrapMode.WordSmart,
             MouseFilter   = MouseFilterEnum.Ignore,
-            CustomMinimumSize = new Vector2(760, 0),
+            CustomMinimumSize = new Vector2(660, 0),
         };
-        body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
-        body.AddThemeFontSizeOverride("normal_font_size", 18);
-        body.AddThemeFontSizeOverride("bold_font_size",   18);
-        ApplyKreonFont(body);
+        bodyLabel.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+        bodyLabel.AddThemeFontSizeOverride("normal_font_size", 20);
+        bodyLabel.AddThemeFontSizeOverride("bold_font_size",   20);
+        ApplyKreonFont(bodyLabel);
+        bodyLabel.Text = spec.Body;
+        // Force a remeasurement so the autowrap + inline-image path doesn't
+        // over-report height (visible as empty space below the last element).
+        bodyLabel.ResetSize();
+        vbox.AddChild(bodyLabel);
 
-        // Inline Prismatic Gem icon for the "select the <Prismatic Gem>" reference.
-        // Fall back to a plain bold label if the icon path doesn't resolve.
-        var prismaticIcon = EncounterTooltipHelper.AllCharsIcon(22).TrimEnd();
-        if (string.IsNullOrEmpty(prismaticIcon))
-            prismaticIcon = "[b][color=#efc851]Prismatic Gem[/color][/b]";
-
-        body.Text = string.Join('\n', new[]
+        // Optional second row with the live "?" button chrome inline.
+        // Row = [prefix Label][? glyph][suffix Label]. Panel is sized to fit the
+        // longest help row on a single line, so no autowrap is needed on the
+        // suffix — autowrap would leave wrapped lines indented under "the glyph
+        // column" instead of the panel's left edge (Label lines wrap within the
+        // Label's bounding box, not the panel's).
+        if (spec.HelpPrefix != null && spec.HelpSuffix != null)
         {
-            "Here you can see stats for all the encounters in the game.",
-            "You can disable the bestiary in the Mod Configuration settings (restart required).",
-            "",
-            "[b][color=#efc851]Left side[/color][/b]: [b][color=#efc851]Biome[/color][/b] / [b][color=#efc851]Act[/color][/b] selectors to filter encounters on top and the list of encounters on the bottom. Change [b][color=#efc851]Sort by[/color][/b] to sort by different metrics like Runs and Damage.",
-            "",
-            "[b][color=#efc851]Right side[/color][/b]: [b][color=#efc851]Stats table[/color][/b]. Change the [b][color=#efc851]Character selectors[/color][/b] on top for different tables. To compare characters to each other, select the " + prismaticIcon + ". To compare a character with its average performance, select the character icon.",
-            "",
-            "[b][color=#efc851]Bottom left[/color][/b]: A filter pane for ascensions, profiles, and more. You can disable the monster preview there. Click [b][color=#efc851]Save Defaults[/color][/b] to affect encounter stats seen in run.",
-            "",
-            "[b][color=#efc851]Table metrics[/color][/b]:",
-            "  • [b]Dmg[/b] — median damage taken",
-            "  • [b]Mid 50%[/b] — range of the middle 50% of damage for this encounter. A.k.a the IQR, shown as p25-p75.",
-            "  • [b]Spread[/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight.",
-            "  • [b]Turns[/b] — average turns.",
-            "  • [b]Pots[/b] — average potions.",
-            "  • [b]Deaths[/b] — runs ended by this encounter / total runs.",
-        });
-        vbox.AddChild(body);
+            var helpRow = new HBoxContainer();
+            helpRow.AddThemeConstantOverride("separation", 6);
+            helpRow.MouseFilter = MouseFilterEnum.Ignore;
 
-        var hint = new Label { Text = "(click anywhere to dismiss)" };
-        hint.AddThemeColorOverride("font_color", new Color(0.75f, 0.72f, 0.65f, 1f));
-        hint.AddThemeFontSizeOverride("font_size", 13);
-        ApplyKreonFont(hint);
-        vbox.AddChild(hint);
+            var prefix = new Label { Text = spec.HelpPrefix };
+            prefix.AddThemeColorOverride("font_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+            prefix.AddThemeFontSizeOverride("font_size", 20);
+            prefix.MouseFilter = MouseFilterEnum.Ignore;
+            prefix.VerticalAlignment = VerticalAlignment.Center;
+            ApplyKreonFont(prefix);
+            helpRow.AddChild(prefix);
 
-        layer.AddChild(panel);
+            helpRow.AddChild(BuildHelpButtonGlyph());
 
-        var tree = (SceneTree)Engine.GetMainLoop();
-        tree?.Root.AddChild(layer);
-        _bestiaryTutorialLayer = layer;
+            var suffix = new Label { Text = spec.HelpSuffix };
+            suffix.AddThemeColorOverride("font_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+            suffix.AddThemeFontSizeOverride("font_size", 20);
+            suffix.MouseFilter = MouseFilterEnum.Ignore;
+            suffix.VerticalAlignment = VerticalAlignment.Center;
+            ApplyKreonFont(suffix);
+            helpRow.AddChild(suffix);
 
-        dimmer.GuiInput += (InputEvent ev) =>
+            vbox.AddChild(helpRow);
+        }
+
+        var hintLabel = new Label { Text = spec.Hint };
+        hintLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.72f, 0.65f, 1f));
+        hintLabel.AddThemeFontSizeOverride("font_size", 14);
+        hintLabel.MouseFilter = MouseFilterEnum.Ignore;
+        ApplyKreonFont(hintLabel);
+        vbox.AddChild(hintLabel);
+
+        return panel;
+    }
+
+    /// <summary>Non-interactive copy of <see cref="BuildHelpButton"/>'s chrome —
+    /// same PanelContainer + styled border + centered "?" label — for use inline
+    /// in tutorial text where we want the button to be visually recognizable.</summary>
+    private Control BuildHelpButtonGlyph()
+    {
+        var normal = new StyleBoxFlat();
+        normal.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);
+        normal.BorderColor = new Color(0.40f, 0.45f, 0.55f, 0.85f);
+        normal.SetBorderWidthAll(1);
+        normal.SetCornerRadiusAll(11);
+        normal.ContentMarginLeft = normal.ContentMarginRight = 0;
+        normal.ContentMarginTop = normal.ContentMarginBottom = 0;
+
+        var panel = new PanelContainer
         {
-            if (ev is InputEventMouseButton mb && mb.Pressed)
-                DismissBestiaryTutorial();
+            CustomMinimumSize = new Vector2(22, 22),
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
+            MouseFilter = MouseFilterEnum.Ignore,
         };
+        panel.AddThemeStyleboxOverride("panel", normal);
 
-        if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info("[SlayTheStats] Bestiary tutorial shown");
+        var label = new Label
+        {
+            Text = "?",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        label.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
+        label.AddThemeFontSizeOverride("font_size", 14);
+        ApplyKreonFont(label, bold: true);
+        ApplyTooltipTextShadow(label);
+        panel.AddChild(label);
+        return panel;
+    }
+
+    private Control BuildTutorialArrow(string glyph)
+    {
+        // Matches CompendiumFilterPatch tutorial arrow: filled-triangle glyph,
+        // gold, Kreon bold at 48pt. The pulse tween is attached in
+        // PositionTutorialPopup once the arrow is in its final spot. Start
+        // hidden so the arrow doesn't flash at (0,0) before positioning.
+        var label = new Label
+        {
+            Name = "SlayTheStatsBestiaryTutorialArrow",
+            Text = glyph,
+            MouseFilter = MouseFilterEnum.Ignore,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visible = false,
+        };
+        label.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        label.AddThemeFontSizeOverride("font_size", 48);
+        ApplyKreonFont(label, bold: true);
+        ApplyTextShadow(label);
+        return label;
+    }
+
+    private void PositionTutorialPopup(Control popup, Control? arrow, TutorialPhaseSpec spec)
+    {
+        if (!GodotObject.IsInstanceValid(popup)) return;
+        popup.ResetSize();
+
+        var viewport = popup.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        var popupSize = popup.Size;
+
+        Vector2 popupPos;
+        Vector2 arrowPos = default;
+        var arrowSize = new Vector2(60, 60);
+
+        const float Gap = 28f;
+
+        if (spec.Target != null && GodotObject.IsInstanceValid(spec.Target))
+        {
+            var targetRect = spec.Target.GetGlobalRect();
+            var targetCenter = targetRect.Position + targetRect.Size * 0.5f;
+
+            switch (spec.Anchor)
+            {
+                case TutorialAnchor.Below:
+                    popupPos = new Vector2(
+                        Mathf.Clamp(targetCenter.X - popupSize.X * 0.5f, 16f, viewport.X - popupSize.X - 16f),
+                        Mathf.Clamp(targetRect.Position.Y + targetRect.Size.Y + Gap + arrowSize.Y, 16f, viewport.Y - popupSize.Y - 16f));
+                    arrowPos = new Vector2(
+                        targetCenter.X - arrowSize.X * 0.5f,
+                        targetRect.Position.Y + targetRect.Size.Y + Gap * 0.2f);
+                    break;
+
+                case TutorialAnchor.LeftOf:
+                    popupPos = new Vector2(
+                        Mathf.Clamp(targetRect.Position.X - popupSize.X - Gap - arrowSize.X, 16f, viewport.X - popupSize.X - 16f),
+                        Mathf.Clamp(targetCenter.Y - popupSize.Y * 0.5f, 16f, viewport.Y - popupSize.Y - 16f));
+                    arrowPos = new Vector2(
+                        targetRect.Position.X - arrowSize.X - Gap * 0.2f,
+                        targetCenter.Y - arrowSize.Y * 0.5f);
+                    break;
+
+                case TutorialAnchor.RightOf:
+                    popupPos = new Vector2(
+                        Mathf.Clamp(targetRect.Position.X + targetRect.Size.X + Gap + arrowSize.X, 16f, viewport.X - popupSize.X - 16f),
+                        Mathf.Clamp(targetCenter.Y - popupSize.Y * 0.5f, 16f, viewport.Y - popupSize.Y - 16f));
+                    arrowPos = new Vector2(
+                        targetRect.Position.X + targetRect.Size.X + Gap * 0.2f,
+                        targetCenter.Y - arrowSize.Y * 0.5f);
+                    break;
+
+                default:
+                    popupPos = (viewport - popupSize) * 0.5f;
+                    break;
+            }
+        }
+        else
+        {
+            popupPos = (viewport - popupSize) * 0.5f;
+        }
+
+        popup.AnchorLeft = popup.AnchorRight = popup.AnchorTop = popup.AnchorBottom = 0f;
+        popup.GlobalPosition = popupPos;
+
+        if (arrow != null && GodotObject.IsInstanceValid(arrow))
+        {
+            arrow.CustomMinimumSize = arrowSize;
+            arrow.Size = arrowSize;
+            arrow.AnchorLeft = arrow.AnchorRight = arrow.AnchorTop = arrow.AnchorBottom = 0f;
+            arrow.GlobalPosition = arrowPos;
+
+            // Looping pulse tween in the arrow's pointing direction — same
+            // Sine-InOut 0.45s swing as the relic/card tutorial arrows. Tween
+            // is killed automatically when the arrow is freed on phase advance.
+            Vector2 delta = spec.Anchor switch
+            {
+                TutorialAnchor.Below   => new Vector2(0f, -10f),  // ▲ wiggles up
+                TutorialAnchor.LeftOf  => new Vector2(10f, 0f),   // ▶ wiggles right
+                TutorialAnchor.RightOf => new Vector2(-10f, 0f),  // ◀ wiggles left
+                _                      => Vector2.Zero,
+            };
+            if (delta != Vector2.Zero)
+            {
+                var basePos = arrow.Position;
+                var tween = arrow.CreateTween().SetLoops();
+                tween.TweenProperty(arrow, "position", basePos + delta, 0.45)
+                     .SetTrans(Tween.TransitionType.Sine)
+                     .SetEase(Tween.EaseType.InOut);
+                tween.TweenProperty(arrow, "position", basePos, 0.45)
+                     .SetTrans(Tween.TransitionType.Sine)
+                     .SetEase(Tween.EaseType.InOut);
+            }
+
+            arrow.Visible = true;
+        }
+
+        // Flip the popup visible now that it's anchored in the right spot —
+        // avoids the one-frame top-left flash that was visible before.
+        popup.Visible = true;
     }
 
     /// <summary>Creates a 1px warm-earth separator style for the stats scroll area borders.</summary>
@@ -1434,6 +1835,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_bestiaryTutorialLayer != null && GodotObject.IsInstanceValid(_bestiaryTutorialLayer))
             _bestiaryTutorialLayer.QueueFree();
         _bestiaryTutorialLayer = null;
+        _bestiaryTutorialPopup = null;
+        _bestiaryTutorialArrow = null;
+
+        // Restore the user's pre-tutorial view so their previous selections
+        // (biome / sort / ranking / character / locked encounter) aren't
+        // clobbered by the demo.
+        if (_tutorialStateSnapshotted)
+        {
+            _selectedBiome       = _tutorialRestoreBiome;
+            _sortMode            = _tutorialRestoreSortMode;
+            _sortDescending      = _tutorialRestoreSortDescending;
+            _sortBySignificance  = _tutorialRestoreSortBySignificance;
+            _sortCharacter       = _tutorialRestoreSortCharacter;
+            _lockedEncounterId   = _tutorialRestoreLockedEncounterId;
+            _tutorialStateSnapshotted = false;
+            RefreshEncounterList();
+        }
     }
 
     // ───────────────────────── Public API ─────────────────────────

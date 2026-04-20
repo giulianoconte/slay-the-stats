@@ -17,6 +17,13 @@ internal class SlayTheStatsConfig : SimpleModConfig
     [ConfigHideInUI] public static bool GroupCardUpgrades { get; set; } = true;
 
     /// <summary>
+    /// When true, runs with non-standard game_mode (e.g. multiplayer) are included
+    /// alongside standard runs. When false (default), only game_mode="standard"
+    /// runs are counted — matches every filter builder's historical behaviour.
+    /// </summary>
+    [ConfigHideInUI] public static bool IncludeMultiplayer { get; set; } = false;
+
+    /// <summary>
     /// When true, uses a color-blind-friendly palette for stat coloring.
     /// When false, uses red/green coloring.
     /// </summary>
@@ -190,6 +197,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
     [ConfigHideInUI] public static string DefaultClassFilter { get; set; } = ClassFilterClassSpecific;
     [ConfigHideInUI] public static string DefaultFilterProfile { get; set; } = "";
     [ConfigHideInUI] public static bool DefaultGroupCardUpgrades { get; set; } = true;
+    [ConfigHideInUI] public static bool DefaultIncludeMultiplayer { get; set; } = false;
 
     internal static void SaveDefaults()
     {
@@ -200,6 +208,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         DefaultClassFilter = ClassFilter;
         DefaultFilterProfile = FilterProfile;
         DefaultGroupCardUpgrades = GroupCardUpgrades;
+        DefaultIncludeMultiplayer = IncludeMultiplayer;
     }
 
     internal static void RestoreDefaults()
@@ -211,6 +220,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         ClassFilter = DefaultClassFilter;
         FilterProfile = DefaultFilterProfile;
         GroupCardUpgrades = DefaultGroupCardUpgrades;
+        IncludeMultiplayer = DefaultIncludeMultiplayer;
     }
 
     internal static void ClearAllFilters()
@@ -222,6 +232,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         ClassFilter = "";
         FilterProfile = "";
         GroupCardUpgrades = true;
+        IncludeMultiplayer = false;
     }
 
     internal static bool IsNonDefault(string field) => field switch
@@ -233,6 +244,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         "ClassFilter" => ClassFilter != DefaultClassFilter,
         "FilterProfile" => FilterProfile != DefaultFilterProfile,
         "GroupUpgrades" => GroupCardUpgrades != DefaultGroupCardUpgrades,
+        "IncludeMultiplayer" => IncludeMultiplayer != DefaultIncludeMultiplayer,
         _ => false,
     };
 
@@ -275,7 +287,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// instantly).
     /// </summary>
     public static AggregationFilter BuildSafeFilter() =>
-        BuildSafeFilterCore(AscensionMin, AscensionMax, VersionMin, VersionMax, FilterProfile);
+        BuildSafeFilterCore(AscensionMin, AscensionMax, VersionMin, VersionMax, FilterProfile, IncludeMultiplayer);
 
     /// <summary>
     /// Same as <see cref="BuildSafeFilter"/> but reads from the PERSISTED
@@ -288,11 +300,12 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// the combat tooltips show.
     /// </summary>
     public static AggregationFilter BuildSafeFilterFromDefaults() =>
-        BuildSafeFilterCore(DefaultAscensionMin, DefaultAscensionMax, DefaultVersionMin, DefaultVersionMax, DefaultFilterProfile);
+        BuildSafeFilterCore(DefaultAscensionMin, DefaultAscensionMax, DefaultVersionMin, DefaultVersionMax, DefaultFilterProfile, DefaultIncludeMultiplayer);
 
-    private static AggregationFilter BuildSafeFilterCore(int ascMin, int ascMax, string versionMin, string versionMax, string profile)
+    private static AggregationFilter BuildSafeFilterCore(int ascMin, int ascMax, string versionMin, string versionMax, string profile, bool includeMultiplayer)
     {
         var filter = new AggregationFilter();
+        if (includeMultiplayer) filter.GameMode = null!;
 
         // Stash the raw values verbatim for footer rendering before any
         // sanitisation. FilterDisplayRaw preserves sentinel info that the

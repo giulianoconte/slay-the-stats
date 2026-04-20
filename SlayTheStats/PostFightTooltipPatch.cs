@@ -32,10 +32,15 @@ public static class PostFightTooltipPatch
     private static RichTextLabel? _nameLabel;
     private static RichTextLabel? _tableLabel;
     private static Label? _brandLabel;
-    private static Label? _hintLabel;
     private static NinePatchRect? _shadow;
     private static bool _warnedOnce;
     internal static bool _dismissed;
+    // Tracks how many NOverlayStack-driven overlays (map, deck, pause, etc.)
+    // are currently on top of the reward screen. HideOverlays/ShowOverlays fire
+    // per push/pop, so nested overlays (map → deck → back to map) would
+    // otherwise cause the tooltip to reappear over the map when the deck pops.
+    // Only restore visibility when the counter returns to 0.
+    internal static int _overlayDepth;
 
     static void Postfix(NRewardsScreen __instance)
     {
@@ -210,6 +215,14 @@ public static class PostFightTooltipPatch
         sb.Append(DeltaCell(fight.PotionsUsed - avgPots, highIsBad: true, n));
         sb.Append(PercentileCell(potPct));
 
+        // Runs: total fights fed into this comparison. No delta / pctile —
+        // this is context, not a per-fight metric. Dulled + blank trailing
+        // cells so the row reads as reference rather than a comparison line.
+        sb.Append(DimLabelCell("Runs"));
+        sb.Append(DimValueCell($"{combined.Fought}"));
+        sb.Append(EmptyCell());
+        sb.Append(EmptyCell());
+
         sb.Append("[/table]");
 
         // Footer
@@ -217,13 +230,14 @@ public static class PostFightTooltipPatch
             ? CardHoverShowPatch.GetCharacterDisplay(character)
             : "All chars";
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
-        sb.Append(TooltipHelper.FormatBaselineLine($"Based on {combined.Fought} fights"));
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
 
-    private const string CellPad = "padding=6,6,2,2 expand=1";
+    // padding=L,T,R,B. Vertical at 0 so row height is just the font line-height;
+    // anything above 0 compounds across 5 rows into visible empty bands.
+    private const string CellPad = "padding=6,0,2,0 expand=1";
 
     private static string HeaderCell(string text) =>
         $"[cell {CellPad}][right][color={ThemeStyle.HeaderGrey}]{text}[/color][/right][/cell]";
@@ -233,6 +247,18 @@ public static class PostFightTooltipPatch
 
     private static string ValueCell(string text) =>
         $"[cell {CellPad}][right][color={TooltipHelper.NeutralShade}]{text}[/color][/right][/cell]";
+
+    // Dulled cells for context rows (e.g. Runs) that shouldn't draw the eye
+    // the same way as per-metric comparison rows. Matches the bestiary's
+    // dimmer-grey convention for baseline / reference rows.
+    private static string DimLabelCell(string text) =>
+        $"[cell {CellPad}][color={ThemeStyle.FooterGrey}]{text}[/color][/cell]";
+
+    private static string DimValueCell(string text) =>
+        $"[cell {CellPad}][right][color={ThemeStyle.FooterGrey}]{text}[/color][/right][/cell]";
+
+    private static string EmptyCell() =>
+        $"[cell {CellPad}][/cell]";
 
     private static string PercentileCell(double? pctile)
     {
@@ -290,15 +316,20 @@ public static class PostFightTooltipPatch
         _tableLabel.ResetSize();
         _panel.ResetSize();
 
+        // Start transparent; PositionTopRight tweens alpha + x into place so the
+        // panel fades and slides in from the right (~0.2s).
         _panel.Visible = true;
-        _panel.Modulate = Colors.White;
+        _panel.Modulate = new Color(1f, 1f, 1f, 0f);
         if (_shadow != null)
         {
             _shadow.Visible = true;
-            _shadow.Modulate = new Color(0f, 0f, 0f, 0.25098f);
+            _shadow.Modulate = new Color(0f, 0f, 0f, 0f);
         }
 
         _dismissed = false;
+        // Reset overlay depth to a clean baseline each time the tooltip is shown.
+        // Any stale counter from a previous fight shouldn't influence show/hide here.
+        _overlayDepth = 0;
 
         // Auto-hide when the rewards screen leaves the tree (player moves to next floor)
         rewardsScreen.TreeExiting += Dismiss;
@@ -314,15 +345,35 @@ public static class PostFightTooltipPatch
         var viewportSize = _panel.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
         var panelSize = _panel.Size;
 
-        float x = viewportSize.X - panelSize.X - RightMarginPx;
-        float y = (viewportSize.Y - panelSize.Y) * 0.5f;
+        float targetX = viewportSize.X - panelSize.X - RightMarginPx;
+        float targetY = (viewportSize.Y - panelSize.Y) * 0.5f;
 
-        _panel.GlobalPosition = new Vector2(x, y);
+        const float SlideOffsetPx = 40f;
+        const float AnimDuration  = 0.4f;
+        const float ShadowAlpha   = 0.25098f;
+
+        // Snap to the slid-out, transparent starting pose, then tween in.
+        _panel.GlobalPosition = new Vector2(targetX + SlideOffsetPx, targetY);
 
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow))
         {
-            _shadow.GlobalPosition = new Vector2(x + 6, y + 6);
+            _shadow.GlobalPosition = new Vector2(targetX + SlideOffsetPx + 6, targetY + 6);
             _shadow.Size = panelSize;
+        }
+
+        var tween = _panel.CreateTween();
+        tween.SetParallel(true);
+        tween.TweenProperty(_panel, "global_position:x", targetX, AnimDuration)
+             .SetTrans(Tween.TransitionType.Cubic)
+             .SetEase(Tween.EaseType.Out);
+        tween.TweenProperty(_panel, "modulate:a", 1.0f, AnimDuration);
+
+        if (_shadow != null && GodotObject.IsInstanceValid(_shadow))
+        {
+            tween.TweenProperty(_shadow, "global_position:x", targetX + 6, AnimDuration)
+                 .SetTrans(Tween.TransitionType.Cubic)
+                 .SetEase(Tween.EaseType.Out);
+            tween.TweenProperty(_shadow, "modulate:a", ShadowAlpha, AnimDuration);
         }
     }
 
@@ -360,13 +411,14 @@ public static class PostFightTooltipPatch
 
         var vbox = new VBoxContainer();
         vbox.Name = "PostFightVBox";
-        vbox.AddThemeConstantOverride("separation", 4);
+        vbox.AddThemeConstantOverride("separation", 2);
         vbox.MouseFilter = Control.MouseFilterEnum.Ignore;
         vbox.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth - 22f, 0);
         _panel.AddChild(vbox);
 
-        // Header row
-        const int HeaderHeightPx = 28;
+        // Header row. 22 is just enough for the 20pt Kreon name + its shadow;
+        // any taller and the gap to the table's first row reads as empty space.
+        const int HeaderHeightPx = 22;
         const int BrandRightPadPx = 24;
         var headerRow = new Control();
         headerRow.Name = "HeaderRow";
@@ -440,17 +492,6 @@ public static class PostFightTooltipPatch
         ApplyTooltipShadow(_tableLabel);
         vbox.AddChild(_tableLabel);
 
-        _hintLabel = new Label();
-        _hintLabel.Name = "PostFightHint";
-        _hintLabel.Text = "(click to dismiss)";
-        _hintLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        _hintLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
-        _hintLabel.AddThemeColorOverride("font_color", new Color(ThemeStyle.HintR, ThemeStyle.HintG, ThemeStyle.HintB, 1f));
-        _hintLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.HintSize);
-        if (kreonRegular != null) _hintLabel.AddThemeFontOverride("font", kreonRegular);
-        ApplyTooltipShadow(_hintLabel);
-        vbox.AddChild(_hintLabel);
-
         var style = TooltipHelper.BuildPanelStyle();
         if (style != null)
             _panel.AddThemeStyleboxOverride("panel", style);
@@ -501,8 +542,11 @@ public static class PostFightOverlayHidePatch
 {
     static void Postfix()
     {
+        PostFightTooltipPatch._overlayDepth++;
         if (!PostFightTooltipPatch._dismissed)
             PostFightTooltipPatch.SetVisible(false);
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.Logger.Info($"[SlayTheStats] PostFight overlay Hide: depth={PostFightTooltipPatch._overlayDepth}");
     }
 }
 
@@ -511,7 +555,15 @@ public static class PostFightOverlayShowPatch
 {
     static void Postfix()
     {
-        if (!PostFightTooltipPatch._dismissed)
+        if (PostFightTooltipPatch._overlayDepth > 0)
+            PostFightTooltipPatch._overlayDepth--;
+        // Only reshow when we're back to bedrock (no overlays on top of the reward
+        // screen). Without the depth check, closing a nested overlay (deck stacked
+        // over map) would un-hide the tooltip while the outer overlay (map) is still
+        // covering the reward screen.
+        if (!PostFightTooltipPatch._dismissed && PostFightTooltipPatch._overlayDepth == 0)
             PostFightTooltipPatch.SetVisible(true);
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.Logger.Info($"[SlayTheStats] PostFight overlay Show: depth={PostFightTooltipPatch._overlayDepth}");
     }
 }

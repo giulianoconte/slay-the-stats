@@ -569,7 +569,11 @@ internal static class EncounterStatsHover
         // with FitContent reports its content size as its minimum, and the leftover
         // space ended up distributed unpredictably.
         const int HeaderHeightPx = 28;
-        const int BrandRightPadPx = 12;
+        // Independent of TooltipHelper's 12px pad for card/relic: the encounter
+        // panel's stone chrome has less effective right inset, so 12 visually
+        // crowds the brand against the frame. Bumped to match the event/post-fight
+        // tooltips which use the same value.
+        const int BrandRightPadPx = 24;
         var headerRow = new Control();
         headerRow.Name = "HeaderRow";
         headerRow.CustomMinimumSize = new Vector2(0, HeaderHeightPx);

@@ -46,20 +46,42 @@ internal static class EventHoverHelper
 
     internal static void Show(NEventOptionButton? holder)
     {
-        if (!SlayTheStatsConfig.ShowInRunStats) return;
-        if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
-        if (holder == null) return;
+        if (!SlayTheStatsConfig.ShowInRunStats)        { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: ShowInRunStats=false");        return; }
+        if (SlayTheStatsConfig.DisableTooltipsEntirely) { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: DisableTooltipsEntirely=true"); return; }
+        if (holder == null)                             { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: holder=null");                 return; }
 
         try
         {
             var eventModel = holder.Event;
-            if (eventModel == null) return;
-            if (eventModel is AncientEventModel) return; // ancient options covered by RelicHoverHelper
-            if (holder.Option?.IsProceed == true) return; // proceed buttons aren't meaningful decisions
+            if (eventModel == null)
+            {
+                MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: holder.Event=null");
+                return;
+            }
+            var eventModelType = eventModel.GetType().Name;
+            if (eventModel is AncientEventModel)
+            {
+                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: AncientEventModel ({eventModelType})");
+                return;
+            }
+            if (holder.Option?.IsProceed == true)
+            {
+                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: Option.IsProceed=true ({eventModelType})");
+                return;
+            }
 
             var eventId = eventModel.Id.ToString();
-            if (AncientEvents.IsAncient(eventId)) return;
-            if (!MainFile.Db.EventVisits.ContainsKey(eventId)) return;
+            MainFile.Logger.Info($"[SlayTheStats] EventHover.Show: eventId='{eventId}' type={eventModelType} hasVisits={MainFile.Db.EventVisits.ContainsKey(eventId)}");
+            if (AncientEvents.IsAncient(eventId))
+            {
+                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: AncientEvents.IsAncient('{eventId}')");
+                return;
+            }
+            if (!MainFile.Db.EventVisits.ContainsKey(eventId))
+            {
+                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: no EventVisits for '{eventId}' (db keys={string.Join(',', MainFile.Db.EventVisits.Keys.Take(10))}{(MainFile.Db.EventVisits.Count > 10 ? ",…" : "")})");
+                return;
+            }
 
             var filter = CardHoverShowPatch.BuildInRunFilter(CardHoverShowPatch.RunCharacter);
             var agg = StatsAggregator.AggregateEvent(MainFile.Db, eventId, filter);

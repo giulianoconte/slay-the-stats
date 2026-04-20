@@ -225,7 +225,7 @@ public static class CardHoverShowPatch
         var (ascMin, ascMax) = ResolveAscensionBounds(SlayTheStatsConfig.AscensionMin, SlayTheStatsConfig.AscensionMax);
         var filter = new AggregationFilter
         {
-            GameMode = "standard",
+            GameMode = SlayTheStatsConfig.IncludeMultiplayer ? null! : "standard",
             AscensionMin = ascMin,
             AscensionMax = ascMax,
             VersionMin = IsVersionLowerBound(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
@@ -281,7 +281,7 @@ public static class CardHoverShowPatch
         var (ascMin, ascMax) = ResolveAscensionBounds(SlayTheStatsConfig.DefaultAscensionMin, SlayTheStatsConfig.DefaultAscensionMax);
         var filter = new AggregationFilter
         {
-            GameMode = "standard",
+            GameMode = SlayTheStatsConfig.DefaultIncludeMultiplayer ? null! : "standard",
             Character = runCharacter,
             AscensionMin = ascMin,
             AscensionMax = ascMax,

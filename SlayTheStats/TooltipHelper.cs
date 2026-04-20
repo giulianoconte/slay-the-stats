@@ -35,13 +35,7 @@ internal static class TooltipHelper
     private static NinePatchRect? _shadow;
     private static bool           _followerInjected;
 
-    private static Font? _monoRegular;
-    private static Font? _monoBold;
-    private static bool  _modFontsLoaded;
-
-    internal static bool HasBoldFont => Fonts.Bold != null || _monoBold != null;
-    internal static Font? GetMonoFont() => _monoRegular ?? ResourceLoader.Load<Font>("res://fonts/source_code_pro_medium.ttf");
-    internal static Font? GetMonoBoldFont() => _monoBold;
+    internal static bool HasBoldFont => Fonts.Bold != null;
     internal static Font? GetKreonFont() => Fonts.Normal;
     internal static Font? GetKreonBoldFont() => Fonts.Bold;
 
@@ -308,45 +302,6 @@ internal static class TooltipHelper
     {
         _headerStyleApplied = false;
         _tableStyleApplied  = false;
-    }
-
-    /// <summary>
-    /// Loads FiraMono regular and bold from the mod's own fonts/ directory.
-    /// Uses the DLL location so the path works regardless of where GDWeave is installed.
-    /// </summary>
-    internal static void TryLoadModFonts()
-    {
-        if (_modFontsLoaded) return;
-        _modFontsLoaded = true;
-        try
-        {
-            var modDir      = System.IO.Path.GetDirectoryName(
-                                  System.Reflection.Assembly.GetExecutingAssembly().Location)!;
-            var regularPath = System.IO.Path.Combine(modDir, "fonts", "FiraMono-Regular.ttf");
-            var boldPath    = System.IO.Path.Combine(modDir, "fonts", "FiraMono-Medium.ttf");
-
-            if (System.IO.File.Exists(regularPath))
-            {
-                var ff = new FontFile();
-                ff.LoadDynamicFont(regularPath);
-                _monoRegular = ff;
-            }
-            if (System.IO.File.Exists(boldPath))
-            {
-                var ff = new FontFile();
-                ff.LoadDynamicFont(boldPath);
-                _monoBold = ff;
-            }
-
-            if (_monoRegular == null)
-                MainFile.Logger.Warn($"[SlayTheStats] FiraMono-Regular.ttf not found at {regularPath}");
-            if (_monoBold == null)
-                MainFile.Logger.Warn($"[SlayTheStats] FiraMono-Medium.ttf not found at {boldPath}");
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] TryLoadModFonts failed: {e.Message}");
-        }
     }
 
     /// <summary>

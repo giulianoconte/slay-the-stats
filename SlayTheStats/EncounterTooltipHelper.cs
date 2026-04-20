@@ -1076,10 +1076,12 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Spread[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Turns[/color][/right][/cell]");
 
+        double spreadBase = 0;
         if (stat.Fought > 0)
         {
             var (medianBase, iqrcBase, _, turnsBase, _) = DeriveBaselines(poolBaseline);
             AppendCombatDataCells(sb, stat, medianBase, iqrcBase, turnsBase);
+            spreadBase = iqrcBase;
         }
         else
         {
@@ -1088,14 +1090,18 @@ public static class EncounterTooltipHelper
         }
         sb.Append("[/table]");
 
-        // Footer — baseline + filter context
+        // Footer — baseline + filter context. Spread baseline is IQRC (ratio);
+        // render as a percentage to match the Spread column.
         var baselineDmgAbs = $"{dmgBaseline:F1}";
         var charLabel = character != null
             ? CardHoverShowPatch.GetCharacterDisplay(character)
             : "All chars";
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
         var categoryLower = categoryLabel.ToLowerInvariant();
-        sb.Append(TooltipHelper.FormatBaselineLine($"Baseline {categoryLower} pool dmg: {baselineDmgAbs}"));
+        var baselineLine = stat.Fought > 0
+            ? $"Baseline {categoryLower}: dmg {baselineDmgAbs}, spread {spreadBase * 100:F0}%"
+            : $"Baseline {categoryLower} dmg: {baselineDmgAbs}";
+        sb.Append(TooltipHelper.FormatBaselineLine(baselineLine));
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();

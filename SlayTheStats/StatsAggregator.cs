@@ -489,6 +489,16 @@ public static class StatsAggregator
                 agg.DamageValues ??= new List<int>();
                 agg.DamageValues.AddRange(stat.DamageValues);
             }
+            if (stat.TurnsValues is { Count: > 0 })
+            {
+                agg.TurnsValues ??= new List<int>();
+                agg.TurnsValues.AddRange(stat.TurnsValues);
+            }
+            if (stat.PotionsValues is { Count: > 0 })
+            {
+                agg.PotionsValues ??= new List<int>();
+                agg.PotionsValues.AddRange(stat.PotionsValues);
+            }
         }
 
         return result;
