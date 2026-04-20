@@ -1844,7 +1844,7 @@ public static partial class CompendiumFilterPatch
     /// </summary>
     internal static void ApplyGameFont(Control control, int size = 18)
     {
-        var font = TooltipHelper.Fonts.Bold ?? TooltipHelper.Fonts.Normal;
+        var font = TooltipHelper.GetKreonBoldFont() ?? TooltipHelper.GetKreonFont();
         if (font != null)
             control.AddThemeFontOverride("font", font);
         control.AddThemeFontSizeOverride("font_size", size);

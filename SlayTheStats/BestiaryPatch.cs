@@ -525,7 +525,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         var title = new Label();
         title.Text = "SlayTheStats Bestiary";
-        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        title.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
         ApplyKreonFont(title, bold: true);
         ApplyTextShadow(title);
@@ -806,7 +806,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsTitleLabel.ScrollActive = false;
         _statsTitleLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         _statsTitleLabel.SizeFlagsVertical = SizeFlags.ShrinkBegin;
-        _statsTitleLabel.AddThemeColorOverride("default_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        _statsTitleLabel.AddThemeColorOverride("default_color", ThemeStyle.TitleGoldColor);
         _statsTitleLabel.AddThemeFontSizeOverride("normal_font_size", ThemeStyle.TitleSecondary);
         _statsTitleLabel.AddThemeFontSizeOverride("bold_font_size", ThemeStyle.TitleSecondary);
         ApplyKreonFont(_statsTitleLabel, bold: true);
@@ -1500,7 +1500,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         panel.AddChild(vbox);
 
         var title = new Label { Text = spec.Title };
-        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        title.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSecondary);
         title.MouseFilter = MouseFilterEnum.Ignore;
         ApplyKreonFont(title, bold: true);
@@ -1620,7 +1620,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             VerticalAlignment = VerticalAlignment.Center,
             Visible = false,
         };
-        label.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        label.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         label.AddThemeFontSizeOverride("font_size", 48);
         ApplyKreonFont(label, bold: true);
         ApplyTextShadow(label);
@@ -1892,7 +1892,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         Label MakeSectionTitle(string text)
         {
             var l = new Label { Text = text };
-            l.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+            l.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
             l.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
             ApplyKreonFont(l, bold: true);
             ApplyTooltipTextShadow(l);
@@ -2687,7 +2687,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         normal.ContentMarginTop = normal.ContentMarginBottom = 0;
 
         var hover = (StyleBoxFlat)normal.Duplicate();
-        hover.BorderColor = new Color(0.918f, 0.745f, 0.318f, 0.95f);
+        hover.BorderColor = new Color(ThemeStyle.TitleGoldColor, 0.95f);
         hover.BgColor = new Color(0.15f, 0.16f, 0.22f, 1f);
 
         var panel = new PanelContainer
@@ -2715,7 +2715,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         panel.MouseEntered += () =>
         {
             panel.AddThemeStyleboxOverride("panel", hover);
-            label.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+            label.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         };
         panel.MouseExited += () =>
         {
@@ -2760,7 +2760,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         popup.AddChild(innerMargin);
 
         var title = new Label { Text = "Ranking modes" };
-        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+        title.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
         ApplyKreonFont(title, bold: true);
         ApplyTooltipTextShadow(title);
@@ -3035,7 +3035,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             ? new Color(0.20f, 0.22f, 0.30f, 1f)
             : new Color(0.10f, 0.11f, 0.15f, 0.85f);
         style.BorderColor = selected
-            ? new Color(0.918f, 0.745f, 0.318f, 0.8f)
+            ? new Color(ThemeStyle.TitleGoldColor, 0.8f)
             : new Color(0.30f, 0.33f, 0.40f, 0.6f);
         style.SetBorderWidthAll(1);
         style.SetCornerRadiusAll(3);
@@ -3050,8 +3050,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         btn.AddThemeStyleboxOverride("hover", hover);
 
         btn.AddThemeColorOverride("font_color",
-            selected ? new Color(0.918f, 0.745f, 0.318f, 1f) : new Color(0.94f, 0.92f, 0.85f, 1f));
-        btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+            selected ? ThemeStyle.TitleGoldColor : new Color(0.94f, 0.92f, 0.85f, 1f));
+        btn.AddThemeColorOverride("font_hover_color", ThemeStyle.TitleGoldColor);
         btn.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(btn);
         ApplyTextShadow(btn);
@@ -3096,21 +3096,24 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     }
 
     /// <summary>
-    /// Applies the Kreon font (game's primary serif) to a Control. Used for everything in the
-    /// bestiary page except the stats table on the right, which keeps the monospace font.
+    /// Applies the Kreon font (game's primary serif) to a Control. Used everywhere in the
+    /// bestiary — every text surface (including the stats table) renders in Kreon since
+    /// the v0.3.0 table refactor dropped monospace in favor of BBCode [table=N] layout.
     /// </summary>
     internal static void ApplyKreonFont(Control control, bool bold = false)
     {
-        var font = bold ? (TooltipHelper.Fonts.Bold ?? TooltipHelper.Fonts.Normal)
-                        : (TooltipHelper.Fonts.Normal ?? TooltipHelper.Fonts.Bold);
+        var boldFont   = TooltipHelper.GetKreonBoldFont();
+        var normalFont = TooltipHelper.GetKreonFont();
+        var font = bold ? (boldFont   ?? normalFont)
+                        : (normalFont ?? boldFont);
         if (font == null) return;
 
         switch (control)
         {
             case RichTextLabel rt:
                 rt.AddThemeFontOverride("normal_font", font);
-                if (TooltipHelper.Fonts.Bold != null)
-                    rt.AddThemeFontOverride("bold_font", TooltipHelper.Fonts.Bold);
+                if (boldFont != null)
+                    rt.AddThemeFontOverride("bold_font", boldFont);
                 break;
             case Label lb:
                 lb.AddThemeFontOverride("font", font);
@@ -3187,7 +3190,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 ? new Color(0.20f, 0.22f, 0.30f, 1f)
                 : new Color(0.10f, 0.11f, 0.15f, 1f);
             tabStyle.BorderColor = selected
-                ? new Color(0.918f, 0.745f, 0.318f, 0.8f)
+                ? new Color(ThemeStyle.TitleGoldColor, 0.8f)
                 : new Color(0.30f, 0.33f, 0.40f, 0.8f);
             tabStyle.SetBorderWidthAll(1);
             tabStyle.SetCornerRadiusAll(4);
@@ -3202,8 +3205,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             btn.AddThemeStyleboxOverride("hover", hoverTab);
 
             btn.AddThemeColorOverride("font_color",
-                selected ? new Color(0.918f, 0.745f, 0.318f, 1f) : new Color(0.94f, 0.92f, 0.85f, 1f));
-            btn.AddThemeColorOverride("font_hover_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+                selected ? ThemeStyle.TitleGoldColor : new Color(0.94f, 0.92f, 0.85f, 1f));
+            btn.AddThemeColorOverride("font_hover_color", ThemeStyle.TitleGoldColor);
             btn.AddThemeFontSizeOverride("font_size", 18);
             ApplyKreonFont(btn, bold: true);
             ApplyTextShadow(btn);
@@ -3258,8 +3261,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private static StyleBoxFlat MakeRowHighlightStyle()
     {
         var s = new StyleBoxFlat();
-        s.BgColor      = new Color(0.918f, 0.745f, 0.318f, 0.18f);
-        s.BorderColor  = new Color(0.918f, 0.745f, 0.318f, 0.55f);
+        s.BgColor      = new Color(ThemeStyle.TitleGoldColor, 0.18f);
+        s.BorderColor  = new Color(ThemeStyle.TitleGoldColor, 0.55f);
         s.BorderWidthLeft   = 0;
         s.SetCornerRadiusAll(2);
         s.ContentMarginLeft   = RowMarginLeftPx;

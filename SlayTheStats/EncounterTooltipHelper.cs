@@ -327,10 +327,13 @@ public static class EncounterTooltipHelper
     // the descriptor, and so the colored row 1 (subject) + colored per-character
     // rows in the all-chars table draw the eye. This split cues the reader that
     // context rows are "reference material" while colored rows are the signal.
-    private const string BaselineSectionColor = "#fef6e2";
-    private const string PoolSectionColor     = "#fef6e2";
-    private const string AllCharsSectionColor = "#fef6e2";
-    private const string ContextRowDataColor  = "#686868";
+    // Section colors all currently resolve to ThemeStyle.Cream — named
+    // separately so the design can diverge them per-section without a
+    // call-site sweep. Context rows use FooterGrey to recede visually.
+    private const string BaselineSectionColor = ThemeStyle.Cream;
+    private const string PoolSectionColor     = ThemeStyle.Cream;
+    private const string AllCharsSectionColor = ThemeStyle.Cream;
+    private const string ContextRowDataColor  = ThemeStyle.FooterGrey;
 
     // BBCode constants used across the focused-view table cells.
     // Descriptor font is slightly bigger than the data cells so it reads as the
@@ -339,7 +342,7 @@ public static class EncounterTooltipHelper
     private const string KreonRegFontTag  = "[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=18]";
     private const string KreonRegClose    = "[/font_size][/font]";
     private const string KreonBoldFontTag = "[font=res://themes/kreon_bold_glyph_space_one.tres]";
-    private const string HeaderColor      = "#8e8676";  // warm grey for column headers (matches ThemeStyle.HeaderGrey)
+    private const string HeaderColor      = ThemeStyle.HeaderGrey;
     // Minimum baseline for potion coloration. Prevents extreme colors from tiny
     // absolute differences by ensuring the ratio denominator isn't near-zero.
     // Complements PotionKScale — the floor handles small baselines, the k-scale
@@ -486,13 +489,6 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell expand={parts} {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
     }
 
-    /// <summary>Reference string that sets the minimum descriptor column width.
-    /// Emitted in a 1px-tall invisible sizing row at the top of every focused-view
-    /// table so Godot's BBCode table layout locks the descriptor column width and
-    /// the data columns stay fixed as the user hovers different encounters.</summary>
-    private const string DescriptorSizingRef =
-        "\u00A0\u00A0\u00A0vs Act 9 elites (baseline)";
-
     /// <summary>Emits an invisible 1px-tall sizing row at the top of a [table=9] to set
     /// column widths in absolute pixels. Each cell contains U+2003 em-space characters at
     /// font_size=1 (calibrated px per em-space — see <see cref="EmSpacePxAtFs1"/>). Widths
@@ -537,9 +533,9 @@ public static class EncounterTooltipHelper
     private static string EmSpacesForPx(int widthPx)
         => EmSpaces(widthPx <= 0 ? 0 : (int)System.Math.Round(widthPx / EmSpacePxAtFs1));
 
-    /// <summary>Column header cell. Uses the same monospace font as data cells (via
-    /// the RichTextLabel's theme override) so auto-sized column widths align with
-    /// the data rows below. Right-aligned to sit over right-aligned numbers.</summary>
+    /// <summary>Column header cell. Shares the surrounding [table=N] layout with
+    /// data cells so Godot's table layout aligns column widths across rows. Right-
+    /// aligned to sit over right-aligned numbers.</summary>
     private static void AppendHeaderCell(StringBuilder sb, string name, string padding = NormalCellPadding, string align = "right")
     {
         sb.Append($"[cell {padding}][{align}][color={HeaderColor}]{name}[/color][/{align}][/cell]");

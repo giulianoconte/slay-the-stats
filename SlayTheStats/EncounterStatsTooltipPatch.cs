@@ -400,11 +400,7 @@ internal static class EncounterStatsHover
 
         var encounterName = TruncateEncounterNameIfTooLong(EncounterCategory.FormatName(encounterId));
 
-        // Trailing spaces extend the FitContent-computed rect past the rightmost letter
-        // so its drop shadow can render in full without being clipped at the rect
-        // boundary. (RichTextLabel + FitContent pegs its width to the text width which
-        // is one px short of where the shadow ends.)
-        handle.NameLabel.Text = $"[b]{encounterName}   [/b]";
+        handle.NameLabel.Text = $"[b]{encounterName}[/b]";
         handle.TableLabel.Text = statsText;
         handle.NameLabel.ResetSize();
         handle.TableLabel.ResetSize();
@@ -551,9 +547,8 @@ internal static class EncounterStatsHover
         panel.ZIndex = 200;
 
         // Inner VBox: header HBox (encounter name | SlayTheStats brand) + table label.
-        // Splitting into two control levels lets the encounter name use Kreon while the
-        // table uses monospace, AND lets the brand sit on the same line as the name
-        // without literal-spaces alignment hacks.
+        // Splitting into two control levels lets the brand sit on the same line as the
+        // encounter name without literal-spaces alignment hacks.
         var vbox = new VBoxContainer();
         vbox.Name = "EncounterStatsVBox";
         vbox.AddThemeConstantOverride("separation", 4);
@@ -581,8 +576,8 @@ internal static class EncounterStatsHover
         headerRow.MouseFilter = Control.MouseFilterEnum.Ignore;
         vbox.AddChild(headerRow);
 
-        var kreonBold = TooltipHelper.Fonts.Bold;
-        var kreonRegular = TooltipHelper.Fonts.Normal;
+        var kreonBold = TooltipHelper.GetKreonBoldFont();
+        var kreonRegular = TooltipHelper.GetKreonFont();
 
         var nameLabel = new RichTextLabel();
         nameLabel.Name                = "EncounterNameLabel";
@@ -594,10 +589,7 @@ internal static class EncounterStatsHover
         nameLabel.SelectionEnabled    = false;
         nameLabel.ShortcutKeysEnabled = false;
         nameLabel.MouseFilter         = Control.MouseFilterEnum.Ignore;
-        // Anchor top-left; FitContent grows the rect to fit text. PopulatePanelData
-        // adds trailing spaces to the text so the rect extends past the rightmost
-        // letter, giving its shadow room to render without being clipped at the rect
-        // boundary.
+        // Anchor top-left; FitContent grows the rect to fit text.
         nameLabel.AnchorLeft   = 0f;
         nameLabel.AnchorTop    = 0f;
         nameLabel.AnchorRight  = 0f;
@@ -613,18 +605,18 @@ internal static class EncounterStatsHover
         if (kreonRegular != null) nameLabel.AddThemeFontOverride("normal_font", kreonRegular);
         nameLabel.AddThemeFontSizeOverride("normal_font_size", 20);
         nameLabel.AddThemeFontSizeOverride("bold_font_size", 20);
-        nameLabel.AddThemeColorOverride("default_color", new Color(0.937f, 0.784f, 0.318f, 1f)); // #efc851
-        ApplyTooltipShadow(nameLabel);
+        nameLabel.AddThemeColorOverride("default_color", ThemeStyle.GoldColor); // #efc851
+        TooltipHelper.ApplyTooltipShadow(nameLabel);
         headerRow.AddChild(nameLabel);
 
         var brandLabel = new Label();
         brandLabel.Name = "SlayTheStatsBrand";
         brandLabel.Text = "SlayTheStats";
-        brandLabel.AddThemeColorOverride("font_color", new Color(0.408f, 0.408f, 0.408f, 1f)); // #686868
+        brandLabel.AddThemeColorOverride("font_color", ThemeStyle.FooterGreyColor); // #686868
         brandLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.BrandSize);
         brandLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
         if (kreonRegular != null) brandLabel.AddThemeFontOverride("font", kreonRegular);
-        ApplyTooltipShadow(brandLabel);
+        TooltipHelper.ApplyTooltipShadow(brandLabel);
         // Anchor to top-right so the brand's right edge always sits BrandRightPadPx
         // inside the header's right edge, regardless of the encounter name length.
         // VerticalAlignment.Top (not Center) nudges the brand up so its top margin
@@ -646,12 +638,11 @@ internal static class EncounterStatsHover
         label.FitContent          = true;
         // WordSmart wrap so the filter-context line (which can get long
         // with all four segments) wraps inside the panel instead of
-        // overflowing the right border. The fixed-width monospace stat row
-        // above is shorter than the panel width so it never wraps. The
-        // CustomMinimumSize below pins the wrap width so Godot's
-        // FitContent+WordSmart doesn't need to guess on the first frame
-        // (which used to cause a one-frame height glitch that dropped the
-        // tooltip below the hover-tip stack).
+        // overflowing the right border. The [table=N] stat rows above are
+        // sized by the panel width and never wrap. The CustomMinimumSize
+        // below pins the wrap width so Godot's FitContent+WordSmart doesn't
+        // need to guess on the first frame (which used to cause a one-frame
+        // height glitch that dropped the tooltip below the hover-tip stack).
         label.AutowrapMode        = TextServer.AutowrapMode.WordSmart;
         label.CustomMinimumSize   = new Vector2(TooltipHelper.TooltipWidth - 22f, 0);
         label.ScrollActive        = false;
@@ -669,9 +660,9 @@ internal static class EncounterStatsHover
         }
         label.AddThemeFontSizeOverride("normal_font_size", 18);
         label.AddThemeFontSizeOverride("bold_font_size", 18);
-        label.AddThemeColorOverride("default_color", new Color(1f, 0.9647f, 0.8863f, 1f));
+        label.AddThemeColorOverride("default_color", ThemeStyle.CreamColor);
         label.AddThemeConstantOverride("line_separation", 0);
-        ApplyTooltipShadow(label);
+        TooltipHelper.ApplyTooltipShadow(label);
         vbox.AddChild(label);
 
         // Steal the same stone-tile stylebox the shared TooltipHelper builds for cards/relics.
@@ -699,30 +690,6 @@ internal static class EncounterStatsHover
             TableLabel = label,
             Shadow     = shadow,
         };
-    }
-
-    /// <summary>
-    /// Adds a drop shadow to a tooltip text control. Offset 3/2 — 1.5:1 right:down
-    /// ratio, right-biased without feeling top-heavy.
-    /// </summary>
-    private static void ApplyTooltipShadow(Control control)
-    {
-        var shadow = new Color(0f, 0f, 0f, 0.55f);
-        switch (control)
-        {
-            case RichTextLabel rt:
-                rt.AddThemeColorOverride("font_shadow_color", shadow);
-                rt.AddThemeConstantOverride("shadow_offset_x", 3);
-                rt.AddThemeConstantOverride("shadow_offset_y", 2);
-                rt.AddThemeConstantOverride("shadow_outline_size", 0);
-                break;
-            case Label lb:
-                lb.AddThemeColorOverride("font_shadow_color", shadow);
-                lb.AddThemeConstantOverride("shadow_offset_x", 3);
-                lb.AddThemeConstantOverride("shadow_offset_y", 2);
-                lb.AddThemeConstantOverride("shadow_outline_size", 0);
-                break;
-        }
     }
 
     private static AggregationFilter BuildFilter(string? character)

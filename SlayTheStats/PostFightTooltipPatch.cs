@@ -412,8 +412,8 @@ public static class PostFightTooltipPatch
 
     private static void BuildPanel()
     {
-        var kreonBold = TooltipHelper.Fonts.Bold;
-        var kreonRegular = TooltipHelper.Fonts.Normal;
+        var kreonBold = TooltipHelper.GetKreonBoldFont();
+        var kreonRegular = TooltipHelper.GetKreonFont();
 
         _panel = new PanelContainer();
         _panel.Name = "PostFightTooltip";
@@ -471,18 +471,18 @@ public static class PostFightTooltipPatch
         if (kreonRegular != null) _nameLabel.AddThemeFontOverride("normal_font", kreonRegular);
         _nameLabel.AddThemeFontSizeOverride("normal_font_size", 20);
         _nameLabel.AddThemeFontSizeOverride("bold_font_size", 20);
-        _nameLabel.AddThemeColorOverride("default_color", new Color(0.937f, 0.784f, 0.318f, 1f));
-        ApplyTooltipShadow(_nameLabel);
+        _nameLabel.AddThemeColorOverride("default_color", ThemeStyle.GoldColor);
+        TooltipHelper.ApplyTooltipShadow(_nameLabel);
         headerRow.AddChild(_nameLabel);
 
         _brandLabel = new Label();
         _brandLabel.Name = "SlayTheStatsBrand";
         _brandLabel.Text = "SlayTheStats";
-        _brandLabel.AddThemeColorOverride("font_color", new Color(0.408f, 0.408f, 0.408f, 1f));
+        _brandLabel.AddThemeColorOverride("font_color", ThemeStyle.FooterGreyColor);
         _brandLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.BrandSize);
         _brandLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
         if (kreonRegular != null) _brandLabel.AddThemeFontOverride("font", kreonRegular);
-        ApplyTooltipShadow(_brandLabel);
+        TooltipHelper.ApplyTooltipShadow(_brandLabel);
         _brandLabel.AnchorLeft = 1f;
         _brandLabel.AnchorRight = 1f;
         _brandLabel.AnchorTop = 0f;
@@ -513,9 +513,9 @@ public static class PostFightTooltipPatch
         }
         _tableLabel.AddThemeFontSizeOverride("normal_font_size", 18);
         _tableLabel.AddThemeFontSizeOverride("bold_font_size", 18);
-        _tableLabel.AddThemeColorOverride("default_color", new Color(1f, 0.9647f, 0.8863f, 1f));
+        _tableLabel.AddThemeColorOverride("default_color", ThemeStyle.CreamColor);
         _tableLabel.AddThemeConstantOverride("line_separation", 0);
-        ApplyTooltipShadow(_tableLabel);
+        TooltipHelper.ApplyTooltipShadow(_tableLabel);
         vbox.AddChild(_tableLabel);
 
         var style = TooltipHelper.BuildPanelStyle();
@@ -533,26 +533,6 @@ public static class PostFightTooltipPatch
         _shadow.ZIndex = 0;
         _shadow.Visible = false;
         _shadow.MouseFilter = Control.MouseFilterEnum.Ignore;
-    }
-
-    private static void ApplyTooltipShadow(Control control)
-    {
-        var shadow = new Color(0f, 0f, 0f, 0.55f);
-        switch (control)
-        {
-            case RichTextLabel rt:
-                rt.AddThemeColorOverride("font_shadow_color", shadow);
-                rt.AddThemeConstantOverride("shadow_offset_x", 3);
-                rt.AddThemeConstantOverride("shadow_offset_y", 2);
-                rt.AddThemeConstantOverride("shadow_outline_size", 0);
-                break;
-            case Label lb:
-                lb.AddThemeColorOverride("font_shadow_color", shadow);
-                lb.AddThemeConstantOverride("shadow_offset_x", 3);
-                lb.AddThemeConstantOverride("shadow_offset_y", 2);
-                lb.AddThemeConstantOverride("shadow_outline_size", 0);
-                break;
-        }
     }
 
     private static AggregationFilter BuildFilter(string? character)

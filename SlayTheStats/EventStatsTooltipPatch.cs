@@ -44,6 +44,15 @@ internal static class EventHoverHelper
     private static Vector2 _anchorGlobal;
     private static Vector2 _anchorSize;
 
+    /// <summary>Generation counter for debouncing Hide. NEventOptionButton's
+    /// OnFocus/OnUnfocus cycle fires rapidly during the button's hover-scale
+    /// tween; without a debounce the panel flickers on/off every frame and
+    /// never stays visible long enough to read. Show increments this counter
+    /// (cancelling any pending Hide); Hide schedules a 50ms timer that only
+    /// runs if the counter hasn't moved — i.e. no new Show has cancelled it.
+    /// Mirrors <see cref="TooltipHelper.HideWithDelay"/>.</summary>
+    private static int _hideGen;
+
     internal static void Show(NEventOptionButton? holder)
     {
         if (!SlayTheStatsConfig.ShowInRunStats)        { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: ShowInRunStats=false");        return; }
@@ -77,15 +86,14 @@ internal static class EventHoverHelper
                 MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: AncientEvents.IsAncient('{eventId}')");
                 return;
             }
-            if (!MainFile.Db.EventVisits.ContainsKey(eventId))
-            {
-                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: no EventVisits for '{eventId}' (db keys={string.Join(',', MainFile.Db.EventVisits.Keys.Take(10))}{(MainFile.Db.EventVisits.Count > 10 ? ",…" : "")})");
-                return;
-            }
 
+            // Build filter upfront so the "no data" path can still render a
+            // tooltip with the current filter context in the footer.
+            // AggregateEvent is safe to call when the event id isn't in the
+            // db — it returns an empty aggregate (TotalVisits=0).
             var filter = CardHoverShowPatch.BuildInRunFilter(CardHoverShowPatch.RunCharacter);
             var agg = StatsAggregator.AggregateEvent(MainFile.Db, eventId, filter);
-            if (agg.TotalVisits == 0) return;
+            var hasData = agg.TotalVisits > 0;
 
             var hoveredTerminal = TerminalOptionOf(holder.Option);
             // Shape2 buckets are keyed by terminal + BucketVariable value.
@@ -105,8 +113,16 @@ internal static class EventHoverHelper
             EnsurePanel();
             if (_panel == null || _panelLabel == null || _panelNameLabel == null) return;
 
-            _panelNameLabel.Text = $"[b]Event Stats   [/b]"; // trailing space for shadow
-            _panelLabel.Text     = BuildStatsText(eventId, agg, hoveredOptionKey, characterLabel, wrBaseline, filter);
+            // Cancel any pending Hide timer — Show reasserts that the tooltip
+            // should be visible. Without this the OnFocus/OnUnfocus ping-pong
+            // during the button's hover-scale tween would race with the 50ms
+            // Hide timer and flicker the panel.
+            _hideGen++;
+
+            _panelNameLabel.Text = $"[b]Event Stats[/b]";
+            _panelLabel.Text     = hasData
+                ? BuildStatsText(eventId, agg, hoveredOptionKey, characterLabel, wrBaseline, filter)
+                : CardHoverShowPatch.NoDataText(filter);
             _panelNameLabel.ResetSize();
             _panelLabel.ResetSize();
             _panel.ResetSize();
@@ -145,16 +161,45 @@ internal static class EventHoverHelper
 
     private static void DeferredShowAndPosition()
     {
-        if (_panel == null || _activeBtn == null || !GodotObject.IsInstanceValid(_activeBtn))
-            return;
+        // Diag: trace why the event tooltip never appears even though Show
+        // succeeds (hasVisits=True logged). Strip once root cause is found.
+        if (_panel == null)        { MainFile.Logger.Info("[SlayTheStats] EventHover.DeferredShow bail: _panel=null"); return; }
+        if (_activeBtn == null)    { MainFile.Logger.Info("[SlayTheStats] EventHover.DeferredShow bail: _activeBtn=null (Hide fired between Show and deferred)"); return; }
+        if (!GodotObject.IsInstanceValid(_activeBtn))
+                                   { MainFile.Logger.Info("[SlayTheStats] EventHover.DeferredShow bail: _activeBtn invalid"); return; }
         _panel.Visible = true;
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = true;
         UpdatePosition();
+        MainFile.Logger.Info($"[SlayTheStats] EventHover.DeferredShow OK: panelPos={_panel.GlobalPosition} panelSize={_panel.Size} visible={_panel.Visible}");
     }
 
     internal static void Hide(NEventOptionButton? holder)
     {
-        if (holder == null || _activeBtn != holder) return;
+        if (holder == null || _activeBtn != holder)
+        {
+            MainFile.Logger.Info($"[SlayTheStats] EventHover.Hide noop: holderNull={holder == null} matched={_activeBtn == holder}");
+            return;
+        }
+        // Debounce: NEventOptionButton.OnFocus/OnUnfocus cycles rapidly during
+        // the hover-scale tween (see log pattern Show→Hide→Show→Hide every
+        // frame). Schedule the real hide on a 50ms timer; if Show fires
+        // again before the timer expires, it increments _hideGen and the
+        // timer callback becomes a no-op.
+        var genAtHide = ++_hideGen;
+        MainFile.Logger.Info($"[SlayTheStats] EventHover.Hide: scheduled (gen={genAtHide})");
+        var timer = (Engine.GetMainLoop() as SceneTree)?.CreateTimer(0.05f);
+        if (timer == null) { DoHide(genAtHide, "no-timer"); return; }
+        timer.Timeout += () => DoHide(genAtHide, "timer");
+    }
+
+    private static void DoHide(int genAtHide, string source)
+    {
+        if (_hideGen != genAtHide)
+        {
+            MainFile.Logger.Info($"[SlayTheStats] EventHover.DoHide skipped ({source}): newer gen (expected={genAtHide}, current={_hideGen})");
+            return;
+        }
+        MainFile.Logger.Info($"[SlayTheStats] EventHover.DoHide firing ({source}, gen={genAtHide})");
         _activeBtn = null;
         if (_panel != null && GodotObject.IsInstanceValid(_panel)) _panel.Visible = false;
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
@@ -263,8 +308,8 @@ internal static class EventHoverHelper
         if (kreonRegular != null) nameLabel.AddThemeFontOverride("normal_font", kreonRegular);
         nameLabel.AddThemeFontSizeOverride("normal_font_size", 20);
         nameLabel.AddThemeFontSizeOverride("bold_font_size", 20);
-        nameLabel.AddThemeColorOverride("default_color", new Color(0.937f, 0.784f, 0.318f, 1f)); // gold
-        ApplyTooltipShadow(nameLabel);
+        nameLabel.AddThemeColorOverride("default_color", ThemeStyle.GoldColor); // gold
+        TooltipHelper.ApplyTooltipShadow(nameLabel);
         headerRow.AddChild(nameLabel);
 
         var brandLabel = new Label
@@ -278,10 +323,10 @@ internal static class EventHoverHelper
             OffsetTop           = 0,
             VerticalAlignment   = VerticalAlignment.Top,
         };
-        brandLabel.AddThemeColorOverride("font_color", new Color(0.408f, 0.408f, 0.408f, 1f));
+        brandLabel.AddThemeColorOverride("font_color", ThemeStyle.FooterGreyColor);
         brandLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.BrandSize);
         if (kreonRegular != null) brandLabel.AddThemeFontOverride("font", kreonRegular);
-        ApplyTooltipShadow(brandLabel);
+        TooltipHelper.ApplyTooltipShadow(brandLabel);
         headerRow.AddChild(brandLabel);
 
         var label = new RichTextLabel
@@ -301,9 +346,9 @@ internal static class EventHoverHelper
         if (kreonBold    != null) label.AddThemeFontOverride("bold_font",   kreonBold);
         label.AddThemeFontSizeOverride("normal_font_size", 18);
         label.AddThemeFontSizeOverride("bold_font_size", 18);
-        label.AddThemeColorOverride("default_color", new Color(1f, 0.9647f, 0.8863f, 1f));
+        label.AddThemeColorOverride("default_color", ThemeStyle.CreamColor);
         label.AddThemeConstantOverride("line_separation", 0);
-        ApplyTooltipShadow(label);
+        TooltipHelper.ApplyTooltipShadow(label);
         vbox.AddChild(label);
 
         var style = TooltipHelper.BuildPanelStyle();
@@ -329,26 +374,6 @@ internal static class EventHoverHelper
         _panelNameLabel  = nameLabel;
         _panelBrandLabel = brandLabel;
         _shadow          = shadow;
-    }
-
-    private static void ApplyTooltipShadow(Control control)
-    {
-        var shadow = new Color(0f, 0f, 0f, 0.55f);
-        switch (control)
-        {
-            case RichTextLabel rt:
-                rt.AddThemeColorOverride("font_shadow_color", shadow);
-                rt.AddThemeConstantOverride("shadow_offset_x", 3);
-                rt.AddThemeConstantOverride("shadow_offset_y", 2);
-                rt.AddThemeConstantOverride("shadow_outline_size", 0);
-                break;
-            case Label lb:
-                lb.AddThemeColorOverride("font_shadow_color", shadow);
-                lb.AddThemeConstantOverride("shadow_offset_x", 3);
-                lb.AddThemeConstantOverride("shadow_offset_y", 2);
-                lb.AddThemeConstantOverride("shadow_outline_size", 0);
-                break;
-        }
     }
 
     // ── Table rendering ──────────────────────────────────────────────
@@ -399,15 +424,6 @@ internal static class EventHoverHelper
         return dict;
     }
 
-    private const string ColPadOuter = "expand=1 padding=4,0,12,0";
-    private const string ColPadInner = "expand=1 padding=12,0,12,0";
-    private const string ColPadLast  = "expand=1 padding=12,0,4,0";
-
-    private static string HdrCell(string name, string padding)
-        => $"[cell {padding}][right][color=#8e8676]{name}[/color][/right][/cell]";
-    private static string DataCell(string content, string padding)
-        => $"[cell {padding}][right]{content}[/right][/cell]";
-
     /// <summary>
     /// Renders the tooltip body. One row for the hovered option. Columns
     /// and the Picks format depend on <see cref="EventAggregate.Shape"/>:
@@ -432,8 +448,8 @@ internal static class EventHoverHelper
         var sb = new StringBuilder();
 
         sb.Append("[table=2]");
-        sb.Append(HdrCell("Picks",  ColPadOuter));
-        sb.Append(HdrCell("Win%",   ColPadLast));
+        sb.Append(TooltipHelper.HdrCell("Picks",  TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell("Win%",   TooltipHelper.ColPadLast));
 
         agg.Options.TryGetValue(hoveredOptionKey, out var opt);
 
@@ -460,8 +476,8 @@ internal static class EventHoverHelper
             ? $"{Math.Round(100.0 * opt!.Wins / picks):F0}%"
             : $"[color={ThemeStyle.NeutralShade}]-[/color]";
 
-        sb.Append(DataCell(picksCell, ColPadOuter));
-        sb.Append(DataCell(winCell,   ColPadLast));
+        sb.Append(TooltipHelper.DataCell(picksCell, TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.DataCell(winCell,   TooltipHelper.ColPadLast));
 
         sb.Append("[/table]");
 

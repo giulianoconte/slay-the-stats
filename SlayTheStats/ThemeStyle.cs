@@ -1,9 +1,13 @@
+using Godot;
+
 namespace SlayTheStats;
 
 /// <summary>
 /// Canonical text-style constants for the mod's UI. Centralizing these keeps the
 /// design language consistent across bestiary, tooltips, compendium filter, and
 /// popups. Prefer these over ad-hoc hex literals or RGB Color constructors.
+/// Each color has a BBCode hex form (for `[color=...]` tags) and a `Color`
+/// form (for `AddThemeColorOverride` and other `Color`-typed APIs).
 /// </summary>
 internal static class ThemeStyle
 {
@@ -15,6 +19,9 @@ internal static class ThemeStyle
     /// <summary>Golden accent for titles, keyword highlights, hover/active button text.</summary>
     public const string Gold = "#efc851";
 
+    /// <summary>Slightly darker gold used for in-bestiary chrome titles and the card/relic tooltip header (pre-theft default). Borrowed from the game's keyword-panel title color; distinct from <see cref="Gold"/> by roughly one 5% brightness step. Keep both — reconciling them changes visual identity.</summary>
+    public const string TitleGold = "#eabe51";
+
     /// <summary>Muted grey for footer / filter-context / hover-prompt text. One source of truth for "secondary metadata".</summary>
     public const string FooterGrey = "#686868";
 
@@ -23,6 +30,15 @@ internal static class ThemeStyle
 
     /// <summary>Neutral placeholder for below-sample-threshold cells and dashes. Shared across card/relic/encounter tooltips.</summary>
     public const string NeutralShade = "#b5b5b5";
+
+    // ── Colors (Godot Color values; use directly in AddThemeColorOverride, StyleBoxFlat.BgColor, etc.) ──
+
+    public static readonly Color CreamColor        = new(Cream);
+    public static readonly Color GoldColor         = new(Gold);
+    public static readonly Color TitleGoldColor    = new(TitleGold);
+    public static readonly Color FooterGreyColor   = new(FooterGrey);
+    public static readonly Color HeaderGreyColor   = new(HeaderGrey);
+    public static readonly Color NeutralShadeColor = new(NeutralShade);
 
     // ── Title hierarchy (font sizes in px) ──
     // Primary = main panel title ("Bestiary", "Filters").

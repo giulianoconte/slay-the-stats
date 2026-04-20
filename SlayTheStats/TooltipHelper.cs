@@ -14,8 +14,8 @@ internal static class TooltipHelper
         public Font? Bold;
         public Font? Normal;
         public int   Size    = 22;
-        public Color Title   = new Color(0.918f, 0.745f, 0.318f, 1f); // golden yellow — matches keyword panel titles
-        public Color Text    = new Color(1f, 0.9647f, 0.8863f, 1f);
+        public Color Title   = ThemeStyle.TitleGoldColor;
+        public Color Text    = ThemeStyle.CreamColor;
         public Color Shadow  = new Color(0f, 0f, 0f, 0.251f);
         public int   ShadowX = 3;
         public int   ShadowY = 2;
@@ -35,9 +35,32 @@ internal static class TooltipHelper
     private static NinePatchRect? _shadow;
     private static bool           _followerInjected;
 
-    internal static bool HasBoldFont => Fonts.Bold != null;
-    internal static Font? GetKreonFont() => Fonts.Normal;
-    internal static Font? GetKreonBoldFont() => Fonts.Bold;
+    // Godot disposes FontVariation resources on scene transitions (main menu ↔
+    // in-run); the log shows `Asset not cached: kreon_*_glyph_space_one.tres`
+    // lines right after a load, leaving our static cache pointing at disposed
+    // native objects. Accessing them throws `ObjectDisposedException` from
+    // Control.AddThemeFontOverride and takes down BuildUI / in-combat hover /
+    // event tooltip. All font access MUST route through these accessors so
+    // disposed refs are re-resolved from the resource path before use.
+    internal static Font? GetKreonFont()
+    {
+        if (Fonts.Normal == null || !GodotObject.IsInstanceValid(Fonts.Normal))
+        {
+            Fonts.Normal = ResourceLoader.Load<Font>("res://themes/kreon_regular_glyph_space_one.tres");
+            InvalidateStyles();
+        }
+        return Fonts.Normal;
+    }
+    internal static Font? GetKreonBoldFont()
+    {
+        if (Fonts.Bold == null || !GodotObject.IsInstanceValid(Fonts.Bold))
+        {
+            Fonts.Bold = ResourceLoader.Load<Font>("res://themes/kreon_bold_glyph_space_one.tres");
+            InvalidateStyles();
+        }
+        return Fonts.Bold;
+    }
+    internal static bool HasBoldFont => GetKreonBoldFont() != null;
 
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
@@ -434,7 +457,8 @@ internal static class TooltipHelper
     {
         // Title — bold, gold, game-stolen title size.
         titleLabel.AddThemeColorOverride("font_color", Fonts.Title);
-        if (Fonts.Bold != null) titleLabel.AddThemeFontOverride("font", Fonts.Bold);
+        var boldFont = GetKreonBoldFont();
+        if (boldFont != null) titleLabel.AddThemeFontOverride("font", boldFont);
         titleLabel.AddThemeFontSizeOverride("font_size", Fonts.Size);
         titleLabel.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         titleLabel.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
@@ -442,13 +466,71 @@ internal static class TooltipHelper
 
         // Brand — Kreon regular, BrandSize, FooterGrey. Font_color on the Label
         // directly (no BBCode in a plain Label).
-        var brandColor = new Color(0.408f, 0.408f, 0.408f, 1f); // #686868 (ThemeStyle.FooterGrey)
-        brandLabel.AddThemeColorOverride("font_color", brandColor);
-        if (Fonts.Normal != null) brandLabel.AddThemeFontOverride("font", Fonts.Normal);
+        brandLabel.AddThemeColorOverride("font_color", ThemeStyle.FooterGreyColor);
+        var normalFont = GetKreonFont();
+        if (normalFont != null) brandLabel.AddThemeFontOverride("font", normalFont);
         brandLabel.AddThemeFontSizeOverride("font_size", ThemeStyle.BrandSize);
         brandLabel.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         brandLabel.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
         brandLabel.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);
+    }
+
+    // ── Shared [table=N] BBCode cell builders ─────────────────────────
+    // Used by card / relic / event stats tooltips. Columns are right-aligned
+    // over right-aligned numeric data; `expand=1` padding distributes leftover
+    // width across columns so they fill the panel rather than clustering tight.
+
+    /// <summary>Outermost column padding (left-edge of the table).</summary>
+    internal const string ColPadOuter = "expand=1 padding=4,0,12,0";
+    /// <summary>Interior column padding (between first and last).</summary>
+    internal const string ColPadInner = "expand=1 padding=12,0,12,0";
+    /// <summary>Rightmost column padding (right-edge of the table).</summary>
+    internal const string ColPadLast  = "expand=1 padding=12,0,4,0";
+
+    /// <summary>Column-header cell: right-aligned text in the stats-table header grey.</summary>
+    internal static string HdrCell(string name, string padding)
+        => $"[cell {padding}][right][color={ThemeStyle.HeaderGrey}]{name}[/color][/right][/cell]";
+
+    /// <summary>Plain right-aligned data cell. Content may contain BBCode (e.g. [color=...] / [b]).</summary>
+    internal static string DataCell(string content, string padding)
+        => $"[cell {padding}][right]{content}[/right][/cell]";
+
+    /// <summary>Right-aligned dash in NeutralShade, for missing-data rows.</summary>
+    internal static string EmptyCell(string padding)
+        => $"[cell {padding}][right][color={NeutralShade}]-[/color][/right][/cell]";
+
+    /// <summary>Right-aligned fraction `num/den` with the numerator already coloured (e.g. by ColN) and the `/den` suffix dimmed to NeutralShade.</summary>
+    internal static string FractionCell(string coloredNum, string den, string padding)
+        => $"[cell {padding}][right]{coloredNum}[color={NeutralShade}]/{den}[/color][/right][/cell]";
+
+    /// <summary>
+    /// Drop shadow for labels inside the independent tooltip panels
+    /// (encounter / event / post-fight). Offset 3/2, alpha 0.55 — darker than
+    /// <see cref="BestiaryPatch.ApplyTextShadow"/> (which uses the softer
+    /// game-stolen <see cref="FontSettings.Shadow"/>) because the independent
+    /// panels sit on their own chrome where a softer shadow reads as washed
+    /// out. Shared so the 3 tooltip files don't keep local copies.
+    /// </summary>
+    internal static readonly Color TooltipShadowColor = new(0f, 0f, 0f, 0.55f);
+    internal const int TooltipShadowOffsetX = 3;
+    internal const int TooltipShadowOffsetY = 2;
+    internal static void ApplyTooltipShadow(Control control)
+    {
+        switch (control)
+        {
+            case RichTextLabel rt:
+                rt.AddThemeColorOverride("font_shadow_color", TooltipShadowColor);
+                rt.AddThemeConstantOverride("shadow_offset_x", TooltipShadowOffsetX);
+                rt.AddThemeConstantOverride("shadow_offset_y", TooltipShadowOffsetY);
+                rt.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+            case Label lb:
+                lb.AddThemeColorOverride("font_shadow_color", TooltipShadowColor);
+                lb.AddThemeConstantOverride("shadow_offset_x", TooltipShadowOffsetX);
+                lb.AddThemeConstantOverride("shadow_offset_y", TooltipShadowOffsetY);
+                lb.AddThemeConstantOverride("shadow_outline_size", 0);
+                break;
+        }
     }
 
     private static void ApplyTableStyle(RichTextLabel label)
@@ -456,10 +538,12 @@ internal static class TooltipHelper
         label.AddThemeColorOverride("default_color", Fonts.Text);
         // Use Kreon proportional font — column alignment is handled by [table=N]
         // BBCode layout, not character width.
-        if (Fonts.Normal != null) label.AddThemeFontOverride("normal_font", Fonts.Normal);
-        if (Fonts.Bold != null)
+        var normalFont = GetKreonFont();
+        var boldFont = GetKreonBoldFont();
+        if (normalFont != null) label.AddThemeFontOverride("normal_font", normalFont);
+        if (boldFont != null)
         {
-            label.AddThemeFontOverride("bold_font", Fonts.Bold);
+            label.AddThemeFontOverride("bold_font", boldFont);
             label.AddThemeFontSizeOverride("bold_font_size", 20);
         }
         label.AddThemeFontSizeOverride("normal_font_size", 20);
@@ -503,7 +587,7 @@ internal static class TooltipHelper
 
     // Three shades per direction: light, medium, heavy. Chosen by significance score.
     // NeutralShade is used when significance is below threshold — dimmer than even the faintest shade.
-    internal const string NeutralShade = "#b5b5b5";
+    internal const string NeutralShade = ThemeStyle.NeutralShade;
 
     // Color-blind palette: teal (good) / orange (bad) — distinguishable without red/green.
     private static readonly string[] _cbBadShades  = { "#A87850", "#D86828", "#F06020" };
