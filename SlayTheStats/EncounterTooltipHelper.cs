@@ -72,11 +72,15 @@ public static class EncounterTooltipHelper
         // --- Pass 1: collect per-character metrics to compute the All (baseline) row ---
         // We need the baseline values before we can color the per-character rows.
         var perCharMetrics = new List<AllCharsPerCharMetrics>();
-        // Parallel list of (charId, stat, startingHp, descriptor) for characters with data,
-        // preserving canonical order + modded characters.
-        var charEntries = new List<(string charId, EncounterEvent stat, int startingHp, string descriptor)>();
-        // Characters with no data — shown as empty rows.
-        var emptyEntries = new List<string>(); // descriptor strings
+        // Single ordered list of every character row to render. Each entry carries a
+        // nullable (stat, startingHp) — null means "no data for this encounter, render as
+        // empty row". Keeping all characters in one list (in canonical order + modded tail)
+        // ensures row order is stable across encounters: whether Silent has data for this
+        // encounter or not, Silent always renders in the same slot between Ironclad and
+        // Regent. Previously we segregated into charEntries / emptyEntries and rendered
+        // each group in order → canonical chars without data were pushed to the bottom,
+        // which changed the per-row order per encounter.
+        var allEntries = new List<(string charId, EncounterEvent? stat, int startingHp, string descriptor)>();
         int totalFought = 0;
         int totalDied = 0;
 
@@ -90,16 +94,18 @@ public static class EncounterTooltipHelper
             {
                 int startingHp = startingHps.GetValueOrDefault(charId, 0);
                 CollectPerCharMetrics(perCharMetrics, stat, startingHp);
-                charEntries.Add((charId, stat, startingHp, descriptor));
+                allEntries.Add((charId, stat, startingHp, descriptor));
                 totalFought += stat.Fought;
                 totalDied += stat.Died;
             }
             else
             {
-                emptyEntries.Add(descriptor);
+                allEntries.Add((charId, null, 0, descriptor));
             }
         }
 
+        // Modded characters (not in CharacterOrder) — appended at the end, sorted by id
+        // so order is still stable across encounters. Only rendered if they have data.
         foreach (var (charId, stat) in charStats.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
         {
             if (rendered.Contains(charId)) continue;
@@ -108,7 +114,7 @@ public static class EncounterTooltipHelper
             var label = FormatUnknownCharLabel(charId);
             int startingHp = startingHps.GetValueOrDefault(charId, 0);
             CollectPerCharMetrics(perCharMetrics, stat, startingHp);
-            charEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/font]"));
+            allEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/font]"));
             totalFought += stat.Fought;
             totalDied += stat.Died;
         }
@@ -121,40 +127,42 @@ public static class EncounterTooltipHelper
         // the same content pool), avoiding the drift we saw with three independent tables.
         // When content exceeds the available height, everything scrolls together — the
         // header and baseline rows scroll with the character rows.
-        const int AllCharsDescExpand = 2;
-        var WP = new WideColumnPaddings();
+        // Descriptor parts + data parts come from class-level constants; label width is
+        // pinned by BestiaryPatch (_statsCharRowsLabel) to AllCharsTableWidthPx so the
+        // expand-ratio math resolves to absolute pixel widths per column.
+        var P = AllCharsColumns;
         var body = new StringBuilder();
         body.Append("[table=8]");
+        AppendSizingRow(body, AllCharsColumns, descParts: AllCharsDescriptorParts);
 
         // Header row
-        AppendDescriptorCell(body, " ", isHeader: true, expand: AllCharsDescExpand);
-        AppendHeaderCell(body, "Runs",    WP.Fought);
-        AppendHeaderCell(body, "Dmg%",    WP.Dmg);
-        AppendHeaderCell(body, "Mid 50%", WP.Mid50);
-        AppendHeaderCell(body, "Spread",  WP.Spread);
-        AppendHeaderCell(body, "Turns",   WP.Turns);
-        AppendHeaderCell(body, "Potions", WP.Pots);
-        AppendHeaderCell(body, "Deaths",  WP.Deaths);
+        AppendDescriptorCell(body, " ", isHeader: true, parts: AllCharsDescriptorParts);
+        AppendHeaderCell(body, "Runs",    P.Fought);
+        AppendHeaderCell(body, "Dmg%",    P.Dmg);
+        AppendHeaderCell(body, "Mid 50%", P.Mid50);
+        AppendHeaderCell(body, "Spread",  P.Spread);
+        AppendHeaderCell(body, "Turns",   P.Turns);
+        AppendHeaderCell(body, "Potions", P.Pots);
+        AppendHeaderCell(body, "Deaths",  P.Deaths);
 
-        // Character rows
-        foreach (var (charId, stat, startingHp, descriptor) in charEntries)
+        // Character rows — render in canonical order, emitting data cells for chars that
+        // have a stat for this encounter and empty cells for those that don't.
+        foreach (var (charId, stat, startingHp, descriptor) in allEntries)
         {
-            AppendDescriptorCell(body, descriptor, expand: AllCharsDescExpand);
-            AppendAllCharsDataCells(body, stat, startingHp, allBaseline);
-        }
-        foreach (var descriptor in emptyEntries)
-        {
-            AppendDescriptorCell(body, descriptor, expand: AllCharsDescExpand);
-            AppendEmptyDataCells(body, wide: true);
+            AppendDescriptorCell(body, descriptor, parts: AllCharsDescriptorParts);
+            if (stat != null)
+                AppendAllCharsDataCells(body, stat!, startingHp, allBaseline);
+            else
+                AppendEmptyDataCells(body);
         }
 
         // Baseline (All) row
         var allIcon = AllCharsIcon(22);
-        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)", expand: AllCharsDescExpand);
+        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)", parts: AllCharsDescriptorParts);
         if (perCharMetrics.Count > 0)
             AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
         else
-            AppendEmptyDataCells(body, wide: true);
+            AppendEmptyDataCells(body);
 
         body.Append("[/table]");
 
@@ -223,46 +231,85 @@ public static class EncounterTooltipHelper
     /// the data block. RIGHT padding is 0 so data columns are as tight as possible;
     /// inter-data-col spacing comes entirely from the text content minimums.</summary>
     private const string FoughtCellPadding      = "padding=2,0,0,0";
-    // Wider padding for the all-characters table — character icons + "%" suffixes need more room.
-    private const string WideNormalCellPadding   = "padding=18,0,18,0";
-    private const string WideTightCellPadding    = "padding=12,0,12,0";
-    /// <summary>First data column (Runs/Fought) in the all-chars table: keep the same
-    /// right padding as WideNormalCellPadding (18) so the gap to Dmg% matches the other
-    /// group separators, but shrink the left padding so Runs values sit closer to the
-    /// character-name descriptor. Pairs with the reduced DescriptorCellPadding right
-    /// padding for a meaningfully tighter visual gap.</summary>
-    private const string WideFoughtCellPadding   = "padding=4,0,18,0";
 
-    /// <summary>Per-column padding assignments so each cell-emitter picks the
-    /// right tier without hard-coding padding strings inline.</summary>
+    /// <summary>Column widths in absolute pixels, expressed as "parts" where one part =
+    /// <see cref="PartSizePx"/> pixels. Mechanism: each cell carries an expand ratio
+    /// (Godot requires it), and the caller pins the RichTextLabel's total width to
+    /// <c>total_parts × PartSizePx</c>. With that pinning, each column's expand allocation
+    /// resolves to <c>(parts / total_parts) × (total_parts × PartSizePx) = parts ×
+    /// PartSizePx</c> — independent of which table or its total parts. Data columns
+    /// therefore render pixel-identical across focused and all-chars tables even when
+    /// descriptor parts differ. Leftover label width sits unused to the right.
+    /// Width pinning is done in <c>BestiaryPatch</c>: focused via <see cref="FocusedTableWidthPx"/>
+    /// on <c>_statsLabel.CustomMinimumSize</c>; all-chars via <see cref="AllCharsTableWidthPx"/>
+    /// in <c>SetupStatsCharRowsLayout</c>.
+    /// Fallback: if any column's real content width exceeds <c>parts × PartSizePx</c>
+    /// that column grows to fit (or text wraps). Accepted as an edge case — Mid50
+    /// "999-999%" ≈ 85px may briefly push 3×24=72 → grows a few px for those rows.</summary>
+    private const int PartSizePx = 27;
+
+    /// <summary>Per-column parts + padding, parameterized so focused and all-chars views
+    /// can use different values per column. Stores the parts alongside the pre-formatted
+    /// BBCode cell string so <see cref="AppendSizingRow"/> can derive the em-space pixel
+    /// floor for each column without re-specifying the numbers.</summary>
     private struct ColumnPaddings
     {
-        public readonly string Fought = FoughtCellPadding;
-        public readonly string Dmg    = TightCellPadding;
-        public readonly string Mid50  = TightCellPadding;
-        public readonly string Spread = TightCellPadding;
-        public readonly string Turns  = TightCellPadding;
-        public readonly string Pots   = TightCellPadding;
-        public readonly string Deaths = TightCellPadding;
-        public ColumnPaddings() {}
+        public readonly int FoughtParts;
+        public readonly int DmgParts;
+        public readonly int Mid50Parts;
+        public readonly int SpreadParts;
+        public readonly int TurnsParts;
+        public readonly int PotsParts;
+        public readonly int DeathsParts;
+
+        public readonly string Fought;
+        public readonly string Dmg;
+        public readonly string Mid50;
+        public readonly string Spread;
+        public readonly string Turns;
+        public readonly string Pots;
+        public readonly string Deaths;
+
+        public ColumnPaddings(int fought, int dmg, int mid50, int spread, int turns, int pots, int deaths)
+        {
+            FoughtParts = fought;
+            DmgParts = dmg;
+            Mid50Parts = mid50;
+            SpreadParts = spread;
+            TurnsParts = turns;
+            PotsParts = pots;
+            DeathsParts = deaths;
+            Fought = $"expand={fought} {FoughtCellPadding}";
+            Dmg    = $"expand={dmg} {TightCellPadding}";
+            Mid50  = $"expand={mid50} {TightCellPadding}";
+            Spread = $"expand={spread} {TightCellPadding}";
+            Turns  = $"expand={turns} {TightCellPadding}";
+            Pots   = $"expand={pots} {TightCellPadding}";
+            Deaths = $"expand={deaths} {TightCellPadding}";
+        }
+
+        public int SumDataParts => FoughtParts + DmgParts + Mid50Parts + SpreadParts
+                                   + TurnsParts + PotsParts + DeathsParts;
     }
 
-    /// <summary>Wider padding for the all-characters table where character icons and
-    /// "%" suffixes on damage columns make the rows wider. Includes expand=1 on every
-    /// data column so all three independent [table=8] RichTextLabels (header, character
-    /// rows, baseline) allocate the same proportional column widths regardless of
-    /// content differences.</summary>
-    private struct WideColumnPaddings
-    {
-        public readonly string Fought = $"expand=1 {WideFoughtCellPadding}";
-        public readonly string Dmg    = $"expand=1 {WideTightCellPadding}";
-        public readonly string Mid50  = $"expand=1 {WideTightCellPadding}";
-        public readonly string Spread = $"expand=1 {WideNormalCellPadding}";
-        public readonly string Turns  = $"expand=1 {WideTightCellPadding}";
-        public readonly string Pots   = $"expand=1 {WideTightCellPadding}";
-        public readonly string Deaths = $"expand=1 {WideTightCellPadding}";
-        public WideColumnPaddings() {}
-    }
+    // Focused view: 2:2:3:3:2:3:3 on data columns.
+    private static readonly ColumnPaddings FocusedColumns =
+        new(fought: 2, dmg: 2, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
+    // All-chars view: same as focused except Dmg% gets 3 parts (wider content like "Dmg%"
+    // header + "100%" data reads comfortably with the extra breathing room).
+    private static readonly ColumnPaddings AllCharsColumns =
+        new(fought: 2, dmg: 3, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
+
+    /// <summary>Focused-view descriptor parts — must match the default on
+    /// <see cref="AppendDescriptorCell"/> and <see cref="AppendSizingRow"/>.</summary>
+    public const int FocusedDescriptorParts = 11;
+    public static readonly int FocusedTotalParts = FocusedDescriptorParts + FocusedColumns.SumDataParts;
+    public static readonly int FocusedTableWidthPx = FocusedTotalParts * PartSizePx;
+    /// <summary>All-chars-view descriptor parts — narrower than focused since character-
+    /// name descriptors are shorter than focused's pool labels.</summary>
+    public const int AllCharsDescriptorParts = 5;
+    public static readonly int AllCharsTotalParts = AllCharsDescriptorParts + AllCharsColumns.SumDataParts;
+    public static readonly int AllCharsTableWidthPx = AllCharsTotalParts * PartSizePx;
 
     private static string EmptyDataCell(string padding, string? color = null, string align = "right")
     {
@@ -271,14 +318,13 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>Descriptor cell in the focused-view / all-chars [table=8] — always the first
-    /// cell of each row. `expand` weights the descriptor column; default 3 soaks up leftover
-    /// horizontal space for long focused-view sub-labels ("vs Act N biome elites (baseline)").
-    /// All-chars view uses expand=2 since character-name descriptors are much shorter and
-    /// `expand=3` leaves a large empty gap between the name and the Runs column.</summary>
-    private static void AppendDescriptorCell(StringBuilder sb, string text, bool isHeader = false, int expand = 3)
+    /// cell of each row. `parts` is the column's expand ratio (plus drives the sizing row's
+    /// pixel floor via <see cref="AppendSizingRow"/>). Focused view uses parts=11 by default;
+    /// all-chars passes parts=5.</summary>
+    private static void AppendDescriptorCell(StringBuilder sb, string text, bool isHeader = false, int parts = 11)
     {
         var color = isHeader ? HeaderColor : BaselineSectionColor;
-        sb.Append($"[cell expand={expand} {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
+        sb.Append($"[cell expand={parts} {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
     }
 
     /// <summary>Reference string that sets the minimum descriptor column width.
@@ -288,27 +334,33 @@ public static class EncounterTooltipHelper
     private const string DescriptorSizingRef =
         "\u00A0\u00A0\u00A0vs Act 9 elites (baseline)";
 
-    /// <summary>Appends an invisible 1px-tall row that locks column widths for the
-    /// focused-view table. Uses U+2003 em-space at font_size=1 (≈1px per em-space) to
-    /// set horizontal minimums without visible height. Each data cell uses the SAME
-    /// padding constant as the corresponding real-row column — otherwise column widths
-    /// inflate by the padding mismatch (Godot picks max(sizing, real) cell width).
-    /// Emitted right after the opening [table=8] tag.</summary>
-    private static void AppendSizingRow(StringBuilder sb)
+    /// <summary>Emits an invisible 1px-tall sizing row at the top of a [table=8] to set
+    /// column widths in absolute pixels. Each cell contains U+2003 em-space characters at
+    /// font_size=1 (≈1px per em-space), so N em-spaces ≈ N pixels. Widths are expressed
+    /// in "parts" where 1 part = <see cref="PartSizePx"/> pixels, and data-column parts
+    /// are shared (FoughtParts, DmgParts, …). Descriptor parts are per-view: focused passes
+    /// 12, all-chars passes 8. A column's final width = max(parts×PartSizePx, widest real
+    /// content in that column); content override can happen when real text at font 18
+    /// exceeds the parts-based floor (Mid50 "999-999%" is the notable case).</summary>
+    /// <summary>Overload that selects the focused view's ColumnPaddings by default.</summary>
+    private static void AppendSizingRow(StringBuilder sb, int descParts = 11)
     {
-        var P = new ColumnPaddings();
-        // Descriptor: long enough for "vs Act 9 elites (baseline)" with icon at font 18.
-        sb.Append($"[cell expand=3 {DescriptorCellPadding}][font_size=1]{EmSpaces(280)}[/font_size][/cell]");
-        // Data col sizing refs — set to the max expected content width (headers or data,
-        // whichever is widest) so columns stay locked across hover-state changes. Headers
-        // generally dominate since "Potions", "Spread", "Turns" are wider than "99.9" etc.
-        AppendSizingDataCell(sb, P.Fought, 40);  // "9999" data
-        AppendSizingDataCell(sb, P.Dmg,    30);  // "Dmg%" header or "100%" data
-        AppendSizingDataCell(sb, P.Mid50,  70);  // "999-999%" data (widest)
-        AppendSizingDataCell(sb, P.Spread, 50);  // "Spread" header
-        AppendSizingDataCell(sb, P.Turns,  45);  // "Turns" header
-        AppendSizingDataCell(sb, P.Pots,   55);  // "Potions" header
-        AppendSizingDataCell(sb, P.Deaths, 55);  // "999/999" data
+        AppendSizingRow(sb, FocusedColumns, descParts);
+    }
+
+    private static void AppendSizingRow(StringBuilder sb, ColumnPaddings P, int descParts)
+    {
+        // Sizing row cells must carry the SAME expand attribute as their real-row counterparts
+        // — mismatch would cause Godot to treat the sizing cell as a separate column with
+        // different expand, breaking the layout.
+        sb.Append($"[cell expand={descParts} {DescriptorCellPadding}][font_size=1]{EmSpaces(descParts * PartSizePx)}[/font_size][/cell]");
+        AppendSizingDataCell(sb, P.Fought, P.FoughtParts * PartSizePx);
+        AppendSizingDataCell(sb, P.Dmg,    P.DmgParts    * PartSizePx);
+        AppendSizingDataCell(sb, P.Mid50,  P.Mid50Parts  * PartSizePx);
+        AppendSizingDataCell(sb, P.Spread, P.SpreadParts * PartSizePx);
+        AppendSizingDataCell(sb, P.Turns,  P.TurnsParts  * PartSizePx);
+        AppendSizingDataCell(sb, P.Pots,   P.PotsParts   * PartSizePx);
+        AppendSizingDataCell(sb, P.Deaths, P.DeathsParts * PartSizePx);
     }
 
     private static void AppendSizingDataCell(StringBuilder sb, string padding, int widthPx)
@@ -334,7 +386,7 @@ public static class EncounterTooltipHelper
         double medianBase, double iqrcBase, double deathRateBase, double turnsBase, double potsBase)
     {
         int n = stat.Fought;
-        var P = new ColumnPaddings();
+        var P = FocusedColumns;
         if (n == 0)
         {
             sb.Append(EmptyDataCell(P.Fought));
@@ -380,7 +432,7 @@ public static class EncounterTooltipHelper
     private static void AppendRow1PoolDataCells(StringBuilder sb, PoolMetrics subject, PoolMetrics baseline)
     {
         int n = subject.Fought;
-        var P = new ColumnPaddings();
+        var P = FocusedColumns;
         if (n == 0)
         {
             sb.Append(EmptyDataCell(P.Fought));
@@ -426,7 +478,7 @@ public static class EncounterTooltipHelper
     {
         int n = m.Fought;
         string color = ContextRowDataColor;
-        var P = new ColumnPaddings();
+        var P = FocusedColumns;
         if (n == 0)
         {
             sb.Append(EmptyDataCell(P.Fought, color));
@@ -561,7 +613,7 @@ public static class EncounterTooltipHelper
     {
         int charCount = metrics.Count;
         string color = ContextRowDataColor;
-        var P = new WideColumnPaddings();
+        var P = AllCharsColumns;
 
         // Median-of-medians for dmg%
         double allDmgPct = MedianOfDoubles(metrics.Select(m => m.DmgPctMedian).ToList());
@@ -641,10 +693,10 @@ public static class EncounterTooltipHelper
         AllRowBaselines baselines)
     {
         int n = stat.Fought;
-        var P = new WideColumnPaddings();
+        var P = AllCharsColumns;
         if (n == 0 || startingHp <= 0)
         {
-            AppendEmptyDataCells(sb, wide: true);
+            AppendEmptyDataCells(sb);
             return;
         }
 
@@ -680,31 +732,19 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {P.Deaths}][right]{cDeaths}[/right][/cell]");
     }
 
-    /// <summary>Appends a full row of empty "-" data cells for the [table=8] layout.</summary>
-    private static void AppendEmptyDataCells(StringBuilder sb, bool wide = false)
+    /// <summary>Appends a full row of empty "-" data cells for the [table=8] layout.
+    /// Only called from the all-chars view (for characters with no data for this
+    /// encounter), so hardcodes AllCharsColumns.</summary>
+    private static void AppendEmptyDataCells(StringBuilder sb)
     {
-        if (wide)
-        {
-            var W = new WideColumnPaddings();
-            sb.Append(EmptyDataCell(W.Fought));
-            sb.Append(EmptyDataCell(W.Dmg));
-            sb.Append(EmptyDataCell(W.Mid50));
-            sb.Append(EmptyDataCell(W.Spread));
-            sb.Append(EmptyDataCell(W.Turns));
-            sb.Append(EmptyDataCell(W.Pots));
-            sb.Append(EmptyDataCell(W.Deaths));
-        }
-        else
-        {
-            var P = new ColumnPaddings();
-            sb.Append(EmptyDataCell(P.Fought));
-            sb.Append(EmptyDataCell(P.Dmg));
-            sb.Append(EmptyDataCell(P.Mid50));
-            sb.Append(EmptyDataCell(P.Spread));
-            sb.Append(EmptyDataCell(P.Turns));
-            sb.Append(EmptyDataCell(P.Pots));
-            sb.Append(EmptyDataCell(P.Deaths));
-        }
+        var P = AllCharsColumns;
+        sb.Append(EmptyDataCell(P.Fought));
+        sb.Append(EmptyDataCell(P.Dmg));
+        sb.Append(EmptyDataCell(P.Mid50));
+        sb.Append(EmptyDataCell(P.Spread));
+        sb.Append(EmptyDataCell(P.Turns));
+        sb.Append(EmptyDataCell(P.Pots));
+        sb.Append(EmptyDataCell(P.Deaths));
     }
 
     /// <summary>FormatDeathsCell variant for the new table layout — no padding,
@@ -835,16 +875,19 @@ public static class EncounterTooltipHelper
         sb.Append("[table=8]");
         AppendSizingRow(sb);
 
-        // Header row — empty descriptor cell + 7 column headers. Paddings must match
-        // ColumnPaddings so header cells right-align with data cells below.
+        // Header row — empty descriptor cell + 7 column headers. Use FocusedColumns
+        // paddings (which carry expand=N) to match the sizing row + data rows; passing
+        // bare cell-padding constants would omit expand and could reset the column's
+        // expand to Godot's default of 1, destabilizing column widths.
+        var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    FoughtCellPadding);
-        AppendHeaderCell(sb, "Dmg",     TightCellPadding);
-        AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
-        AppendHeaderCell(sb, "Spread",  TightCellPadding);
-        AppendHeaderCell(sb, "Turns",   TightCellPadding);
-        AppendHeaderCell(sb, "Potions", TightCellPadding);
-        AppendHeaderCell(sb, "Deaths",  TightCellPadding);
+        AppendHeaderCell(sb, "Runs",    FP.Fought);
+        AppendHeaderCell(sb, "Dmg",     FP.Dmg);
+        AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
+        AppendHeaderCell(sb, "Spread",  FP.Spread);
+        AppendHeaderCell(sb, "Turns",   FP.Turns);
+        AppendHeaderCell(sb, "Potions", FP.Pots);
+        AppendHeaderCell(sb, "Deaths",  FP.Deaths);
 
         // Row 1: this encounter, this character — data cells colored against act pool baseline
         AppendDescriptorCell(sb, $"{charIcon}vs {encNameRow1}");
@@ -898,15 +941,17 @@ public static class EncounterTooltipHelper
         sb.Append("[table=8]");
         AppendSizingRow(sb);
 
-        // Header row
+        // Header row (see comment in BuildEncounterStatsTextFocused — use FocusedColumns
+        // paddings so expand attributes match the sizing + data rows).
+        var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    FoughtCellPadding);
-        AppendHeaderCell(sb, "Dmg",     TightCellPadding);
-        AppendHeaderCell(sb, "Mid 50%", TightCellPadding);
-        AppendHeaderCell(sb, "Spread",  TightCellPadding);
-        AppendHeaderCell(sb, "Turns",   TightCellPadding);
-        AppendHeaderCell(sb, "Potions", TightCellPadding);
-        AppendHeaderCell(sb, "Deaths",  TightCellPadding);
+        AppendHeaderCell(sb, "Runs",    FP.Fought);
+        AppendHeaderCell(sb, "Dmg",     FP.Dmg);
+        AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
+        AppendHeaderCell(sb, "Spread",  FP.Spread);
+        AppendHeaderCell(sb, "Turns",   FP.Turns);
+        AppendHeaderCell(sb, "Potions", FP.Pots);
+        AppendHeaderCell(sb, "Deaths",  FP.Deaths);
 
         var allCharsIcon = AllCharsIcon(22);
         var catPlural = PluralizeCategory(catLower);

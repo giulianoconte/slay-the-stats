@@ -2,6 +2,7 @@ using BaseLib.Utils;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Assets;
+using MegaCrit.Sts2.Core.Audio;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Helpers;
@@ -464,11 +465,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         MainFile.Logger.Info("[SlayTheStats] BuildUI stage: start");
 
         // Outer margin: extra left padding so the back button (in the slightly-below-middle-left
-        // position) doesn't overlap the encounter list
+        // position) doesn't overlap the encounter list. The right margin pulls the title
+        // row, title-vs-content separator, encounter list, VSeparator, stats table + its
+        // legend "?", the stats/preview HSeparator, and the preview panel all inward from
+        // the right edge as a unit — bumping this is the single knob for shrinking the
+        // bestiary's right-side footprint.
         var margin = new MarginContainer();
         margin.SetAnchorsPreset(LayoutPreset.FullRect);
         margin.AddThemeConstantOverride("margin_left", 260);
-        margin.AddThemeConstantOverride("margin_right", 12);
+        margin.AddThemeConstantOverride("margin_right", 72);
         margin.AddThemeConstantOverride("margin_top", 24);
         margin.AddThemeConstantOverride("margin_bottom", 24);
         // Clicks in the margin padding area (left 200px, etc.) that don't hit
@@ -531,10 +536,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var leftSection = new VBoxContainer();
         leftSection.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         leftSection.SizeFlagsVertical = SizeFlags.ExpandFill;
-        // Stretch ratio gives the encounter list the majority of the horizontal
-        // budget while leaving the right panel enough room for all table columns
-        // (including Deaths) without clipping.
-        leftSection.SizeFlagsStretchRatio = 0.82f;
+        // Stretch ratio: encounter list vs right panel. leftSection=0.9 / rightPanel=1.0
+        // gives ~47% / 53% of the content-split width to each side. Tuned so the right
+        // panel is still wide enough for EncounterTooltipHelper.FocusedTableWidthPx
+        // (parts × PartSizePx) but the encounter list gets a fair share for readability.
+        leftSection.SizeFlagsStretchRatio = 0.9f;
         leftSection.AddThemeConstantOverride("separation", 4);
         contentSplit.AddChild(leftSection);
 
@@ -770,7 +776,22 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         titleRow.AddChild(_legendButton);
 
         // Stats label — used for focused-character and category views (non-scrollable).
+        // Width is pinned to FocusedTableWidthPx so the BBCode [table=8]'s expand-ratio
+        // math resolves to absolute per-column pixel widths (parts × PartSizePx). Three
+        // flags work together to keep column widths stable across encounter hovers:
+        //   • ShrinkBegin horizontal     — label sits at min size, doesn't ExpandFill.
+        //   • CustomMinimumSize.X=pinned — exact table width, independent of content.
+        //   • FitContent=false           — prevents content-driven width growth. Without
+        //     this, a descriptor that exceeds its column allocation would bump the label
+        //     width up (even 1-2px) and the whole expand-ratio distribution would shift,
+        //     causing visible column jitter as the user hovers different encounters.
+        //   • ExpandFill vertical        — absorbs all remaining statsBox vertical space
+        //     since FitContent=false no longer drives the min height.
         _statsLabel = CreateStatsRichTextLabel();
+        _statsLabel.FitContent = false;
+        _statsLabel.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        _statsLabel.SizeFlagsVertical   = SizeFlags.ExpandFill;
+        _statsLabel.CustomMinimumSize = new Vector2(EncounterTooltipHelper.FocusedTableWidthPx, 0);
         _statsLabel.Text = $"[color=#686868]Hover an encounter to see stats[/color]";
         statsVbox.AddChild(_statsLabel);
 
@@ -991,6 +1012,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                     CompendiumFilterPatch.SyncAllControls();
                 }
             };
+            AttachHoverSfx(fallback);
             if (_filterPane is FilterPanelContainer fpc)
                 fpc.AssociatedButton = fallback;
 
@@ -1663,7 +1685,25 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
         // Drop shadow so the table text matches the rest of the bestiary (and the tooltip family).
         ApplyTextShadow(label);
+        ApplyDebugTableOverlay(label);
         return label;
+    }
+
+    /// <summary>When DebugMode is on, paint RichTextLabel tables with visible per-cell
+    /// borders and alternating row backgrounds so the relationship between cell padding,
+    /// content width, and the inter-column gap is legible at a glance. Godot exposes
+    /// three RichTextLabel theme colors for this: <c>table_border</c> (cell edge line),
+    /// <c>table_odd_row_bg</c>, and <c>table_even_row_bg</c> (row fills). With
+    /// <c>table_h_separation=0</c>, adjacent cells sit flush — the only visible gap
+    /// between two cells' content is the sum of cellA.right-pad + cellB.left-pad, which
+    /// the borders make easy to measure. No-op when DebugMode is off so release builds
+    /// stay clean.</summary>
+    private static void ApplyDebugTableOverlay(RichTextLabel label)
+    {
+        if (!SlayTheStatsConfig.DebugMode) return;
+        label.AddThemeColorOverride("table_border",       new Color(1.00f, 0.25f, 0.25f, 0.95f));
+        label.AddThemeColorOverride("table_odd_row_bg",   new Color(0.25f, 0.35f, 0.55f, 0.30f));
+        label.AddThemeColorOverride("table_even_row_bg",  new Color(0.55f, 0.35f, 0.25f, 0.30f));
     }
 
     // ───────────────────────── Column legend popup ─────────────────────────
@@ -1993,6 +2033,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var catWrap = new PanelContainer();
             catWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
             catWrap.MouseFilter = MouseFilterEnum.Stop;
+            // Same inspect cursor as encounter rows — hovering a category header reveals
+            // the pool-aggregate stats in the right-hand panel, so it's also "clickable
+            // for more detail" from the user's POV.
+            catWrap.MouseDefaultCursorShape = CursorShape.Help;
 
             var catRow = new HBoxContainer();
             // Use a compact row height for category headers — the icon wrapper now uses a
@@ -2092,9 +2136,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             catWrap.GuiInput += (InputEvent ev) =>
             {
                 // Click region for collapse/expand: arrow + icon. 14(arrow) + 2(sep)
-                // + 62(icon column) = 78px. Matches the encounter row layout so the
+                // + 50(icon column) = 66px. Matches the encounter row layout so the
                 // clickable collapse area visually lines up with the icon column.
-                const float CollapseThreshold = 78f;
+                const float CollapseThreshold = 66f;
                 if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
                 {
                     if (mb.Position.X < CollapseThreshold)
@@ -2289,12 +2333,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         encounterHeader.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(encounterHeader);
         ApplyTextShadow(encounterHeader);
-        // Left margin matches the encounter rows below: 20px lead spacer + 62px icon
-        // column + 8px HBox separation = 90px before the highlight panel starts, plus
-        // the highlight panel's left content margin (RowMarginLeftPx). The header row
-        // itself has separation=6, so subtract that from the spacer.
-        // 14(arrow) + 2(gap) + 62(icon col) + 2(gap) = 80, plus the highlight panel's left content margin.
-        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(80 + RowMarginLeftPx, 0) });
+        // Left margin matches the encounter rows below: 14px lead spacer + 50px icon
+        // column + 2+2px HBox separation = 68px before the highlight panel starts, plus
+        // the highlight panel's left content margin (RowMarginLeftPx).
+        // 14(arrow) + 2(gap) + 50(icon col) + 2(gap) = 68, plus the highlight panel's left content margin.
+        _statsColumnHeaderRow.AddChild(new Control { CustomMinimumSize = new Vector2(68 + RowMarginLeftPx, 0) });
         _statsColumnHeaderRow.AddChild(encounterHeader);
 
         var spacer = new Control();
@@ -2565,6 +2608,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 panel.AcceptEvent();
             }
         };
+        AttachHoverSfx(panel);
         return panel;
     }
 
@@ -2896,7 +2940,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
             onPressed();
         };
+        AttachHoverSfx(btn);
         return btn;
+    }
+
+    /// <summary>Hook a Control's MouseEntered signal to play the game-native UI hover SFX.
+    /// Mirrors the hover cue used by NButton so our custom bestiary controls (biome / sort /
+    /// score-by chips, help buttons, encounter rows, etc.) feel native. Skip controls that
+    /// already carry a game-native hover sound — stacking two plays at once is audible.</summary>
+    private static void AttachHoverSfx(Control c)
+    {
+        if (c == null) return;
+        c.MouseEntered += () => SfxCmd.Play(FmodSfx.uiHover);
     }
 
     /// <summary>
@@ -3148,7 +3203,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Wrap each row in a PanelContainer so we can flip a highlight stylebox on hover/select.
         var wrap = new PanelContainer();
         wrap.MouseFilter = MouseFilterEnum.Stop;
+        // Godot's Help cursor shape (enum value 16) is overridden at boot by
+        // NCursorManager._EnterTree with the game's magnifying-glass "inspect" image,
+        // so every Control that opts into CursorShape.Help gets the native magnifier.
+        wrap.MouseDefaultCursorShape = CursorShape.Help;
         wrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
+        AttachHoverSfx(wrap);
 
         // Boss rows get a slightly taller row height so the per-boss icon has breathing
         // space without crowding the row's text. Other rows stay at the compact text-row
@@ -3175,7 +3235,17 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             // images are distinctive enough that we don't need a glow, but the size pop
             // still cues which row is active. The wrapper width is pinned to the same
             // column as the category icons so boss icons sit on the same vertical line.
-            var bossHandle = EncounterIcons.MakePlainBossIcon(encounterId, bossSize, rowHeight, EncounterIcons.CategoryIconColumnWidthPx);
+            //
+            // Row layout: leadSpacer(14) + sep(2) + iconWrapper(50) + sep(2) + highlightPanel.
+            // Centering the icon in its 50px wrapper puts its center at x≈41, which reads
+            // as left-biased inside the 14..78 (arrow-end to text-start) gap whose true
+            // midpoint is x≈46. Shift the icon +5px right so the visual center lands in
+            // the arrow→text midpoint; the hover scale stays symmetric (pivot is at the
+            // icon's own center) so the row doesn't jitter.
+            const float BossIconGapCenterShift = 5f;
+            var bossHandle = EncounterIcons.MakePlainBossIcon(
+                encounterId, bossSize, rowHeight, EncounterIcons.CategoryIconColumnWidthPx,
+                iconOffsetX: BossIconGapCenterShift);
             if (bossHandle != null)
             {
                 bossHandle.Wrapper.SizeFlagsVertical = SizeFlags.ShrinkCenter;
@@ -3793,10 +3863,17 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void SetupStatsCharRowsLayout()
     {
         if (_statsCharRowsLabel == null || _statsCharRowsClipper == null || _statsCharRowsWrapper == null) return;
-        // Set the label width to match the clipper so BBCode tables render at the right width.
-        float clipperWidth = _statsCharRowsClipper.Size.X;
+        // Pin the label width to the parts-derived absolute value (AllCharsTableWidthPx) so
+        // the BBCode [table=8]'s expand-ratio math resolves to exact per-column pixel widths.
+        // Clipper is typically wider than this — leftover clipper width becomes empty space
+        // to the right of the table. If the table happens to be wider than the clipper for
+        // some reason (e.g. lots of characters or extreme content), we fall back to the
+        // clipper width and the table's internal layout absorbs the difference.
+        float targetWidth = Math.Min(
+            EncounterTooltipHelper.AllCharsTableWidthPx,
+            _statsCharRowsClipper.Size.X);
         float contentHeight = _statsCharRowsLabel.GetContentHeight();
-        _statsCharRowsLabel.Size = new Godot.Vector2(clipperWidth, contentHeight);
+        _statsCharRowsLabel.Size = new Godot.Vector2(targetWidth, contentHeight);
 
         float clipperHeight = _statsCharRowsClipper.Size.Y;
         bool needsScroll = contentHeight > clipperHeight;
@@ -5105,9 +5182,10 @@ internal static class EncounterIcons
     /// Width of the icon column on category header rows. Every category icon is wrapped at
     /// this exact width so their visual centers line up regardless of which icon (weak,
     /// elite, event, etc.) is being rendered. Sized to fit the largest category icon
-    /// (elite/boss = 42px) plus its breathing room.
+    /// (elite/boss = 42px) with a tight breathing margin; the silhouette halo (~2.5px)
+    /// and hover scale still overflow visually since the wrapper doesn't clip.
     /// </summary>
-    public const int CategoryIconColumnWidthPx = 62;
+    public const int CategoryIconColumnWidthPx = 50;
 
     /// <summary>
     /// Vertical extent of the category icon wrapper. Smaller than the column width so the
@@ -5164,12 +5242,17 @@ internal static class EncounterIcons
     /// <paramref name="wrapperWidthOverride"/> pins the wrapper width to a uniform column
     /// (typically <see cref="CategoryIconColumnWidthPx"/>) so boss icons sit on the same
     /// vertical line as the category icons.
+    /// <paramref name="iconOffsetX"/> shifts the icon (and outline) horizontally inside
+    /// the wrapper. Used by the encounter row to pull the boss icon toward the center of
+    /// the arrow→text gap rather than the center of the icon column — since the icon
+    /// column sits flush against the arrow spacer, a centered icon reads as left-biased.
     /// </summary>
     public static NBestiaryStatsSubmenu.IconHoverHandle? MakePlainBossIcon(
         string encounterId,
         int sizePx,
         int? rowHeightOverridePx = null,
-        int? wrapperWidthOverride = null)
+        int? wrapperWidthOverride = null,
+        float iconOffsetX = 0f)
     {
         var perBoss = LoadBossTexture(encounterId);
         Color modulate;
@@ -5206,8 +5289,8 @@ internal static class EncounterIcons
             outline.Texture       = outlineTex;
             outline.AnchorLeft    = 0.5f; outline.AnchorRight = 0.5f;
             outline.AnchorTop     = 0.5f; outline.AnchorBottom = 0.5f;
-            outline.OffsetLeft    = -outlineSize / 2f;
-            outline.OffsetRight   =  outlineSize / 2f;
+            outline.OffsetLeft    = -outlineSize / 2f + iconOffsetX;
+            outline.OffsetRight   =  outlineSize / 2f + iconOffsetX;
             outline.OffsetTop     = -outlineSize / 2f;
             outline.OffsetBottom  =  outlineSize / 2f;
             outline.StretchMode   = TextureRect.StretchModeEnum.KeepAspectCentered;
@@ -5222,8 +5305,8 @@ internal static class EncounterIcons
         icon.Texture       = tex;
         icon.AnchorLeft    = 0.5f; icon.AnchorRight = 0.5f;
         icon.AnchorTop     = 0.5f; icon.AnchorBottom = 0.5f;
-        icon.OffsetLeft    = -sizePx / 2f;
-        icon.OffsetRight   =  sizePx / 2f;
+        icon.OffsetLeft    = -sizePx / 2f + iconOffsetX;
+        icon.OffsetRight   =  sizePx / 2f + iconOffsetX;
         icon.OffsetTop     = -sizePx / 2f;
         icon.OffsetBottom  =  sizePx / 2f;
         icon.StretchMode   = TextureRect.StretchModeEnum.KeepAspectCentered;
