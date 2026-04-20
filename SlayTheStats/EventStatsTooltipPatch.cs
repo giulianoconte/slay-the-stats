@@ -119,7 +119,7 @@ internal static class EventHoverHelper
             // Hide timer and flicker the panel.
             _hideGen++;
 
-            _panelNameLabel.Text = $"[b]Event Stats[/b]";
+            _panelNameLabel.Text = $"[b]{L.T("tooltip.event.header")}[/b]";
             _panelLabel.Text     = hasData
                 ? BuildStatsText(eventId, agg, hoveredOptionKey, characterLabel, wrBaseline, filter)
                 : CardHoverShowPatch.NoDataText(filter);

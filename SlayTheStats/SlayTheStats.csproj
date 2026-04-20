@@ -74,7 +74,7 @@
     <ItemGroup>
         <PackageReference Include="Alchyr.Sts2.BaseLib" Version="3.0.9" PrivateAssets="All" />
         <PackageReference Include="Alchyr.Sts2.ModAnalyzers" Version="*" />
-        <AdditionalFiles Include="SlayTheStats/localization/**/*.json"/>
+        <AdditionalFiles Include="localization/**/*.json"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -112,6 +112,12 @@
         <Message Text="Copying .dll and manifest to mods folder." Importance="high" />
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsPath)$(MSBuildProjectName)/" />
         <Copy SourceFiles="SlayTheStats.json" DestinationFolder="$(ModsPath)$(MSBuildProjectName)/" />
+        <Message Text="Copying localization files to mods folder." Importance="high" />
+        <ItemGroup>
+            <LocalizationFiles Include="localization/**/*.json"/>
+        </ItemGroup>
+        <Copy SourceFiles="@(LocalizationFiles)"
+              DestinationFiles="@(LocalizationFiles->'$(ModsPath)$(MSBuildProjectName)/localization/%(RecursiveDir)%(Filename)%(Extension)')" />
         <Message Text="Copying BaseLib to mods folder." Importance="high" />
         <ItemGroup>
             <BaseLibFiles Include="$(NuGetPackageRoot)/alchyr.sts2.baselib/**/lib/**/BaseLib.dll;$(NuGetPackageRoot)/alchyr.sts2.baselib/**/Content/BaseLib.pck;$(NuGetPackageRoot)/alchyr.sts2.baselib/**/Content/BaseLib.json;"/>

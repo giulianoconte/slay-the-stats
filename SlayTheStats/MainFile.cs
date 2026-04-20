@@ -28,6 +28,11 @@ public partial class MainFile : Node
             catch (Exception e) { Logger.Warn($"SlayTheStats: Patch {type.Name} skipped — {e.Message}"); }
         }
 
+        // Localization: load mod-owned JSON strings from disk and bind to the
+        // game's current locale. Safe to call before ModConfig registration —
+        // config descriptions will route through L.T once they're migrated.
+        L.Init();
+
         var config = new SlayTheStatsConfig();
         // BaseLib's ModConfig.Init() ran the cfg load inside the constructor above. Now
         // sanitise any filter properties that might have been left in a degenerate state by
