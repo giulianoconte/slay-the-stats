@@ -103,10 +103,11 @@ public static class EncounterTooltipHelper
         int totalDied = 0;
 
         var rendered = new HashSet<string>();
-        foreach (var (charId, label) in CharacterOrder)
+        foreach (var (charId, defaultLabel) in CharacterOrder)
         {
             rendered.Add(charId);
             var icon = CharacterIcon(charId, 30);
+            var label = L.CharacterName(charId, defaultLabel);
             var descriptor = $"{icon}{KreonBoldFontTag}{label}[/b]";
             if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
             {
@@ -155,14 +156,14 @@ public static class EncounterTooltipHelper
 
         // Header row
         AppendDescriptorCell(body, " ", isHeader: true, parts: AllCharsDescriptorParts);
-        AppendHeaderCell(body, "Runs",    P.Fought);
-        AppendHeaderCell(body, "Dist",    P.Spark);  // density distribution sparkline
-        AppendHeaderCell(body, "Dmg%",    P.Dmg);
-        AppendHeaderCell(body, "Mid 50%", P.Mid50);
-        AppendHeaderCell(body, "Spread",  P.Spread);
-        AppendHeaderCell(body, "Turns",   P.Turns);
-        AppendHeaderCell(body, "Pots", P.Pots);
-        AppendHeaderCell(body, "Deaths",  P.Deaths);
+        AppendHeaderCell(body, L.T("tooltip.col.runs"),    P.Fought);
+        AppendHeaderCell(body, L.T("tooltip.col.dist"),    P.Spark);  // density distribution sparkline
+        AppendHeaderCell(body, L.T("tooltip.col.dmg_pct"), P.Dmg);
+        AppendHeaderCell(body, L.T("tooltip.col.mid50"),   P.Mid50);
+        AppendHeaderCell(body, L.T("tooltip.col.spread"),  P.Spread);
+        AppendHeaderCell(body, L.T("tooltip.col.turns"),   P.Turns);
+        AppendHeaderCell(body, L.T("tooltip.col.potions"), P.Pots);
+        AppendHeaderCell(body, L.T("tooltip.col.deaths"),  P.Deaths);
 
         // Character rows — render in canonical order, emitting data cells for chars that
         // have a stat for this encounter and empty cells for those that don't.
@@ -192,7 +193,7 @@ public static class EncounterTooltipHelper
         // across the characters that had data. Gives a cross-character
         // density for this encounter alongside the baseline numbers.
         var allIcon = AllCharsIcon(22);
-        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/b] (baseline)", parts: AllCharsDescriptorParts);
+        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}{L.T("tooltip.row.all")}[/b] {L.T("descriptor.baseline_suffix")}", parts: AllCharsDescriptorParts);
         if (perCharMetrics.Count > 0)
         {
             AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
@@ -955,15 +956,25 @@ public static class EncounterTooltipHelper
     /// Drops the "encounters" suffix entirely in favour of a shorter pluralized
     /// category: "normal encounters" → "normals", "elite encounters" → "elites",
     /// etc. Unknown/unexpected categories fall back to naive +"s".</summary>
-    private static string PluralizeCategory(string categoryLower) => categoryLower switch
+    /// <summary>Localized plural form of a category (used in descriptor
+    /// rows like "vs all elites"). Fallback on miss is English-naive "+s",
+    /// which is noisy for non-English locales but translators can override
+    /// every plural via the <c>category.*.plural</c> keys.</summary>
+    private static string PluralizeCategory(string categoryLower)
     {
-        "weak"   => "weaks",
-        "normal" => "normals",
-        "elite"  => "elites",
-        "boss"   => "bosses",
-        "event"  => "events",
-        _        => categoryLower + "s",
-    };
+        var key = "category." + categoryLower + ".plural";
+        var translated = L.T(key);
+        if (translated != key) return translated;
+        return categoryLower switch
+        {
+            "weak"   => "weaks",
+            "normal" => "normals",
+            "elite"  => "elites",
+            "boss"   => "bosses",
+            "event"  => "events",
+            _        => categoryLower + "s",
+        };
+    }
 
     /// <summary>Returns just the inline character icon BBCode at a given size, without the
     /// trailing name. Returns empty string when the character has no recognised icon.</summary>
@@ -1082,17 +1093,17 @@ public static class EncounterTooltipHelper
         // expand to Godot's default of 1, destabilizing column widths.
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    FP.Fought);
-        AppendHeaderCell(sb, "Dist",    FP.Spark);
-        AppendHeaderCell(sb, "Dmg",     FP.Dmg);
-        AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
-        AppendHeaderCell(sb, "Spread",  FP.Spread);
-        AppendHeaderCell(sb, "Turns",   FP.Turns);
-        AppendHeaderCell(sb, "Pots", FP.Pots);
-        AppendHeaderCell(sb, "Deaths",  FP.Deaths);
+        AppendHeaderCell(sb, L.T("tooltip.col.runs"),    FP.Fought);
+        AppendHeaderCell(sb, L.T("tooltip.col.dist"),    FP.Spark);
+        AppendHeaderCell(sb, L.T("tooltip.col.dmg"),     FP.Dmg);
+        AppendHeaderCell(sb, L.T("tooltip.col.mid50"),   FP.Mid50);
+        AppendHeaderCell(sb, L.T("tooltip.col.spread"),  FP.Spread);
+        AppendHeaderCell(sb, L.T("tooltip.col.turns"),   FP.Turns);
+        AppendHeaderCell(sb, L.T("tooltip.col.potions"), FP.Pots);
+        AppendHeaderCell(sb, L.T("tooltip.col.deaths"),  FP.Deaths);
 
         // Row 1: this encounter, this character — data cells colored against act pool baseline
-        AppendDescriptorCell(sb, $"{charIcon}vs {encNameRow1}");
+        AppendDescriptorCell(sb, $"{charIcon}{L.T("descriptor.vs_encounter", ("enc", encNameRow1))}");
         AppendRow1DataCells(sb, encounterStat, medianBase, iqrcBase, deathRateBase, turnsBase, potsBase);
         // AppendRow1DataCells always emits a Spark marker now, so the
         // sparkline list needs a matching entry — texture if the row
@@ -1108,26 +1119,26 @@ public static class EncounterTooltipHelper
         // Row 2: act + category pool baseline — plain text (no coloring on context rows)
         if (poolAct.HasValue && actLabel != null)
         {
-            AppendDescriptorCell(sb, $"{charIcon}vs {actLabel} {PluralizeCategory(catLower)} (baseline)");
+            AppendDescriptorCell(sb, $"{charIcon}{L.T("descriptor.vs_act_cat_baseline", ("act", actLabel), ("cat_plural", PluralizeCategory(catLower)))}");
             AppendPoolDataCells(sb, poolAct.Value);
             focusedSparklineValues.Add(GetDmgPctValuesFromPctList(poolActDmgPct));
         }
 
         // Row 3: all-acts category pool
-        AppendDescriptorCell(sb, $"{charIcon}vs all {PluralizeCategory(catLower)}");
+        AppendDescriptorCell(sb, $"{charIcon}{L.T("descriptor.vs_all_cat", ("cat_plural", PluralizeCategory(catLower)))}");
         AppendPoolDataCells(sb, poolAll);
         focusedSparklineValues.Add(GetDmgPctValuesFromPctList(poolAllDmgPct));
 
         // Row 4: all chars vs this encounter — character-weighted aggregation
         var allCharsIcon = AllCharsIcon(22);
-        AppendDescriptorCell(sb, $"{allCharsIcon}All vs {encNameRow4}");
+        AppendDescriptorCell(sb, $"{allCharsIcon}{L.T("descriptor.all_vs_encounter", ("enc", encNameRow4))}");
         AppendPoolDataCells(sb, allCharsMetrics);
         focusedSparklineValues.Add(GetDmgPctValuesFromPctList(allCharsDmgPct));
 
         sb.Append("[/table]");
 
         // Footer — character omitted (each row shows its character context via icon).
-        var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
+        var filterCtx = CardHoverShowPatch.BuildFilterContext(L.T("filter.all_characters"), filter, includeCharacter: false);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return new FocusedTableParts { Text = sb.ToString(), Sparklines = BuildSparklinesFromValues(focusedSparklineValues) };
@@ -1165,14 +1176,14 @@ public static class EncounterTooltipHelper
         // paddings so expand attributes match the sizing + data rows).
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, "Runs",    FP.Fought);
-        AppendHeaderCell(sb, "Dist",    FP.Spark);
-        AppendHeaderCell(sb, "Dmg",     FP.Dmg);
-        AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
-        AppendHeaderCell(sb, "Spread",  FP.Spread);
-        AppendHeaderCell(sb, "Turns",   FP.Turns);
-        AppendHeaderCell(sb, "Pots", FP.Pots);
-        AppendHeaderCell(sb, "Deaths",  FP.Deaths);
+        AppendHeaderCell(sb, L.T("tooltip.col.runs"),    FP.Fought);
+        AppendHeaderCell(sb, L.T("tooltip.col.dist"),    FP.Spark);
+        AppendHeaderCell(sb, L.T("tooltip.col.dmg"),     FP.Dmg);
+        AppendHeaderCell(sb, L.T("tooltip.col.mid50"),   FP.Mid50);
+        AppendHeaderCell(sb, L.T("tooltip.col.spread"),  FP.Spread);
+        AppendHeaderCell(sb, L.T("tooltip.col.turns"),   FP.Turns);
+        AppendHeaderCell(sb, L.T("tooltip.col.potions"), FP.Pots);
+        AppendHeaderCell(sb, L.T("tooltip.col.deaths"),  FP.Deaths);
 
         var allCharsIcon = AllCharsIcon(22);
         var catPlural = PluralizeCategory(catLower);
@@ -1185,25 +1196,30 @@ public static class EncounterTooltipHelper
             var catPluralColored = catColor != null
                 ? $"{KreonBoldFontTag}[color={catColor}]{catPlural}[/color][/b]"
                 : catPlural;
-            AppendDescriptorCell(sb, $"{charIcon}vs {biomeColored} {catPluralColored}");
+            AppendDescriptorCell(sb, $"{charIcon}{L.T("descriptor.vs_biome_cat", ("biome", biomeColored), ("cat_plural", catPluralColored))}");
             AppendRow1PoolDataCells(sb, poolBiome, poolAll);
             sparklineValues.Add(GetDmgPctValuesFromPctList(poolBiomeDmgPct));
 
-            AppendDescriptorCell(sb, $"{charIcon}vs all {catPlural} (baseline)");
+            // Row 2 (neutral baseline): this char, all acts
+            AppendDescriptorCell(sb, $"{charIcon}{L.T("descriptor.vs_all_cat_baseline", ("cat_plural", catPlural))}");
             AppendPoolDataCells(sb, poolAll);
             sparklineValues.Add(GetDmgPctValuesFromPctList(poolAllDmgPct));
 
-            AppendDescriptorCell(sb, $"{allCharsIcon}All vs {biomeLabel} {catPlural}");
+            // Row 3 (neutral): all characters, scoped to same biome/act
+            AppendDescriptorCell(sb, $"{allCharsIcon}{L.T("descriptor.all_vs_biome_cat", ("biome", biomeLabel), ("cat_plural", catPlural))}");
             AppendPoolDataCells(sb, allCharsPool);
             sparklineValues.Add(GetDmgPctValuesFromPctList(allCharsDmgPct));
         }
         else
         {
-            AppendDescriptorCell(sb, $"{charIcon}vs all {catPlural}");
+            // All acts: 2 rows.
+            // Row 1 (colored): this char, all acts — colored vs all-chars pool
+            AppendDescriptorCell(sb, $"{charIcon}{L.T("descriptor.vs_all_cat", ("cat_plural", catPlural))}");
             AppendRow1PoolDataCells(sb, poolBiome, allCharsPool);
             sparklineValues.Add(GetDmgPctValuesFromPctList(poolBiomeDmgPct));
 
-            AppendDescriptorCell(sb, $"{allCharsIcon}All vs all {catPlural} (baseline)");
+            // Row 2 (neutral baseline): all characters, all acts
+            AppendDescriptorCell(sb, $"{allCharsIcon}{L.T("descriptor.all_vs_all_cat_baseline", ("cat_plural", catPlural))}");
             AppendPoolDataCells(sb, allCharsPool);
             sparklineValues.Add(GetDmgPctValuesFromPctList(allCharsDmgPct));
         }
@@ -1211,7 +1227,7 @@ public static class EncounterTooltipHelper
         sb.Append("[/table]");
 
         // Footer — character omitted (each row shows its character context inline).
-        var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
+        var filterCtx = CardHoverShowPatch.BuildFilterContext(L.T("filter.all_characters"), filter, includeCharacter: false);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return new FocusedTableParts { Text = sb.ToString(), Sparklines = BuildSparklinesFromValues(sparklineValues) };
@@ -1333,11 +1349,11 @@ public static class EncounterTooltipHelper
 
         sb.Append("[table=5]");
         // Header row
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Runs[/color][/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Dmg[/color][/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Mid 50%[/color][/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Spread[/color][/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]Turns[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.runs")}[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.dmg")}[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.mid50")}[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.spread")}[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.turns")}[/color][/right][/cell]");
 
         double spreadBase = 0;
         if (stat.Fought > 0)
@@ -1364,12 +1380,14 @@ public static class EncounterTooltipHelper
         var baselineDmgAbs = $"{dmgBaseline:F1}";
         var charLabel = character != null
             ? CardHoverShowPatch.GetCharacterDisplay(character)
-            : "All chars";
+            : L.T("filter.all_characters");
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
+        // Category still renders English/game-casing; will localize when
+        // FormatCategory migrates as part of the bestiary phase-3 surface.
         var categoryLower = categoryLabel.ToLowerInvariant();
         var baselineLine = stat.Fought > 0
-            ? $"Baseline {categoryLower}: dmg {baselineDmgAbs}, spread {spreadBase * 100:F0}%"
-            : $"Baseline {categoryLower} dmg: {baselineDmgAbs}";
+            ? L.T("tooltip.baseline.encounter",        ("category", categoryLower), ("dmg", baselineDmgAbs), ("spread", $"{spreadBase * 100:F0}"))
+            : L.T("tooltip.baseline.encounter_nodata", ("category", categoryLower), ("dmg", baselineDmgAbs));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineLine));
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
@@ -1408,8 +1426,8 @@ public static class EncounterTooltipHelper
     internal static string NoDataText(string? characterLabel, int? ascensionMin, int? ascensionMax)
     {
         var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
-        var label = characterLabel ?? "All chars";
-        return $"[color={TooltipHelper.NeutralShade}]No encounter data\n[font_size=16]{ascPrefix}{label}[/font_size][/color]";
+        var label = characterLabel ?? L.T("filter.all_characters");
+        return $"[color={TooltipHelper.NeutralShade}]{L.T("tooltip.no_encounter_data")}\n[font_size=16]{ascPrefix}{label}[/font_size][/color]";
     }
 
     /// <summary>

@@ -116,7 +116,7 @@ public static class BestiaryButtonPatch
             // Override the visible text. Label child is named "Label" inside the scene.
             var labelNode = ((Node)ourButton).GetNodeOrNull<Label>("Label");
             if (labelNode != null)
-                labelNode.Text = "Bestiary Stats";
+                labelNode.Text = L.T("bestiary.compendium_button");
 
             // Tint the background panel with the same steel blue-gray as our card/relic
             // tooltip background so the compendium button reads as part of the SlayTheStats
@@ -524,7 +524,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         outerVbox.AddChild(bestiaryTitleRow);
 
         var title = new Label();
-        title.Text = "SlayTheStats Bestiary";
+        title.Text = L.T("bestiary.page_title");
         title.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitlePrimary);
         ApplyKreonFont(title, bold: true);
@@ -533,7 +533,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // "?" next to the title replays the tutorial — forces it to show even
         // after BestiaryTutorialSeen=true. Same chrome as _legendButton.
-        _tutorialButton = BuildHelpButton("Show the bestiary tutorial", () => MaybeShowBestiaryTutorial(force: true));
+        _tutorialButton = BuildHelpButton(L.T("bestiary.help.tutorial_tooltip"), () => MaybeShowBestiaryTutorial(force: true));
         bestiaryTitleRow.AddChild(_tutorialButton);
 
         outerVbox.AddChild(new HSeparator());
@@ -575,7 +575,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var sortRowOuter = new HBoxContainer();
         sortRowOuter.AddThemeConstantOverride("separation", 8);
         var sortLabel = new Label();
-        sortLabel.Text = "Sort by:";
+        sortLabel.Text = L.T("bestiary.sort.label");
         sortLabel.AddThemeColorOverride("font_color", new Color(0.88f, 0.86f, 0.80f, 1f));
         sortLabel.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(sortLabel);
@@ -1120,7 +1120,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         vbox.AddChild(titleRow);
 
         var title = new Label();
-        title.Text = "Bestiary Settings";
+        title.Text = L.T("bestiary.settings.title");
         title.AddThemeColorOverride("font_color", new Color("EFC851")); // Gold
         title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         CompendiumFilterPatch.ApplyGameFont(title, 24);
@@ -1133,7 +1133,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // possible post-v1.0.0 feature, but the UI here is binary (Live / None)
         // for v0.3.0 to keep the surface simple.
         var previewCheckbox = CompendiumFilterPatch.BuildStyledCheckbox(
-            "Show monster preview",
+            L.T("bestiary.settings.show_preview"),
             SlayTheStatsConfig.BestiaryPreviewEnabled,
             ticked =>
             {
@@ -1389,33 +1389,33 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         return phase switch
         {
             BestiaryTutorialPhase.Intro => new TutorialPhaseSpec(
-                title:      "Welcome to SlayTheStats Bestiary!",
-                body:       "Here you can see stats for all the encounters in the game. You can disable the Bestiary in the Mod Configuration settings.",
+                title:      L.T("bestiary.tutorial.intro.title"),
+                body:       L.T("bestiary.tutorial.intro.body"),
                 helpPrefix: null, helpSuffix: null,
-                hint:       "(click to continue)",
+                hint:       L.T("bestiary.tutorial.hint_continue"),
                 target:     null, arrowGlyph: null, anchor: TutorialAnchor.Center),
 
             BestiaryTutorialPhase.Filters => new TutorialPhaseSpec(
-                title:      "Biome filters",
-                body:       "Change biome/act and sorting here. Click an encounter below to see its stats, or click a category to see the whole pool's stats, such as [b][color=#e84ad5]Elite[/color][/b].",
+                title:      L.T("bestiary.tutorial.filters.title"),
+                body:       L.T("bestiary.tutorial.filters.body"),
                 helpPrefix: null, helpSuffix: null,
-                hint:       "(click to continue)",
+                hint:       L.T("bestiary.tutorial.hint_continue"),
                 target:     _biomeTabRow, arrowGlyph: "\u25B2", anchor: TutorialAnchor.Below),
 
             BestiaryTutorialPhase.Characters => new TutorialPhaseSpec(
-                title:      "Stats tables",
-                body:       "Select character here or select " + prismaticIcon + " to see a table comparing all characters.",
-                helpPrefix: "Click",
-                helpSuffix: "for details on what the columns mean.",
-                hint:       "(click to continue)",
+                title:      L.T("bestiary.tutorial.characters.title"),
+                body:       L.T("bestiary.tutorial.characters.body", ("prismatic_icon", prismaticIcon)),
+                helpPrefix: L.T("bestiary.tutorial.characters.help_prefix"),
+                helpSuffix: L.T("bestiary.tutorial.characters.help_suffix"),
+                hint:       L.T("bestiary.tutorial.hint_continue"),
                 target:     _sortCharRow, arrowGlyph: "\u25B6", anchor: TutorialAnchor.LeftOf),
 
             BestiaryTutorialPhase.FilterPane => new TutorialPhaseSpec(
-                title:      "Run filters",
-                body:       "Click here to filter by ascension, version, etc. Save defaults to affect in-run encounter stats.",
-                helpPrefix: "Click the",
-                helpSuffix: "at the top of the page to replay this tutorial.",
-                hint:       "(click to finish)",
+                title:      L.T("bestiary.tutorial.filter_pane.title"),
+                body:       L.T("bestiary.tutorial.filter_pane.body"),
+                helpPrefix: L.T("bestiary.tutorial.filter_pane.help_prefix"),
+                helpSuffix: L.T("bestiary.tutorial.filter_pane.help_suffix"),
+                hint:       L.T("bestiary.tutorial.hint_finish"),
                 target:     _filterButton, arrowGlyph: "\u25C0", anchor: TutorialAnchor.RightOf),
 
             _ => default,
@@ -1847,7 +1847,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
     }
 
-    private Control BuildLegendButton() => BuildHelpButton("What do these columns mean?", ToggleLegendPopup);
+    private Control BuildLegendButton() => BuildHelpButton(L.T("bestiary.help.legend_tooltip"), ToggleLegendPopup);
 
     private void ToggleLegendPopup()
     {
@@ -1922,6 +1922,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // characters comparison vs. per-character focused view) and the Dmg
         // encoding each uses. Replaces the standalone footer note from the
         // prior single-section layout.
+        // TODO(localization): copy still hardcoded in English. The 2-section
+        // layout landed after phase-3 migration, so bestiary.legend.title/body
+        // keys in settings_ui.json match the old 1-section copy.
         vbox.AddChild(MakeSectionTitle("Table type"));
         vbox.AddChild(MakeSectionBody(string.Join('\n', new[]
         {
@@ -2103,7 +2106,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _highlightTween?.Kill();
         _highlightTween = null;
 
-        ShowSingleLabelStats($"[color=#686868]Hover an encounter to see stats[/color]");
+        ShowSingleLabelStats($"[color=#686868]{L.T("bestiary.placeholder.hover_encounter")}[/color]");
         SetStatsTitle("");
         _hoveredEncounterId = null;
         // Snapshot locked state before clearing — we'll re-apply after the list
@@ -2450,7 +2453,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // the first time. The spacer to its right still ExpandFills to push the stat
         // header to the right edge.
         var encounterHeader = new Label();
-        encounterHeader.Text = "Encounter";
+        encounterHeader.Text = L.T("bestiary.col.encounter");
         encounterHeader.MouseFilter = MouseFilterEnum.Ignore;
         encounterHeader.AddThemeColorOverride("font_color", new Color(0.88f, 0.85f, 0.76f, 1f));
         encounterHeader.AddThemeFontSizeOverride("font_size", 14);
@@ -2634,14 +2637,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _sortTabRow.AddChild(gap);
 
         var rankLabel = new Label();
-        rankLabel.Text = "Rank by:";
+        rankLabel.Text = L.T("bestiary.rank.label");
         rankLabel.AddThemeColorOverride("font_color", new Color(0.88f, 0.86f, 0.80f, 1f));
         rankLabel.AddThemeFontSizeOverride("font_size", 14);
         ApplyKreonFont(rankLabel);
         _sortTabRow.AddChild(rankLabel);
 
         var rawBtn = MakeChipButton(
-            "Raw",
+            L.T("bestiary.rank.raw"),
             !_sortBySignificance,
             () =>
             {
@@ -2653,7 +2656,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _sortTabRow.AddChild(rawBtn);
 
         var sigBtn = MakeChipButton(
-            "Significance",
+            L.T("bestiary.rank.significance"),
             _sortBySignificance,
             () =>
             {
@@ -2668,7 +2671,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _sortTabRow.AddChild(_rankByHelpButton);
     }
 
-    private Control BuildRankByHelpButton() => BuildHelpButton("What do Raw and Significance mean?", ToggleRankByPopup);
+    private Control BuildRankByHelpButton() => BuildHelpButton(L.T("bestiary.help.rank_tooltip"), ToggleRankByPopup);
 
     /// <summary>Shared factory for the "?" help buttons next to the stats title and the rank-by row.
     /// Built from a PanelContainer + centered Label rather than a Button because Godot's Button
@@ -2759,7 +2762,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         innerMargin.AddChild(vbox);
         popup.AddChild(innerMargin);
 
-        var title = new Label { Text = "Ranking modes" };
+        var title = new Label { Text = L.T("bestiary.rank.title") };
         title.AddThemeColorOverride("font_color", ThemeStyle.TitleGoldColor);
         title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
         ApplyKreonFont(title, bold: true);
@@ -2780,14 +2783,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         body.AddThemeFontSizeOverride("bold_font_size", 16);
         ApplyKreonFont(body);
         ApplyTooltipTextShadow(body);
-        body.Text = string.Join('\n', new[]
-        {
-            "[b][color=#efc851]Raw[/color][/b] — sort by raw metric, ignoring sample size.",
-            "",
-            "[b][color=#efc851]Significance[/color][/b] — sort by significance calculation, taking into account number of fights & deviation. An encounter with +10 damage at n=30 ranks more significant than an encounter with +30 damage at n=5.",
-            "",
-            "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
-        });
+        body.Text = L.T("bestiary.rank.body");
         vbox.AddChild(body);
 
         var layer = WrapPopupForClickOutsideDismiss(popup, ToggleRankByPopup);
@@ -3682,8 +3678,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 category,
                 poolBiomeDmgPct, poolAllDmgPct, allCharsPoolDmgPct);
 
-            var scopePrefix = biomeLabel ?? "All";
-            SetStatsTitle($"{scopePrefix} {categoryLabel} Encounter Stats");
+            var scopePrefix = biomeLabel ?? L.T("bestiary.biome.all_acts");
+            SetStatsTitle(L.T("bestiary.stats_title.category", ("scope", scopePrefix), ("category", categoryLabel)));
             ShowSingleLabelStats(catFocusedParts);
             ClearMonsterPreview();
             return;
@@ -3713,8 +3709,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, catBiome);
             double iqrcBaseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, catBiome);
 
-            var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : "All";
-            SetStatsTitle($"{biomeName} {categoryLabel} Encounter Stats");
+            var biomeName = _selectedBiome != null && _selectedBiome != "all:" ? FormatBiomeName(_selectedBiome) : L.T("bestiary.biome.all_acts");
+            SetStatsTitle(L.T("bestiary.stats_title.category", ("scope", biomeName), ("category", categoryLabel)));
 
             var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
                 combined, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
@@ -3736,7 +3732,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_lockedEncounterId != null || _lockedCategory != null) return;
         CancelPendingRender();
         SetStatsTitle("");
-        ShowSingleLabelStats($"[color=#686868]Hover an encounter to see stats[/color]");
+        ShowSingleLabelStats($"[color=#686868]{L.T("bestiary.placeholder.hover_encounter")}[/color]");
         ClearMonsterPreview();
     }
 
@@ -3836,7 +3832,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         else
         {
             SetStatsTitle("");
-            ShowSingleLabelStats($"[color=#686868]Hover an encounter to see stats[/color]");
+            ShowSingleLabelStats($"[color=#686868]{L.T("bestiary.placeholder.hover_encounter")}[/color]");
             ClearMonsterPreview();
         }
     }
@@ -3903,7 +3899,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var allCharsMetrics = StatsAggregator.AggregateMetricsFromEvents(charStats.Values);
 
             var charLabel = FormatCharacterLabel(_sortCharacter);
-            var actLabel = encAct > 0 ? $"Act {encAct}" : null;
+            var actLabel = encAct > 0 ? L.T("bestiary.biome.act", ("act", encAct)) : null;
 
             // Pool-row Dmg% values for sparklines. Each row plots a
             // separate distribution; encounters for the char are
@@ -3921,7 +3917,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 category,
                 poolActDmgPct, poolAllDmgPct, allCharsDmgPct);
 
-            SetStatsTitle($"{encounterName} Stats");
+            SetStatsTitle(L.T("bestiary.stats_title.encounter", ("encounter", encounterName)));
             ShowSingleLabelStats(encFocusedParts);
             return;
         }
@@ -3935,7 +3931,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             double dmgPctBaseline = StatsAggregator.GetEncounterDmgPctBaseline(MainFile.Db, filter, category, encBiome);
             double iqrcBaseline = StatsAggregator.GetEncounterIqrcBaseline(MainFile.Db, filter, category, encBiome);
 
-            SetStatsTitle($"{EncounterCategory.FormatName(encounterId)} Stats");
+            SetStatsTitle(L.T("bestiary.stats_title.encounter", ("encounter", EncounterCategory.FormatName(encounterId))));
 
             if (charStats.Count == 0)
             {
@@ -5070,10 +5066,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private static string FormatBiomeName(string biome)
     {
-        if (biome == AllBiomeKey) return "All Acts";
+        if (biome == AllBiomeKey) return L.T("bestiary.biome.all_acts");
         if (biome.StartsWith(ActPrefix) && int.TryParse(biome[ActPrefix.Length..], out var act))
-            return $"Act {act}";
+            return L.T("bestiary.biome.act", ("act", act));
 
+        // Specific biome keys ("BIOME.OVERGROWTH" → "Overgrowth"). Phase 4
+        // will resolve these via the game's own biome / encounter loc table;
+        // until then, fall back to title-cased entry.
         var dotIdx = biome.IndexOf('.');
         var name = dotIdx >= 0 ? biome[(dotIdx + 1)..] : biome;
         if (name.Length == 0) return biome;
@@ -5122,12 +5121,12 @@ internal static class EncounterSorting
 
     public static string Label(EncounterSortMode mode) => mode switch
     {
-        EncounterSortMode.Name         => "Name",
-        EncounterSortMode.Seen         => "Runs",
-        EncounterSortMode.DeathRate    => "Death%",
-        EncounterSortMode.MedianDamage => "Dmg",
-        EncounterSortMode.Spread       => "Spread",
-        EncounterSortMode.Turns        => "Turns",
+        EncounterSortMode.Name         => L.T("bestiary.sort.name"),
+        EncounterSortMode.Seen         => L.T("tooltip.col.runs"),
+        EncounterSortMode.DeathRate    => L.T("bestiary.sort.death_pct"),
+        EncounterSortMode.MedianDamage => L.T("tooltip.col.dmg"),
+        EncounterSortMode.Spread       => L.T("tooltip.col.spread"),
+        EncounterSortMode.Turns        => L.T("tooltip.col.turns"),
         _ => mode.ToString(),
     };
 

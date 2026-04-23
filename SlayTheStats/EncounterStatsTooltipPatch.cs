@@ -383,7 +383,7 @@ internal static class EncounterStatsHover
         }
 
         var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
-        var characterLabel = effectiveChar != null ? FormatCharacterName(effectiveChar) : "All";
+        var characterLabel = effectiveChar != null ? FormatCharacterName(effectiveChar) : null;
 
         var poolBaseline = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, biome);
         double dmgBaseline = StatsAggregator.GetEncounterDmgBaseline(MainFile.Db, filter, category, biome);

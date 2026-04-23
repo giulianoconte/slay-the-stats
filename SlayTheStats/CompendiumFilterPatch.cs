@@ -923,21 +923,21 @@ public static partial class CompendiumFilterPatch
         vbox.AddThemeConstantOverride("separation", 8);
         margin.AddChild(vbox);
 
-        var title = new Label { Text = "Welcome to SlayTheStats!" };
+        var title = new Label { Text = L.T("welcome.title") };
         title.AddThemeColorOverride("font_color", Gold);
         ApplyGameFont(title, 24);
         vbox.AddChild(title);
 
         var body = new Label
         {
-            Text = "Click the SlayTheStats button to adjust the filters\nfor specific ascensions, versions, profiles, and more.\n\nSave default settings to customize stats shown in-run.",
+            Text = L.T("welcome.body"),
             AutowrapMode = TextServer.AutowrapMode.Off,
         };
         body.AddThemeColorOverride("font_color", Cream);
         ApplyGameFont(body, 18);
         vbox.AddChild(body);
 
-        var hint = new Label { Text = "(click anywhere to dismiss)" };
+        var hint = new Label { Text = L.T("welcome.hint_dismiss") };
         hint.AddThemeColorOverride("font_color", new Color(0.75f, 0.72f, 0.65f, 1f));
         ApplyGameFont(hint, 13);
         vbox.AddChild(hint);
@@ -1283,8 +1283,8 @@ public static partial class CompendiumFilterPatch
 
         public static string Format(int value, int maxExplicit = 10)
         {
-            if (value == LowestSentinel)  return "Lowest";
-            if (value == HighestSentinel) return "Highest";
+            if (value == LowestSentinel)  return L.T("filter.sentinel.lowest");
+            if (value == HighestSentinel) return L.T("filter.sentinel.highest");
             // Clamp any out-of-range explicit values displayed through the
             // stepper Format helper — same reasoning as the stepper's
             // constructor clamp. Sentinels fall through the branches above.
@@ -1385,7 +1385,7 @@ public static partial class CompendiumFilterPatch
         vbox.AddChild(titleRow);
 
         var title = new Label();
-        title.Text = "SlayTheStats Filters";
+        title.Text = L.T("filter.pane.title");
         title.AddThemeColorOverride("font_color", Gold);
         title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         ApplyGameFont(title, 24);
@@ -1413,7 +1413,7 @@ public static partial class CompendiumFilterPatch
         var verRow = new HBoxContainer();
         verRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(verRow);
-        verRow.AddChild(MakeLabel("Version:", 120));
+        verRow.AddChild(MakeLabel(L.T("filter.row.version"), 120));
 
         var versions = StatsAggregator.GetDistinctVersions(MainFile.Db);
         var verValues = new List<string> { SlayTheStatsConfig.VersionLowest };
@@ -1465,7 +1465,7 @@ public static partial class CompendiumFilterPatch
         var profRow = new HBoxContainer();
         profRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(profRow);
-        profRow.AddChild(MakeLabel("Profile:", 120));
+        profRow.AddChild(MakeLabel(L.T("filter.row.profile"), 120));
 
         var profSelect = MakeDropdown(profiles, SlayTheStatsConfig.FilterProfile);
         profSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
@@ -1489,7 +1489,7 @@ public static partial class CompendiumFilterPatch
         var ascRow = new HBoxContainer();
         ascRow.AddThemeConstantOverride("separation", 6);
         vbox.AddChild(ascRow);
-        ascRow.AddChild(MakeLabel("Ascension:", 120));
+        ascRow.AddChild(MakeLabel(L.T("filter.row.ascension"), 120));
 
         var ascMin = new AscensionStepper(SlayTheStatsConfig.AscensionMin);
         ascRow.AddChild(ascMin);
@@ -1540,7 +1540,7 @@ public static partial class CompendiumFilterPatch
             var classRow = new HBoxContainer();
             classRow.AddThemeConstantOverride("separation", 6);
             vbox.AddChild(classRow);
-            classRow.AddChild(MakeLabel("Class:", 120));
+            classRow.AddChild(MakeLabel(L.T("filter.row.class"), 120));
 
             // "All" (empty string) intentionally omitted — cross-class stats on a class
             // card are low-signal (few runs introduce other-class cards) and misleading
@@ -1548,7 +1548,7 @@ public static partial class CompendiumFilterPatch
             // to see e.g. an Ironclad card's Silent stats can pick "Silent" explicitly.
             // Legacy "" values are migrated to "__class__" in SlayTheStatsConfig.Sanitize.
             classValues = new List<string> { SlayTheStatsConfig.ClassFilterClassSpecific };
-            var classLabels = new List<string> { "Auto" };
+            var classLabels = new List<string> { L.T("filter.class.auto") };
             foreach (var ch in GetOrderedCharacters(MainFile.Db))
             {
                 classValues.Add(ch);
@@ -1594,7 +1594,7 @@ public static partial class CompendiumFilterPatch
             Control groupUpgradesControl;
             if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
             {
-                var clonedTickbox = CloneTickbox(_tickboxTemplate, "Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+                var clonedTickbox = CloneTickbox(_tickboxTemplate, L.T("filter.group_upgrades"), SlayTheStatsConfig.GroupCardUpgrades);
                 clonedTickbox.Toggled += (box) =>
                 {
                     SlayTheStatsConfig.GroupCardUpgrades = box.IsTicked;
@@ -1636,7 +1636,7 @@ public static partial class CompendiumFilterPatch
             }
             else
             {
-                var fallback = MakeCheckButton("Group card upgrades", SlayTheStatsConfig.GroupCardUpgrades);
+                var fallback = MakeCheckButton(L.T("filter.group_upgrades"), SlayTheStatsConfig.GroupCardUpgrades);
                 fallback.Toggled += (pressed) =>
                 {
                     SlayTheStatsConfig.GroupCardUpgrades = pressed;
@@ -1674,7 +1674,7 @@ public static partial class CompendiumFilterPatch
             Control includeMultiplayerControl;
             if (_tickboxTemplate != null && GodotObject.IsInstanceValid(_tickboxTemplate))
             {
-                var clonedTickbox = CloneTickbox(_tickboxTemplate, "Include multiplayer runs", SlayTheStatsConfig.IncludeMultiplayer);
+                var clonedTickbox = CloneTickbox(_tickboxTemplate, L.T("filter.include_multiplayer"), SlayTheStatsConfig.IncludeMultiplayer);
                 clonedTickbox.Toggled += (box) =>
                 {
                     SlayTheStatsConfig.IncludeMultiplayer = box.IsTicked;
@@ -1702,7 +1702,7 @@ public static partial class CompendiumFilterPatch
             }
             else
             {
-                var fallback = MakeCheckButton("Include multiplayer runs", SlayTheStatsConfig.IncludeMultiplayer);
+                var fallback = MakeCheckButton(L.T("filter.include_multiplayer"), SlayTheStatsConfig.IncludeMultiplayer);
                 fallback.Toggled += (pressed) =>
                 {
                     SlayTheStatsConfig.IncludeMultiplayer = pressed;
@@ -1733,19 +1733,19 @@ public static partial class CompendiumFilterPatch
         row1.AddThemeConstantOverride("separation", 8);
         vbox.AddChild(row1);
 
-        row1.AddChild(MakeActionButton("Clear Filters", () =>
+        row1.AddChild(MakeActionButton(L.T("filter.button.clear"), () =>
         {
             SlayTheStatsConfig.ClearAllFilters();
             SyncAllControls();
             NotifyChanged();
         }));
-        row1.AddChild(MakeActionButton("Reset", () =>
+        row1.AddChild(MakeActionButton(L.T("filter.button.reset"), () =>
         {
             SlayTheStatsConfig.RestoreDefaults();
             SyncAllControls();
             NotifyChanged();
         }));
-        var saveDefaultsBtn = MakeActionButton("Save Defaults", () =>
+        var saveDefaultsBtn = MakeActionButton(L.T("filter.button.save_defaults"), () =>
         {
             SlayTheStatsConfig.SaveDefaults();
             try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
@@ -1903,8 +1903,8 @@ public static partial class CompendiumFilterPatch
 
     private static string FormatVersionValue(string v)
     {
-        if (v == SlayTheStatsConfig.VersionLowest)  return "Lowest";
-        if (v == SlayTheStatsConfig.VersionHighest) return "Highest";
+        if (v == SlayTheStatsConfig.VersionLowest)  return L.T("filter.sentinel.lowest");
+        if (v == SlayTheStatsConfig.VersionHighest) return L.T("filter.sentinel.highest");
         return v;
     }
 
@@ -1934,7 +1934,7 @@ public static partial class CompendiumFilterPatch
         btn.AddThemeColorOverride("font_focus_color", Gold);
         ApplyGameFont(btn, 19);
         ApplyDropdownStyle(btn);
-        btn.AddItem("Any", 0);
+        btn.AddItem(L.T("filter.dropdown.any"), 0);
         for (int i = 0; i < items.Count; i++)
             btn.AddItem(items[i], i + 1);
         SelectOptionByText(btn, selected);
@@ -2106,11 +2106,12 @@ public static partial class CompendiumFilterPatch
     private static string FormatCharName(string character)
     {
         if (string.IsNullOrEmpty(character)) return "";
-        var name = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+        var entry = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
             ? character["CHARACTER.".Length..]
             : character;
-        if (name.Length == 0) return character;
-        return char.ToUpper(name[0]) + name[1..].ToLower();
+        if (entry.Length == 0) return character;
+        var fallback = char.ToUpper(entry[0]) + entry[1..].ToLower();
+        return L.CharacterName(entry, fallback);
     }
 
     /// <summary>

@@ -1,157 +1,75 @@
 using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
 using MegaCrit.Sts2.Core.Localization;
-using MegaCrit.Sts2.Core.Modding;
 
 namespace SlayTheStats;
 
 /// <summary>
-/// Mod-owned localization. All user-facing strings flow through <see cref="T"/>;
-/// the current locale tracks the game's <see cref="LocManager"/> language, English
-/// is the fallback, and a missing key renders as the key itself so gaps are
-/// visible in-game rather than silently blank.
+/// Mod-owned localization. Thin wrapper over the game's <see cref="LocManager"/>
+/// that queries our entries in the merged <c>settings_ui</c> loc table.
 ///
-/// Translation files live on disk at <c>{modPath}/localization/{lang}/*.locjson</c>.
-/// The content is plain JSON — the <c>.locjson</c> extension exists only to dodge
-/// the game's mod-manifest scanner, which recursively reads every <c>*.json</c>
-/// under the mod dir as a would-be <c>ModManifest</c> and logs a noisy missing-
-/// <c>id</c> error for each of ours. Keys are flat strings (e.g.
-/// <c>"tooltip.col.runs"</c>); every file inside a language dir is merged into
-/// one dict for that language at load time, so translators can split strings
-/// across as many files as they want.
+/// <para><b>How strings get into the game.</b> Our <c>.pck</c> ships
+/// <c>res://SlayTheStats/localization/{lang}/settings_ui.json</c>. At boot,
+/// <c>LocManager.LoadTablesFromPath</c> iterates base-game loc files and
+/// merges each mod's contribution via <c>ModManager.GetModdedLocTables</c> +
+/// <c>LocTable.MergeWith</c>. Our entries live in the base <c>settings_ui</c>
+/// table alongside the game's own keys and BaseLib's auto-UI keys
+/// (BASELIB-*, SLAYTHESTATS-*). No separate mod-owned file reading.</para>
 ///
-/// We read from disk with <see cref="File.ReadAllText"/> rather than Godot's
-/// <c>ResourceLoader</c> because the mod doesn't ship a <c>.pck</c> (dropped in
-/// v0.3.1), so <c>res://</c> paths can't resolve mod-owned translations. Trade-off:
-/// we don't hook into the game's Weblate / <see cref="LocTable"/> pipeline. If
-/// community translators emerge and want Weblate integration we revisit.
+/// <para><b>English fallback.</b> Non-English <c>LocTable</c> instances are
+/// constructed with the English table as their fallback, so <see
+/// cref="LocTable.GetRawText"/> automatically recurses when a key is missing
+/// in the current locale's table. If the key is absent everywhere it throws
+/// <see cref="LocException"/>, which we catch and surface the key itself so
+/// gaps stay visible in-game rather than silently blank.</para>
+///
+/// <para><b>Live locale switching.</b> <see cref="LocManager"/> rebinds its
+/// active table on language change, so every <see cref="T"/> call hits the
+/// current locale automatically — no manual subscription or cache-invalidate
+/// on our side. <see cref="TooltipHelper.InitLocaleSubscription"/> handles
+/// the orthogonal concern of font cache invalidation for CJK fallback.</para>
+///
+/// <para><b>Replacements.</b> <see cref="T(string, (string, object)[])"/>
+/// does a simple <c>Replace("{name}", value)</c> pass over the template —
+/// no SmartFormat pluralization for v1.0.0.</para>
 /// </summary>
 public static class L
 {
-    private const string DefaultLang = "eng";
+    private const string Table = "settings_ui";
 
-    private static readonly Dictionary<string, Dictionary<string, string>> _tables = new();
-    private static Dictionary<string, string> _currentTable = new();
-    private static Dictionary<string, string> _fallbackTable = new();
-    private static string _currentLang = DefaultLang;
-
-    /// <summary>Missing keys are logged once per session. Without this, a key
-    /// referenced from a hover-tooltip code path would spam the log.</summary>
+    /// <summary>Missing-key warnings log once per key per session so a
+    /// hover-heavy UI doesn't flood the log.</summary>
     private static readonly HashSet<string> _warnedMissing = new();
 
-    private static bool _initDone;
-
-    /// <summary>Idempotent wrapper around <see cref="Init"/>. Called from
-    /// <c>MainMenuReadyPatch</c>, which fires on every return to the main menu —
-    /// the first call does the work, subsequent calls are no-ops.</summary>
-    public static void InitIfNeeded()
-    {
-        if (_initDone) return;
-        Init();
-        _initDone = true;
-    }
-
-    /// <summary>Loads JSON tables, binds to the game's current locale, and
-    /// subscribes to locale-change notifications. Must run after
-    /// <see cref="LocManager.Instance"/> is alive — mod-Initialize time is too
-    /// early, so this is called from <c>MainMenuReadyPatch</c>. Safe to call
-    /// multiple times; reloads tables and re-binds on each call.</summary>
-    public static void Init()
+    /// <summary>Look up a translation. Missing keys log once + return the
+    /// key itself so gaps stay visible in-game.</summary>
+    public static string T(string key)
     {
         try
         {
-            _tables.Clear();
-            _warnedMissing.Clear();
-
-            var modPath = FindModPath();
-            if (modPath == null)
-            {
-                MainFile.Logger.Warn("[L] Could not find SlayTheStats mod path — localization disabled, all keys render as keys");
-                return;
-            }
-
-            var localeRoot = Path.Combine(modPath, "localization");
-            if (!Directory.Exists(localeRoot))
-            {
-                MainFile.Logger.Warn($"[L] Localization dir not found at {localeRoot} — all keys render as keys");
-                return;
-            }
-
-            foreach (var langDir in Directory.GetDirectories(localeRoot))
-            {
-                var lang = Path.GetFileName(langDir);
-                var merged = new Dictionary<string, string>();
-                foreach (var jsonFile in Directory.GetFiles(langDir, "*.locjson"))
-                {
-                    try
-                    {
-                        var text = File.ReadAllText(jsonFile);
-                        var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(text);
-                        if (dict == null) continue;
-                        foreach (var kv in dict) merged[kv.Key] = kv.Value;
-                    }
-                    catch (Exception e)
-                    {
-                        MainFile.Logger.Warn($"[L] Failed to parse {jsonFile}: {e.Message}");
-                    }
-                }
-                _tables[lang] = merged;
-                MainFile.Logger.Info($"[L] Loaded locale '{lang}' ({merged.Count} keys)");
-            }
-
-            _fallbackTable = _tables.TryGetValue(DefaultLang, out var f) ? f : new Dictionary<string, string>();
-            if (_fallbackTable.Count == 0)
-                MainFile.Logger.Warn($"[L] No '{DefaultLang}' locale loaded — missing keys will render as keys");
-
-            RefreshFromGameLocale();
-            LocString.SubscribeToLocaleChange(RefreshFromGameLocale);
+            var mgr = LocManager.Instance;
+            if (mgr == null) return key;
+            var table = mgr.GetTable(Table);
+            return table.GetRawText(key);
+        }
+        catch (LocException)
+        {
+            // Key absent in current locale AND English fallback — table's
+            // internal fallback chain already walked.
+            if (_warnedMissing.Add(key))
+                MainFile.Logger.Warn($"[L] Missing key '{key}' in '{Table}' table (checked current locale + English fallback)");
         }
         catch (Exception e)
         {
-            MainFile.Logger.Warn($"[L] Init failed: {e.GetType().Name}: {e.Message}");
+            if (_warnedMissing.Add(key))
+                MainFile.Logger.Warn($"[L] T('{key}') failed: {e.GetType().Name}: {e.Message}");
         }
-    }
-
-    private static string? FindModPath()
-    {
-        foreach (var mod in ModManager.Mods)
-        {
-            if (mod.manifest?.id == MainFile.ModId)
-                return mod.path;
-        }
-        return null;
-    }
-
-    /// <summary>Re-points <see cref="_currentTable"/> at the game's active locale.
-    /// Called on boot and on every locale change (via <see cref="LocString.SubscribeToLocaleChange"/>).
-    /// UI surfaces built once and cached (bestiary chrome, tutorial popups) need
-    /// to rebuild on locale change too — that's a separate subscription concern;
-    /// tooltip surfaces that rebuild on every show pick up the new locale for free.</summary>
-    private static void RefreshFromGameLocale()
-    {
-        _currentLang = LocManager.Instance?.Language ?? DefaultLang;
-        _currentTable = _tables.TryGetValue(_currentLang, out var t) ? t : _fallbackTable;
-        MainFile.Logger.Info($"[L] Active locale: '{_currentLang}' ({_currentTable.Count} keys)");
-        _warnedMissing.Clear();
-    }
-
-    /// <summary>Look up a translation. Current locale → English fallback → key
-    /// itself. Missing-key warnings log once per key per session.</summary>
-    public static string T(string key)
-    {
-        if (_currentTable.TryGetValue(key, out var val)) return val;
-        if (_fallbackTable.TryGetValue(key, out var fallback)) return fallback;
-        if (_warnedMissing.Add(key))
-            MainFile.Logger.Warn($"[L] Missing key '{key}' in '{_currentLang}' and fallback '{DefaultLang}'");
         return key;
     }
 
-    /// <summary>Look up a translation with named-placeholder substitution:
-    /// template like <c>"(baseline) Pick% {pick}"</c>, call as
-    /// <c>L.T("tooltip.baseline.card", ("pick", "35%"))</c>. Placeholder names
-    /// are substituted via simple string replace — no SmartFormat pluralization
-    /// for v1.0.0; revisit if translators need it.</summary>
+    /// <summary>Template lookup with named-placeholder substitution:
+    /// e.g. <c>L.T("tooltip.baseline.buys", ("buys", "22%"), ("win", "48%"))</c>
+    /// replaces <c>{buys}</c> and <c>{win}</c> in the template. Simple string
+    /// replace — no format specifiers, no escaping.</summary>
     public static string T(string key, params (string name, object value)[] variables)
     {
         var template = T(key);
@@ -159,5 +77,30 @@ public static class L
         foreach (var (name, value) in variables)
             template = template.Replace("{" + name + "}", value?.ToString() ?? "");
         return template;
+    }
+
+    /// <summary>Resolves a character entry (<c>"IRONCLAD"</c> or the fully
+    /// qualified <c>"CHARACTER.IRONCLAD"</c>) to its localized short display
+    /// name via the game's <c>"characters"</c> loc table. Returns
+    /// <paramref name="fallback"/> if the key is missing (modded characters
+    /// without a titleObject, or pre-LocManager call).</summary>
+    public static string CharacterName(string characterIdOrEntry, string fallback)
+    {
+        try
+        {
+            var entry = characterIdOrEntry.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+                ? characterIdOrEntry.Substring("CHARACTER.".Length)
+                : characterIdOrEntry;
+            if (entry.Length == 0) return fallback;
+            var table = LocManager.Instance?.GetTable("characters");
+            if (table != null && table.HasEntry(entry + ".titleObject"))
+                return table.GetRawText(entry + ".titleObject");
+        }
+        catch (Exception e)
+        {
+            if (_warnedMissing.Add("character:" + characterIdOrEntry))
+                MainFile.Logger.Warn($"[L] CharacterName lookup failed for '{characterIdOrEntry}': {e.Message}");
+        }
+        return fallback;
     }
 }

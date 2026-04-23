@@ -209,16 +209,16 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline = 50.0, string characterLabel = "All characters", int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 
         // Relics: Act | Runs | Buys (bought/seen) | Win%
         sb.Append("[table=4]");
-        sb.Append(TooltipHelper.HdrCell("Act", TooltipHelper.ColPadOuter));
-        sb.Append(TooltipHelper.HdrCell("Runs", TooltipHelper.ColPadInner));
-        sb.Append(TooltipHelper.HdrCell("Buys", TooltipHelper.ColPadInner));
-        sb.Append(TooltipHelper.HdrCell("Win%", TooltipHelper.ColPadLast));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.act"), TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.runs"), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.buys"), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
         int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
 
@@ -257,7 +257,7 @@ internal static class RelicHoverHelper
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
         var cTotRuns   = TooltipHelper.ColN($"{totPresent}", totPresent);
         var cTotWr     = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
-        sb.Append(TooltipHelper.DataCell("All", TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.DataCell(L.T("tooltip.row.all"), TooltipHelper.ColPadOuter));
         sb.Append(TooltipHelper.DataCell(cTotRuns, TooltipHelper.ColPadInner));
         sb.Append(CardHoverShowPatch.FormatBuysFractionCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline, TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.DataCell(cTotWr, TooltipHelper.ColPadLast));
@@ -268,7 +268,7 @@ internal static class RelicHoverHelper
         // NaN baselines (filter matched zero runs/contexts) render as "—".
         var wrStr       = double.IsNaN(wrBaseline)          ? "—" : $"{Math.Round(wrBaseline):F0}%";
         var buysBaseStr = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
-        var baselineText = $"(baseline)    Buys {buysBaseStr}    Win% {wrStr}";
+        var baselineText = L.T("tooltip.baseline.buys", ("buys", buysBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
 
         var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";

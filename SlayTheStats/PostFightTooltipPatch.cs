@@ -195,23 +195,23 @@ public static class PostFightTooltipPatch
         // Header
         sb.Append(LabelCell(""));
         sb.Append(HeaderCell(""));
-        sb.Append(HeaderCell("vs hist."));
-        sb.Append(HeaderCell("pctile"));
+        sb.Append(HeaderCell(L.T("postfight.col.vs_hist")));
+        sb.Append(HeaderCell(L.T("postfight.col.pctile")));
 
         // Damage: raw | delta vs median | percentile
-        sb.Append(LabelCell("Damage"));
+        sb.Append(LabelCell(L.T("postfight.row.damage")));
         sb.Append(ValueCell($"{fight.DamageTaken}"));
         sb.Append(DeltaCell(fight.DamageTaken - dmgBaseline, highIsBad: true, n));
         sb.Append(PercentileCell(dmgPct));
 
         // Turns: raw | delta vs avg | percentile
-        sb.Append(LabelCell("Turns"));
+        sb.Append(LabelCell(L.T("tooltip.col.turns")));
         sb.Append(ValueCell($"{fight.TurnsTaken}"));
         sb.Append(DeltaCell(fight.TurnsTaken - avgTurns, highIsBad: true, n));
         sb.Append(PercentileCell(turnPct));
 
         // Potions: raw | delta vs avg | percentile
-        sb.Append(LabelCell("Pots"));
+        sb.Append(LabelCell(L.T("postfight.row.pots")));
         sb.Append(ValueCell($"{fight.PotionsUsed}"));
         sb.Append(DeltaCell(fight.PotionsUsed - avgPots, highIsBad: true, n));
         sb.Append(PercentileCell(potPct));
@@ -219,7 +219,7 @@ public static class PostFightTooltipPatch
         // Runs: total fights fed into this comparison. No delta / pctile —
         // this is context, not a per-fight metric. Dulled + blank trailing
         // cells so the row reads as reference rather than a comparison line.
-        sb.Append(DimLabelCell("Runs"));
+        sb.Append(DimLabelCell(L.T("tooltip.col.runs")));
         sb.Append(DimValueCell($"{combined.Fought}"));
         sb.Append(EmptyCell());
         sb.Append(EmptyCell());
@@ -229,7 +229,7 @@ public static class PostFightTooltipPatch
         // Footer
         var charLabel = character != null
             ? CardHoverShowPatch.GetCharacterDisplay(character)
-            : "All chars";
+            : L.T("filter.all_characters");
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 

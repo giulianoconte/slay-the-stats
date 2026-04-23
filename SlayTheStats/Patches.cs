@@ -98,14 +98,10 @@ public static class MainMenuReadyPatch
 
     static void Postfix(NMainMenu __instance)
     {
-        // LocManager.Instance is not yet constructed when MainFile.Initialize()
-        // runs (mod init happens before the locale manager boots). Deferring L.Init
-        // + TooltipHelper.InitLocaleSubscription to NMainMenu._Ready — the first
-        // hook that fires after the locale manager is ready — lets the first
-        // RefreshFromGameLocale actually read the user's chosen language and the
-        // SubscribeToLocaleChange call complete successfully. Guarded by a flag so
-        // subsequent main-menu loads (after a run) don't re-run init.
-        L.InitIfNeeded();
+        // Deferred here (not MainFile.Initialize) because LocManager.Instance
+        // is null at mod-init; any LocString subscribe or GetTable call NREs.
+        // By NMainMenu._Ready the locale system is up, so the font-fallback
+        // subscription binds cleanly.
         TooltipHelper.InitLocaleSubscription();
 
         CardHoverShowPatch.RunCharacter = null;

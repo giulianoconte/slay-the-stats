@@ -119,7 +119,7 @@ internal static class EventHoverHelper
             // Hide timer and flicker the panel.
             _hideGen++;
 
-            _panelNameLabel.Text = $"[b]Event Stats[/b]";
+            _panelNameLabel.Text = $"[b]{L.T("tooltip.event.header")}[/b]";
             _panelLabel.Text     = hasData
                 ? BuildStatsText(eventId, agg, hoveredOptionKey, characterLabel, wrBaseline, filter)
                 : CardHoverShowPatch.NoDataText(filter);
@@ -448,8 +448,8 @@ internal static class EventHoverHelper
         var sb = new StringBuilder();
 
         sb.Append("[table=2]");
-        sb.Append(TooltipHelper.HdrCell("Picks",  TooltipHelper.ColPadOuter));
-        sb.Append(TooltipHelper.HdrCell("Win%",   TooltipHelper.ColPadLast));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.picks"),   TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
         agg.Options.TryGetValue(hoveredOptionKey, out var opt);
 
@@ -483,14 +483,12 @@ internal static class EventHoverHelper
 
         if (isShape2)
         {
-            // Non-comparative note, rendered in the same muted style as the
-            // baseline/footer strip so it reads as metadata rather than data.
-            sb.Append(TooltipHelper.FormatBaselineLine("Offered data not recorded for this event"));
+            sb.Append(TooltipHelper.FormatBaselineLine(L.T("tooltip.baseline.event.shape2_no_data")));
         }
         else
         {
             var wrStr = double.IsNaN(wrBaseline) ? "—" : $"{Math.Round(wrBaseline):F0}%";
-            sb.Append(TooltipHelper.FormatBaselineLine($"(baseline) Win% {wrStr}"));
+            sb.Append(TooltipHelper.FormatBaselineLine(L.T("tooltip.baseline.event", ("win", wrStr))));
         }
 
         var filterCtx = CardHoverShowPatch.BuildFilterContext(characterLabel, filter);

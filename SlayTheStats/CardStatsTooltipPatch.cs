@@ -196,11 +196,15 @@ public static class CardHoverShowPatch
 
     internal static string FormatCharacterName(string character)
     {
-        var name = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
+        var entry = character.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
             ? character.Substring("CHARACTER.".Length)
             : character;
-        if (name.Length == 0) return character;
-        return char.ToUpper(name[0]) + name.Substring(1).ToLower();
+        if (entry.Length == 0) return character;
+        // Fallback: title-cased entry (e.g. "IRONCLAD" → "Ironclad"). Used
+        // if the game's "characters" loc table has no entry for this ID
+        // (modded characters that didn't register a titleObject string).
+        var fallback = char.ToUpper(entry[0]) + entry.Substring(1).ToLower();
+        return L.CharacterName(entry, fallback);
     }
 
     /// <summary>
@@ -785,7 +789,7 @@ public static class CardHoverShowPatch
         // doesn't need a "character" marker — just "(baseline)" is enough.
         var prBaseStr = double.IsNaN(pickRateBaseline) ? "—" : $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = double.IsNaN(characterWR)     ? "—" : $"{Math.Round(characterWR):F0}%";
-        var baselineText = L.T("tooltip.baseline.card_pick", ("pick", prBaseStr), ("win", wrStr));
+        var baselineText = L.T("tooltip.baseline.pick", ("pick", prBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
 
         var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
@@ -859,7 +863,7 @@ public static class CardHoverShowPatch
         // NaN baselines (filter matched zero runs/contexts) render as "—".
         var wrStr        = double.IsNaN(characterWR)         ? "—" : $"{Math.Round(characterWR):F0}%";
         var buysBaseStr  = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
-        var baselineText = L.T("tooltip.baseline.card_buys", ("buys", buysBaseStr), ("win", wrStr));
+        var baselineText = L.T("tooltip.baseline.buys", ("buys", buysBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
 
         var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";

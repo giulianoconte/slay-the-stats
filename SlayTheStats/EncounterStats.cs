@@ -182,12 +182,22 @@ public static class EncounterCategory
     }
 
     /// <summary>
-    /// Formats a category string for display (title-case).
-    /// e.g. "elite" -> "Elite", "event" -> "Event"
+    /// Localized display label for an encounter category (our mod's own
+    /// taxonomy: weak / normal / elite / boss / event). Keyed as
+    /// <c>category.{lower}</c> in the loc table; unknown categories fall
+    /// back to the title-cased input so modded encounter categories render
+    /// readable-ish until someone adds a translation.
     /// </summary>
     public static string FormatCategory(string category)
     {
-        if (string.IsNullOrEmpty(category)) return "Unknown";
+        if (string.IsNullOrEmpty(category)) return L.T("category.unknown");
+        var lower = category.ToLowerInvariant();
+        // L.T returns the key itself on miss; detect that and fall through
+        // to the title-cased fallback so modded categories don't render as
+        // the literal key. Also why we don't just return L.T unconditionally.
+        var key = "category." + lower;
+        var translated = L.T(key);
+        if (translated != key) return translated;
         return char.ToUpper(category[0]) + category[1..].ToLower();
     }
 }
