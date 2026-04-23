@@ -268,6 +268,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private HBoxContainer? _statsColumnHeaderRow;
     private VBoxContainer? _encounterList;
     private RichTextLabel? _statsLabel;
+    /// <summary>Wraps <see cref="_statsLabel"/> with a small top margin that
+    /// compensates for Godot RichTextLabel rendering the first table row
+    /// above its widget rect when the label's visibility transitions from
+    /// false → true (toggling from all-chars to focused via the character
+    /// selector). Hover-to-hover renders stay visible and lay out correctly
+    /// without this margin, but toggle-triggered renders don't. Visibility
+    /// is toggled alongside <see cref="_statsLabel"/> so the margin doesn't
+    /// leak into the all-chars layout when focused is hidden.</summary>
+    private MarginContainer? _statsLabelMargin;
     private RichTextLabel? _statsTitleLabel;
     // Split labels for the scrollable all-characters table. When in all-chars mode,
     // _statsLabel is hidden and these three take over. _statsHeaderLabel and
@@ -745,10 +754,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // present. The selector pushes the stats table down as it wraps; the table
         // absorbs the lost height via its capped content area.
         //
-        // Named "Table Style" header above the row so the selector reads as a named
+        // Named "Table Type" header above the row so the selector reads as a named
         // control with the legend "?" button inline. Previously the legend "?" sat
         // next to the encounter title below the stats table header where users
-        // missed it; hoisting it up here pairs the help cue with the Table Style
+        // missed it; hoisting it up here pairs the help cue with the Table Type
         // selector it contextualizes, and also sits closer to the table columns the
         // popup explains.
         var tableStyleHeader = new HBoxContainer();
@@ -756,7 +765,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         tableStyleHeader.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         rightPanel.AddChild(tableStyleHeader);
 
-        var tableStyleLabel = new Label { Text = "Table Style" };
+        var tableStyleLabel = new Label { Text = "Table Type" };
         tableStyleLabel.AddThemeColorOverride("font_color", Color.FromHtml(ThemeStyle.HeaderGrey));
         tableStyleLabel.AddThemeFontSizeOverride("font_size", 16);
         ApplyKreonFont(tableStyleLabel, bold: true);
@@ -783,7 +792,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statsBox.AddChild(statsVbox);
 
         // Title row: encounter / category name in Kreon gold. The legend "?" button
-        // moved up to the Table Style header above the selector row so the help cue
+        // moved up to the Table Type header above the selector row so the help cue
         // sits next to the selector it contextualizes.
         var titleRow = new HBoxContainer();
         titleRow.AddThemeConstantOverride("separation", 8);
@@ -822,7 +831,19 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsLabel.SizeFlagsVertical   = SizeFlags.ExpandFill;
         _statsLabel.CustomMinimumSize = new Vector2(EncounterTooltipHelper.FocusedTableWidthPx, 0);
         _statsLabel.Text = $"[color=#686868]Hover an encounter to see stats[/color]";
-        statsVbox.AddChild(_statsLabel);
+
+        // MarginContainer compensates for the Godot RichTextLabel rendering the
+        // first table row above its widget rect when visibility flips false → true
+        // (toggling from all-chars to focused). Hover-to-hover re-renders look
+        // fine without this — but without the wrapper, toggle-triggered renders
+        // collapse the header onto the title row. Value tuned to match the
+        // natural hover-to-hover gap.
+        _statsLabelMargin = new MarginContainer();
+        _statsLabelMargin.AddThemeConstantOverride("margin_top", 2);
+        _statsLabelMargin.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+        _statsLabelMargin.SizeFlagsVertical   = SizeFlags.ExpandFill;
+        _statsLabelMargin.AddChild(_statsLabel);
+        statsVbox.AddChild(_statsLabelMargin);
 
         // All-characters scrollable layout: header (sticky) + character rows (scrollable) + baseline (sticky) + footer.
         // These are hidden until the all-chars view is active.
@@ -1204,6 +1225,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (!force && SlayTheStatsConfig.BestiaryTutorialSeen)
             return;
 
+        // Ensure view state is populated before snapshotting. If the tutorial
+        // fires from OnSubmenuOpened before the first Refresh() (which is what
+        // normally calls RestoreBestiaryState), _selectedBiome / sort / etc.
+        // would still be null — capturing null here would leave biome tabs
+        // unhighlighted after the tutorial dismisses. RestoreBestiaryState is
+        // idempotent (early-return when _selectedBiome is already set), so
+        // calling it here is safe when state is already restored.
+        RestoreBestiaryState();
+
         // Snapshot state once per tutorial run so dismiss restores the user's view.
         _tutorialRestoreBiome              = _selectedBiome;
         _tutorialRestoreSortMode           = _sortMode;
@@ -1262,6 +1292,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     private void AdvanceTutorial()
     {
+        // Click feedback on every tutorial advance — both phase transitions and
+        // the final dismiss click. Same sfx event as the biome/sort/character
+        // buttons so the tutorial reads as "in the UI family" rather than silent.
+        SfxCmd.Play("event:/sfx/ui/clicks/ui_click");
+
         var next = _bestiaryTutorialPhase + 1;
         if (!Enum.IsDefined(typeof(BestiaryTutorialPhase), next))
         {
@@ -1725,18 +1760,20 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         return label;
     }
 
-    /// <summary>When DebugMode is on, paint RichTextLabel tables with visible per-cell
-    /// borders and alternating row backgrounds so the relationship between cell padding,
-    /// content width, and the inter-column gap is legible at a glance. Godot exposes
-    /// three RichTextLabel theme colors for this: <c>table_border</c> (cell edge line),
-    /// <c>table_odd_row_bg</c>, and <c>table_even_row_bg</c> (row fills). With
-    /// <c>table_h_separation=0</c>, adjacent cells sit flush — the only visible gap
-    /// between two cells' content is the sum of cellA.right-pad + cellB.left-pad, which
-    /// the borders make easy to measure. No-op when DebugMode is off so release builds
-    /// stay clean.</summary>
+    /// <summary>In dev builds with DebugMode on, paint RichTextLabel tables with
+    /// visible per-cell borders and alternating row backgrounds so the relationship
+    /// between cell padding, content width, and the inter-column gap is legible at
+    /// a glance. Godot exposes three RichTextLabel theme colors for this:
+    /// <c>table_border</c> (cell edge line), <c>table_odd_row_bg</c>, and
+    /// <c>table_even_row_bg</c> (row fills). With <c>table_h_separation=0</c>,
+    /// adjacent cells sit flush — the only visible gap between two cells' content
+    /// is the sum of cellA.right-pad + cellB.left-pad, which the borders make easy
+    /// to measure. Gated on <c>!BuildInfo.IsRelease</c> as well as DebugMode so a
+    /// release build with DebugMode on (enabled for user bug reports) doesn't
+    /// accidentally paint red cell borders across every stats table.</summary>
     private static void ApplyDebugTableOverlay(RichTextLabel label)
     {
-        if (!SlayTheStatsConfig.DebugMode) return;
+        if (BuildInfo.IsRelease || !SlayTheStatsConfig.DebugMode) return;
         label.AddThemeColorOverride("table_border",       new Color(1.00f, 0.25f, 0.25f, 0.95f));
         label.AddThemeColorOverride("table_odd_row_bg",   new Color(0.25f, 0.35f, 0.55f, 0.30f));
         label.AddThemeColorOverride("table_even_row_bg",  new Color(0.55f, 0.35f, 0.25f, 0.30f));
@@ -1829,28 +1866,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         innerMargin.AddChild(vbox);
         popup.AddChild(innerMargin);
 
-        var title = new Label { Text = "Stat columns" };
-        title.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
-        title.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
-        ApplyKreonFont(title, bold: true);
-        ApplyTooltipTextShadow(title);
-        vbox.AddChild(title);
-
-        var body = new RichTextLabel
-        {
-            BbcodeEnabled = true,
-            FitContent    = true,
-            ScrollActive  = false,
-            AutowrapMode  = TextServer.AutowrapMode.WordSmart,
-            MouseFilter   = MouseFilterEnum.Ignore,
-            CustomMinimumSize = new Vector2(520, 0),
-        };
-        body.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
-        body.AddThemeFontSizeOverride("normal_font_size", 16);
-        body.AddThemeFontSizeOverride("bold_font_size", 16);
-        ApplyKreonFont(body);
-        ApplyTooltipTextShadow(body);
-        // Inline Prismatic Gem + per-character icons for the Table Style lines.
+        // Inline Prismatic Gem + per-character icons for the Table type section.
         var prismaticIcon = EncounterTooltipHelper.AllCharsIcon(20).TrimEnd();
         if (string.IsNullOrEmpty(prismaticIcon))
             prismaticIcon = "[b][color=#efc851]Prismatic Gem[/color][/b]";
@@ -1861,11 +1877,53 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (string.IsNullOrEmpty(charIcons))
             charIcons = "[b][color=#efc851]Ironclad[/color][/b], [b][color=#efc851]Silent[/color][/b], [b][color=#efc851]Defect[/color][/b]";
 
-        body.Text = string.Join('\n', new[]
+        // Local helpers: one-liner section title + one-liner body, both carrying
+        // the popup's shared styling so each section can be added to the vbox
+        // without duplicating the theme overrides inline.
+        Label MakeSectionTitle(string text)
         {
-            prismaticIcon + " — compare all characters for this encounter.",
-            charIcons + " etc — see how this encounter compares to others for this character.",
-            "",
+            var l = new Label { Text = text };
+            l.AddThemeColorOverride("font_color", new Color(0.918f, 0.745f, 0.318f, 1f));
+            l.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
+            ApplyKreonFont(l, bold: true);
+            ApplyTooltipTextShadow(l);
+            return l;
+        }
+        RichTextLabel MakeSectionBody(string text)
+        {
+            var b = new RichTextLabel
+            {
+                BbcodeEnabled = true,
+                FitContent    = true,
+                ScrollActive  = false,
+                AutowrapMode  = TextServer.AutowrapMode.WordSmart,
+                MouseFilter   = MouseFilterEnum.Ignore,
+                CustomMinimumSize = new Vector2(520, 0),
+            };
+            b.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
+            b.AddThemeFontSizeOverride("normal_font_size", 16);
+            b.AddThemeFontSizeOverride("bold_font_size", 16);
+            ApplyKreonFont(b);
+            ApplyTooltipTextShadow(b);
+            b.Text = text;
+            return b;
+        }
+
+        // Section 1: Table type — explains the two Table Type options (all-
+        // characters comparison vs. per-character focused view) and the Dmg
+        // encoding each uses. Replaces the standalone footer note from the
+        // prior single-section layout.
+        vbox.AddChild(MakeSectionTitle("Table type"));
+        vbox.AddChild(MakeSectionBody(string.Join('\n', new[]
+        {
+            prismaticIcon + " — compare all characters for this encounter. Damage represents percentage of starting max HP.",
+            charIcons + " etc — see how this encounter compares to others for this character. Damage represents raw damage taken.",
+        })));
+
+        // Section 2: Stat columns — per-column definitions.
+        vbox.AddChild(MakeSectionTitle("Stat columns"));
+        vbox.AddChild(MakeSectionBody(string.Join('\n', new[]
+        {
             "[b][color=#efc851]Dmg[/color][/b] — median damage taken.",
             "[b][color=#efc851]Mid 50%[/color][/b] — the damage range a typical fight lands in. A quarter of your fights took less than the lower number, half landed inside the range, a quarter took more than the upper number. (Shown as p25-p75; a.k.a. the IQR.)",
             "[b][color=#efc851]Spread[/color][/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight. A Spread of 100% means the Mid 50% range is as wide as the median damage.",
@@ -1873,11 +1931,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             "[b][color=#efc851]Pots[/color][/b] — average potions.",
             "[b][color=#efc851]Deaths[/color][/b] — runs ended by this encounter / total runs.",
             "",
-            "[color=#bfb7a6]In the " + prismaticIcon + " (all-characters) view, [b]Dmg[/b] and [b]Mid 50%[/b] are shown as a percentage of each character's starting max HP so characters with different HP totals compare fairly.[/color]",
-            "",
             "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
-        });
-        vbox.AddChild(body);
+        })));
 
         // Wrap the popup in a CanvasLayer + full-screen click-catcher so clicking
         // anywhere outside the popup dismisses it.
@@ -1928,7 +1983,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // clobbered by the demo.
         if (_tutorialStateSnapshotted)
         {
-            _selectedBiome       = _tutorialRestoreBiome;
+            // Fall back to the default biome if the snapshot was somehow null
+            // (shouldn't happen — MaybeShowBestiaryTutorial runs
+            // RestoreBestiaryState first — but if it did, every biome tab
+            // would render unselected because "biome == null" matches no tab).
+            _selectedBiome       = _tutorialRestoreBiome ?? GetDefaultBiome();
             _sortMode            = _tutorialRestoreSortMode;
             _sortDescending      = _tutorialRestoreSortDescending;
             _sortBySignificance  = _tutorialRestoreSortBySignificance;
@@ -1991,7 +2050,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _sortMode = mode;
         _sortDescending = SlayTheStatsConfig.BestiarySortDescending;
 
-        // Table Style (character focus) intentionally does NOT persist across bestiary
+        // Table Type (character focus) intentionally does NOT persist across bestiary
         // opens — always start in Overview (all-characters) mode. Users can switch to a
         // focused character within the session; that choice is forgotten on reopen.
         _sortCharacter = null;
@@ -2757,7 +2816,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         return $"{label} {arrow}";
     }
 
-    // Icon-only Table Style selector — mimics NCardPoolFilter from the card library.
+    // Icon-only Table Type selector — mimics NCardPoolFilter from the card library.
     // Scale-based selection: selected icon sits at 1.1× (slightly larger), unselected
     // at 0.95×. On hover, the current scale is multiplied by 1.2× using a SINE-OUT
     // tween (0.05s in / 0.3s out), matching NCardPoolFilter's tween values. No halo,
@@ -2890,7 +2949,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private static bool _prismaticGemProbed;
 
     /// <summary>Loads the Prismatic Gem relic icon as a Texture2D for the Overview
-    /// slot of the Table Style selector. Cached after first probe.</summary>
+    /// slot of the Table Type selector. Cached after first probe.</summary>
     private static Texture2D? LoadPrismaticGemTexture()
     {
         if (_prismaticGemProbed) return _prismaticGemTexture;
@@ -3911,6 +3970,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void ShowAllCharsStats(EncounterTooltipHelper.AllCharsTableParts parts)
     {
         if (_statsLabel != null) _statsLabel.Visible = false;
+        if (_statsLabelMargin != null) _statsLabelMargin.Visible = false;
 
         // Header/baseline labels unused now that the single-table consolidation puts
         // every row inside _statsCharRowsLabel. Kept in the tree to avoid rebuilding UI.
@@ -3975,6 +4035,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void ShowSingleLabelStats(string text)
     {
         if (_statsLabel != null) { _statsLabel.Text = text; _statsLabel.Visible = true; }
+        if (_statsLabelMargin != null) _statsLabelMargin.Visible = true;
         if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = false;
         if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = false;
         if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = false;

@@ -292,13 +292,13 @@ public static class EncounterTooltipHelper
                                    + TurnsParts + PotsParts + DeathsParts;
     }
 
-    // Focused view: 2:2:3:3:2:3:3 on data columns.
+    // Both views share the same data-column part distribution so data columns render
+    // at identical widths across the focused and all-chars tables.
+    // Distribution: Fought:2  Dmg:2  Mid50:3  Spread:3  Turns:2  Pots:3  Deaths:3.
     private static readonly ColumnPaddings FocusedColumns =
         new(fought: 2, dmg: 2, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
-    // All-chars view: same as focused except Dmg% gets 3 parts (wider content like "Dmg%"
-    // header + "100%" data reads comfortably with the extra breathing room).
     private static readonly ColumnPaddings AllCharsColumns =
-        new(fought: 2, dmg: 3, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
+        new(fought: 2, dmg: 2, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
 
     /// <summary>Focused-view descriptor parts — must match the default on
     /// <see cref="AppendDescriptorCell"/> and <see cref="AppendSizingRow"/>.</summary>
@@ -307,7 +307,7 @@ public static class EncounterTooltipHelper
     public static readonly int FocusedTableWidthPx = FocusedTotalParts * PartSizePx;
     /// <summary>All-chars-view descriptor parts — narrower than focused since character-
     /// name descriptors are shorter than focused's pool labels.</summary>
-    public const int AllCharsDescriptorParts = 5;
+    public const int AllCharsDescriptorParts = 6;
     public static readonly int AllCharsTotalParts = AllCharsDescriptorParts + AllCharsColumns.SumDataParts;
     public static readonly int AllCharsTableWidthPx = AllCharsTotalParts * PartSizePx;
 
@@ -1124,8 +1124,14 @@ public static class EncounterTooltipHelper
         double spreadBase = 0;
         if (stat.Fought > 0)
         {
-            var (medianBase, iqrcBase, _, turnsBase, _) = DeriveBaselines(poolBaseline);
-            AppendCombatDataCells(sb, stat, medianBase, iqrcBase, turnsBase);
+            // Pool baseline provides spread + turns; Dmg uses the explicit
+            // `dmgBaseline` (fight-weighted mean) so the coloration matches what
+            // the footer line displays. Mixing poolBaseline.Median for coloration
+            // and dmgBaseline for display caused a "4 vs 4.8 but colored red" bug
+            // when the two numbers disagreed (encounter-weighted median of medians
+            // is not the same as fight-weighted mean damage).
+            var (_, iqrcBase, _, turnsBase, _) = DeriveBaselines(poolBaseline);
+            AppendCombatDataCells(sb, stat, dmgBaseline, iqrcBase, turnsBase);
             spreadBase = iqrcBase;
         }
         else
@@ -1153,10 +1159,12 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>Appends 5 data cells for the in-combat encounter table: Runs | Dmg | Mid 50% | Spread | Turns.
-    /// Coloration matches the bestiary focused-view row 1: Dmg via ColBadRelative on absolute median,
-    /// Mid 50% neutral, Spread via ColBadLog, Turns via ColBadRelative.</summary>
+    /// Coloration: Dmg via ColBadRelative against <paramref name="dmgBaseline"/> (the
+    /// same value shown in the footer, so color and display agree); Mid 50% neutral;
+    /// Spread via ColBadLog against <paramref name="iqrcBaseline"/>; Turns via
+    /// ColBadRelative against <paramref name="turnsBaseline"/>.</summary>
     private static void AppendCombatDataCells(StringBuilder sb, EncounterEvent stat,
-        double medianBaseline, double iqrcBaseline, double turnsBaseline)
+        double dmgBaseline, double iqrcBaseline, double turnsBaseline)
     {
         int n = stat.Fought;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
@@ -1165,7 +1173,7 @@ public static class EncounterTooltipHelper
         string fIqr = iqr.HasValue ? $"{iqr.Value.p25:F0}-{iqr.Value.p75:F0}" : "-";
 
         var cN      = TooltipHelper.ColN($"{n}", n);
-        var cDmg    = ColBadRelative($"{dmgMedian:F0}", dmgMedian, medianBaseline, n);
+        var cDmg    = ColBadRelative($"{dmgMedian:F0}", dmgMedian, dmgBaseline, n);
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
         var cSpread = FormatSpreadCell(IqrcFromBounds(iqr, dmgMedian), n, iqrcBaseline);
         var cTurns  = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBaseline, n);
