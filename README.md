@@ -24,14 +24,13 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 
 ### Requirements
 
-- [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) installed for STS2.
 - [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v0.2.5 or later.
+- **NOTE:** GUMM is NOT required. If you previously installed it for this mod, see [Uninstalling GUMM](#uninstalling-gumm) below.
 
 ### Installation
 
-1. Install [GUMM (Godot Universal Mod Manager)](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) in STS2
-2. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.5 or later) into your mods folder if you haven't already
-3. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll` and `SlayTheStats.json`
+1. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.5 or later) into your mods folder if you haven't already
+2. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll` and `SlayTheStats.json`
 
 ### Uninstalling
 
@@ -47,6 +46,16 @@ Paths for items 2–4:
 - **Linux:** `~/.local/share/Slay the Spire 2/`  (contains `mod_configs/SlayTheStats.cfg`, `slay-the-stats.json`, and `ModConfig/SlayTheStats.json`)
 
 If you only want to reset stats but keep your settings, delete just `slay-the-stats.json` — it will be rebuilt from your run history on next launch.
+
+### Uninstalling GUMM
+
+I was mistaken — you never needed GUMM to run this mod. Sorry! Here's how to uninstall GUMM:
+
+1. In your STS2 install folder, next to the executable, delete `override.cfg` — otherwise the game won't launch (Godot tries to load GUMM's loader scene and exits).
+2. Delete the GUMM installation folder.
+3. Delete the GUMM file from your game's data folder:
+   - **Windows:** `%APPDATA%\Slay the Spire 2\`
+   - **Linux:** `~/.local/share/Slay the Spire 2/`
 
 ### Compendium Filters
 
@@ -124,13 +133,12 @@ Check the Godot log for `[SlayTheStats]` entries:
 ### Tech Stack
 
 - **Language:** C# (.NET 9)
-- **Modding layer:** [GUMM](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) + [BaseLib](https://github.com/Alchyr/BaseLib-StS2) + HarmonyX
+- **Modding layer:** [BaseLib](https://github.com/Alchyr/BaseLib-StS2) + HarmonyX (uses STS2's built-in mod loader)
 - **Build target:** Godot 4.5.1 / STS2
 
 ### Prerequisites
 
 - [.NET 9.0 SDK](https://dot.net)
-- [GUMM](https://sts2mods.com/godot-universal-mod-manager-for-sts-2/) installed in STS2
 - `sts2.dll` and `0Harmony.dll` copied from your STS2 install into `SlayTheStats/libs/`
   - Windows path: `steamapps\common\Slay the Spire 2\`
 

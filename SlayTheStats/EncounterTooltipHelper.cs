@@ -773,7 +773,7 @@ public static class EncounterTooltipHelper
 
     /// <summary>Returns just the inline character icon BBCode at a given size, without the
     /// trailing name. Returns empty string when the character has no recognised icon.</summary>
-    private static string CharacterIcon(string characterId, int sizePx)
+    internal static string CharacterIcon(string characterId, int sizePx)
     {
         var name = characterId.StartsWith("CHARACTER.", StringComparison.OrdinalIgnoreCase)
             ? characterId.Substring("CHARACTER.".Length)

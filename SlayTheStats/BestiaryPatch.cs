@@ -138,12 +138,20 @@ public static class BestiaryButtonPatch
                     var hsvField = AccessTools.Field(typeof(NCompendiumBottomButton), "_hsv");
                     hsvField?.SetValue(ourButton, ownMat);
                 }
-                // Blue tint to tie the button to the mod's steel-blue tooltip family.
-                // The BgPanel's shader desaturates / shifts the SelfModulate color (a direct
-                // (0.60, 0.68, 0.88) tooltip blue comes out plum after the shader), so we
-                // bias the channels hard toward blue to land on a true blue after the
-                // shader is done with it.
-                ((CanvasItem)bgPanel).SelfModulate = new Color(0.30f, 0.55f, 1.00f, 1f);
+                // Muted blue tint in the same pastel family as the native Character Stats
+                // (army green) and Run History (light red) buttons — lighter and
+                // noticeably less saturated than the previous vivid (0.30, 0.55, 1.00).
+                // The BgPanel shader desaturates / warms the SelfModulate color toward
+                // magenta, so we pull red well below green to stay on the cool side of
+                // blue after the shader runs — green equal-ish to blue pushes the
+                // output toward a cool sky-blue rather than a warm periwinkle/purple.
+                ((CanvasItem)bgPanel).SelfModulate = new Color(0.30f, 0.65f, 1.00f, 1f);
+                // R pinned at 0.30 to stay cool — raising it slides back toward purple.
+                // With R capped, SelfModulate alone can't go any lighter without losing
+                // blue character, so stack a uniform brightness multiplier on top via
+                // Modulate. The shader composes Modulate * SelfModulate, so >1 here
+                // lifts the output linearly without shifting hue.
+                ((CanvasItem)bgPanel).Modulate = new Color(1.35f, 1.35f, 1.35f, 1f);
             }
 
             // Replace the icon with a square grid of boss icons (encountered in full color,
@@ -736,6 +744,29 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // HFlowContainer so icons wrap to additional rows when many characters are
         // present. The selector pushes the stats table down as it wraps; the table
         // absorbs the lost height via its capped content area.
+        //
+        // Named "Table Style" header above the row so the selector reads as a named
+        // control with the legend "?" button inline. Previously the legend "?" sat
+        // next to the encounter title below the stats table header where users
+        // missed it; hoisting it up here pairs the help cue with the Table Style
+        // selector it contextualizes, and also sits closer to the table columns the
+        // popup explains.
+        var tableStyleHeader = new HBoxContainer();
+        tableStyleHeader.AddThemeConstantOverride("separation", 6);
+        tableStyleHeader.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        rightPanel.AddChild(tableStyleHeader);
+
+        var tableStyleLabel = new Label { Text = "Table Style" };
+        tableStyleLabel.AddThemeColorOverride("font_color", Color.FromHtml(ThemeStyle.HeaderGrey));
+        tableStyleLabel.AddThemeFontSizeOverride("font_size", 16);
+        ApplyKreonFont(tableStyleLabel, bold: true);
+        ApplyTextShadow(tableStyleLabel);
+        tableStyleLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        tableStyleHeader.AddChild(tableStyleLabel);
+
+        _legendButton = BuildLegendButton();
+        tableStyleHeader.AddChild(_legendButton);
+
         _sortCharRow!.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         rightPanel.AddChild(_sortCharRow);
 
@@ -751,8 +782,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statsVbox.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         statsBox.AddChild(statsVbox);
 
-        // Title row: encounter / category name in Kreon gold + a small "?" legend button
-        // on the right that toggles a popup explaining each stat column.
+        // Title row: encounter / category name in Kreon gold. The legend "?" button
+        // moved up to the Table Style header above the selector row so the help cue
+        // sits next to the selector it contextualizes.
         var titleRow = new HBoxContainer();
         titleRow.AddThemeConstantOverride("separation", 8);
         titleRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -771,9 +803,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         ApplyTextShadow(_statsTitleLabel);
         _statsTitleLabel.Text = "";
         titleRow.AddChild(_statsTitleLabel);
-
-        _legendButton = BuildLegendButton();
-        titleRow.AddChild(_legendButton);
 
         // Stats label — used for focused-character and category views (non-scrollable).
         // Width is pinned to FocusedTableWidthPx so the BBCode [table=8]'s expand-ratio
@@ -1164,6 +1193,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private bool              _tutorialRestoreSortBySignificance;
     private string?           _tutorialRestoreSortCharacter;
     private string?           _tutorialRestoreLockedEncounterId;
+    private HashSet<string>?  _tutorialRestoreCollapsedCategories;
 
     /// <summary>Show the tutorial. Auto-fires on first open; force=true replays
     /// via the "?" button next to the title even after BestiaryTutorialSeen=true.</summary>
@@ -1181,7 +1211,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _tutorialRestoreSortBySignificance = _sortBySignificance;
         _tutorialRestoreSortCharacter      = _sortCharacter;
         _tutorialRestoreLockedEncounterId  = _lockedEncounterId;
+        _tutorialRestoreCollapsedCategories = new HashSet<string>(_collapsedCategories);
         _tutorialStateSnapshotted          = true;
+
+        // Expand every category so phases 3/4 can lock a specific encounter and
+        // have it visible in the list (otherwise `LockEncounter` on a collapsed
+        // category silently no-ops and the Spine preview stays empty).
+        _collapsedCategories.Clear();
 
         // Defer one frame so the bestiary's own layout has settled before we read
         // target element rects for arrow placement.
@@ -1814,21 +1850,30 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         body.AddThemeFontSizeOverride("bold_font_size", 16);
         ApplyKreonFont(body);
         ApplyTooltipTextShadow(body);
-        // Inline Prismatic Gem icon for the "in the <Prismatic Gem> view" reference.
+        // Inline Prismatic Gem + per-character icons for the Table Style lines.
         var prismaticIcon = EncounterTooltipHelper.AllCharsIcon(20).TrimEnd();
         if (string.IsNullOrEmpty(prismaticIcon))
             prismaticIcon = "[b][color=#efc851]Prismatic Gem[/color][/b]";
+        var ironcladIcon = EncounterTooltipHelper.CharacterIcon("CHARACTER.IRONCLAD", 20).TrimEnd();
+        var silentIcon   = EncounterTooltipHelper.CharacterIcon("CHARACTER.SILENT", 20).TrimEnd();
+        var defectIcon   = EncounterTooltipHelper.CharacterIcon("CHARACTER.DEFECT", 20).TrimEnd();
+        var charIcons    = string.Join(" ", new[] { ironcladIcon, silentIcon, defectIcon }.Where(s => !string.IsNullOrEmpty(s)));
+        if (string.IsNullOrEmpty(charIcons))
+            charIcons = "[b][color=#efc851]Ironclad[/color][/b], [b][color=#efc851]Silent[/color][/b], [b][color=#efc851]Defect[/color][/b]";
 
         body.Text = string.Join('\n', new[]
         {
+            prismaticIcon + " — compare all characters for this encounter.",
+            charIcons + " etc — see how this encounter compares to others for this character.",
+            "",
             "[b][color=#efc851]Dmg[/color][/b] — median damage taken.",
-            "[b][color=#efc851]Mid 50%[/color][/b] — range of the middle 50% of damage for this encounter. A.k.a the IQR, shown as p25-p75.",
-            "[b][color=#efc851]Spread[/color][/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight.",
+            "[b][color=#efc851]Mid 50%[/color][/b] — the damage range a typical fight lands in. A quarter of your fights took less than the lower number, half landed inside the range, a quarter took more than the upper number. (Shown as p25-p75; a.k.a. the IQR.)",
+            "[b][color=#efc851]Spread[/color][/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight. A Spread of 100% means the Mid 50% range is as wide as the median damage.",
             "[b][color=#efc851]Turns[/color][/b] — average turns.",
             "[b][color=#efc851]Pots[/color][/b] — average potions.",
             "[b][color=#efc851]Deaths[/color][/b] — runs ended by this encounter / total runs.",
             "",
-            "[color=#bfb7a6]In the " + prismaticIcon + " (all-characters) view, [b]Dmg[/b] and [b]Mid 50%[/b] are shown as a percentage of each character's max HP so characters with different HP totals compare fairly.[/color]",
+            "[color=#bfb7a6]In the " + prismaticIcon + " (all-characters) view, [b]Dmg[/b] and [b]Mid 50%[/b] are shown as a percentage of each character's starting max HP so characters with different HP totals compare fairly.[/color]",
             "",
             "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
         });
@@ -1889,6 +1934,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _sortBySignificance  = _tutorialRestoreSortBySignificance;
             _sortCharacter       = _tutorialRestoreSortCharacter;
             _lockedEncounterId   = _tutorialRestoreLockedEncounterId;
+            _collapsedCategories.Clear();
+            if (_tutorialRestoreCollapsedCategories != null)
+                foreach (var c in _tutorialRestoreCollapsedCategories)
+                    _collapsedCategories.Add(c);
+            _tutorialRestoreCollapsedCategories = null;
             _tutorialStateSnapshotted = false;
             RefreshEncounterList();
         }
@@ -2033,10 +2083,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var catWrap = new PanelContainer();
             catWrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
             catWrap.MouseFilter = MouseFilterEnum.Stop;
-            // Same inspect cursor as encounter rows — hovering a category header reveals
-            // the pool-aggregate stats in the right-hand panel, so it's also "clickable
-            // for more detail" from the user's POV.
-            catWrap.MouseDefaultCursorShape = CursorShape.Help;
 
             var catRow = new HBoxContainer();
             // Use a compact row height for category headers — the icon wrapper now uses a
@@ -2169,6 +2215,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
             // Make children click-transparent so catWrap.GuiInput handles all clicks.
             MakeRowChildrenClickTransparent(catWrap);
+
+            // Cursor overlay — scope the magnifier cursor to the name/stat area only.
+            // Arrow + icon columns revert to the default cursor so the magnifier
+            // signals "reveals pool-aggregate stats on the right" specifically, not
+            // "click to collapse" (which the arrow already conveys visually). Added
+            // after MakeRowChildrenClickTransparent so the recursion doesn't reset
+            // the MouseFilter back to Ignore. Pass = hit-tested (cursor shape
+            // applies) + events propagate up to catWrap.GuiInput.
+            catHighlightPanel.AddChild(MakeCursorOverlay());
 
             _encounterList.AddChild(catWrap);
 
@@ -3181,6 +3236,21 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             SetMouseFilterIgnoreRecursive(child);
     }
 
+    /// <summary>Full-rect transparent Control that carries the magnifier cursor.
+    /// MouseFilter=Pass so the cursor shape applies on hit-test while the event
+    /// still propagates up to the row's GuiInput handler. Godot's CursorShape.Help
+    /// is remapped by NCursorManager._EnterTree to the game's "inspect" image.</summary>
+    private static Control MakeCursorOverlay()
+    {
+        var overlay = new Control
+        {
+            MouseFilter             = Control.MouseFilterEnum.Pass,
+            MouseDefaultCursorShape = Control.CursorShape.Help,
+        };
+        overlay.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        return overlay;
+    }
+
     private static StyleBoxEmpty MakeRowEmptyStyle()
     {
         var s = new StyleBoxEmpty();
@@ -3203,10 +3273,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Wrap each row in a PanelContainer so we can flip a highlight stylebox on hover/select.
         var wrap = new PanelContainer();
         wrap.MouseFilter = MouseFilterEnum.Stop;
-        // Godot's Help cursor shape (enum value 16) is overridden at boot by
-        // NCursorManager._EnterTree with the game's magnifying-glass "inspect" image,
-        // so every Control that opts into CursorShape.Help gets the native magnifier.
-        wrap.MouseDefaultCursorShape = CursorShape.Help;
         wrap.AddThemeStyleboxOverride("panel", MakeRowEmptyStyle());
         AttachHoverSfx(wrap);
 
@@ -3391,6 +3457,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // click. Hover highlighting still works because MouseEntered/MouseExited
         // on `wrap` test against its full rect regardless of descendant filters.
         MakeRowChildrenClickTransparent(wrap);
+
+        // Cursor overlay — scope the magnifier cursor to the name/stat area only.
+        // The lead spacer (alignment-only, not interactive) and the monster icon
+        // (purely visual) revert to the default cursor. Added after
+        // MakeRowChildrenClickTransparent so the recursion doesn't reset the
+        // MouseFilter back to Ignore. Pass = hit-tested (cursor shape applies)
+        // + events propagate up to wrap.GuiInput so clicks still lock the row.
+        highlightPanel.AddChild(MakeCursorOverlay());
 
         return wrap;
     }
@@ -4003,6 +4077,19 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// the visuals, add to the cache, and evict the oldest entry if we're at
     /// capacity.
     /// </summary>
+    /// <summary>Encounters whose live preview pipeline produces a broken render
+    /// (Doormaker's DOOR monster has no MonsterModel; Kaiser Crab bosses render
+    /// through NKaiserCrabBossBackground, not a standalone Spine; SkulkingColony's
+    /// default skin is empty and fallback skins still render oddly). These fall
+    /// back to a static "Preview WIP" placeholder instead of the boss icon so
+    /// users understand the preview is intentionally deferred.</summary>
+    private static readonly HashSet<string> UnpreviewedEncounterIds = new()
+    {
+        "ENCOUNTER.DOORMAKER_BOSS",
+        "ENCOUNTER.KAISER_CRAB_BOSS",
+        "ENCOUNTER.SKULKING_COLONY_ELITE",
+    };
+
     private void RenderMonsterPreview(string encounterId)
     {
         ClearMonsterPreview();
@@ -4010,6 +4097,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // Preview disabled entirely — no render path runs.
         if (!SlayTheStatsConfig.BestiaryPreviewEnabled) return;
+
+        // Known-unpreviewed encounters — show a "Preview WIP" placeholder
+        // instead of letting the render pipeline produce an empty / broken
+        // image. Maintained manually; add ids here when a new encounter
+        // fails the live pipeline and a proper fix is deferred.
+        if (UnpreviewedEncounterIds.Contains(encounterId))
+        {
+            ShowWipPlaceholder();
+            return;
+        }
 
         // GPU-friendly mode: static-sprite cache hit. Display the baked
         // ImageTexture directly, no SubViewport involved.
@@ -4751,11 +4848,34 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// paths. Does NOT free cached viewports — only <see cref="AddToLruCache"/>
     /// and the cache-clearing helpers touch the LRU.
     /// </summary>
+    /// <summary>Show a centered "Preview WIP" label in the render area. Used
+    /// for encounters listed in <see cref="UnpreviewedEncounterIds"/> where the
+    /// live/static render pipeline produces a broken or empty image.</summary>
+    private void ShowWipPlaceholder()
+    {
+        if (_renderArea == null) return;
+        var label = new Label
+        {
+            Name                = "MonsterPreviewWip",
+            Text                = "Preview WIP",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment   = VerticalAlignment.Center,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical   = SizeFlags.ExpandFill,
+            MouseFilter         = MouseFilterEnum.Ignore,
+        };
+        label.AddThemeColorOverride("font_color", Color.FromHtml(ThemeStyle.HeaderGrey));
+        label.AddThemeFontSizeOverride("font_size", ThemeStyle.TitleSubsection);
+        ApplyKreonFont(label);
+        ApplyTextShadow(label);
+        ((Node)_renderArea).AddChild(label);
+    }
+
     private void ClearMonsterPreview()
     {
         if (_renderArea != null)
         {
-            foreach (var name in new[] { "MonsterPreviewLabel", "MonsterPreviewTex" })
+            foreach (var name in new[] { "MonsterPreviewLabel", "MonsterPreviewTex", "MonsterPreviewWip" })
             {
                 var node = ((Node)_renderArea).GetNodeOrNull(name);
                 if (node != null)

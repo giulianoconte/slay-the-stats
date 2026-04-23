@@ -23,16 +23,15 @@ Color coding helps you read the data at a glance:
 REQUIREMENTS
 ------------------------------------------------------------------------
 
-- GUMM (Godot Universal Mod Manager) installed for STS2: https://sts2mods.com/godot-universal-mod-manager-for-sts-2/
 - BaseLib v0.2.5 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "UNINSTALLING GUMM" below.
 
 ------------------------------------------------------------------------
 INSTALLATION
 ------------------------------------------------------------------------
 
-1. Install GUMM for STS2 if you haven't already: https://sts2mods.com/godot-universal-mod-manager-for-sts-2/
-2. Download and extract BaseLib (v0.2.5 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
-3. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll and SlayTheStats.json
+1. Download and extract BaseLib (v0.2.5 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
+2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll and SlayTheStats.json
 
 ------------------------------------------------------------------------
 COMPENDIUM FILTERS
@@ -113,6 +112,11 @@ Q: I'm seeing "no data" for everything.
 
 A: The mod cannot find your run history to populate data. In this case you'll need to find where your game save data is (such as run history). Set "DataDirectory" to the "SlayTheSpire2" folder which the data is stored in. For Windows it is %APPDATA%/SlayTheSpire2. Note that you need to put the full path in there. Please file a bug report so I can fix the defaults!
 
+
+Q: I lost my save data after installing.
+
+A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress. There are ways to transfer save data over to a modded profile. See the sts2-modding channel in the SlayTheSpire discord for how to do this. You can also use the mod UnifiedSavePath.
+
 ------------------------------------------------------------------------
 TROUBLESHOOTING
 ------------------------------------------------------------------------
@@ -120,6 +124,17 @@ TROUBLESHOOTING
 Check the Godot log for [SlayTheStats] entries (close the game first):
 - Windows: %APPDATA%\Godot\app_userdata\Slay the Spire 2\logs\godot.log
 - Linux: ~/.local/share/godot/app_userdata/Slay the Spire 2/logs/godot.log
+
+------------------------------------------------------------------------
+UNINSTALLING GUMM
+------------------------------------------------------------------------
+
+I was mistaken - you never needed GUMM to run this mod. Sorry! Here's how to uninstall GUMM:
+- In your sts2 install folder, next to your executable, there is an override.cfg file that GUMM writes to. Delete it -- otherwise the game won't launch (Godot tries to load GUMM's loader scene and exits).
+- Delete the GUMM installation folder.
+- Delete the GUMM file from your game's data folder:
+  - Windows: %APPDATA%\Slay the Spire 2\
+  - Linux: ~/.local/share/Slay the Spire 2/
 
 ------------------------------------------------------------------------
 COMING SOON
