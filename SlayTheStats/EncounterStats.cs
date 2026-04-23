@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using MegaCrit.Sts2.Core.Localization;
 
 namespace SlayTheStats;
 
@@ -155,13 +156,36 @@ public static class EncounterCategory
     }
 
     /// <summary>
-    /// Strips ENCOUNTER. prefix and category suffix, then title-cases with spaces.
-    /// e.g. "ENCOUNTER.LAGAVULIN_MATRIARCH_BOSS" -> "Lagavulin Matriarch"
+    /// Localized encounter display name. Looks up <c>&lt;entry&gt;.title</c> in the
+    /// game's <c>encounters</c> loc table (same source as the in-game combat UI),
+    /// so names match whatever language the player has the game set to. Falls
+    /// back to a title-cased derivation of the id when the key is missing
+    /// (pre-LocManager call, modded encounters without loc entries, etc.).
     /// </summary>
     public static string FormatName(string encounterId)
     {
-        var name = encounterId.StartsWith("ENCOUNTER.") ? encounterId["ENCOUNTER.".Length..] : encounterId;
+        var entry = encounterId.StartsWith("ENCOUNTER.") ? encounterId["ENCOUNTER.".Length..] : encounterId;
+        try
+        {
+            var table = LocManager.Instance?.GetTable("encounters");
+            var key = entry + ".title";
+            if (table != null && table.HasEntry(key))
+                return table.GetRawText(key);
+        }
+        catch (Exception)
+        {
+            // Fall through to title-cased fallback.
+        }
+        return FormatNameFallback(entry);
+    }
 
+    /// <summary>
+    /// Strips the category suffix and title-cases the remainder.
+    /// e.g. "LAGAVULIN_MATRIARCH_BOSS" → "Lagavulin Matriarch"
+    /// </summary>
+    private static string FormatNameFallback(string entry)
+    {
+        var name = entry;
         foreach (var (suffix, _) in Suffixes)
         {
             if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
@@ -171,7 +195,6 @@ public static class EncounterCategory
             }
         }
 
-        // Title-case with spaces: LAGAVULIN_MATRIARCH -> Lagavulin Matriarch
         var words = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i < words.Length; i++)
         {
@@ -187,6 +210,13 @@ public static class EncounterCategory
     /// <c>category.{lower}</c> in the loc table; unknown categories fall
     /// back to the title-cased input so modded encounter categories render
     /// readable-ish until someone adds a translation.
+    ///
+    /// <para>We looked at routing <c>boss</c> through the game's own
+    /// <c>static_hover_tips.BOSS.title</c> to drop the per-locale guessing,
+    /// but that key is a template ("Boss: {BossName}") populated by
+    /// <c>NTopBarBossIcon</c> with the specific boss's name — unusable as a
+    /// standalone category label. No other uniform game-loc source was
+    /// found. Per-locale hardcoding it is.</para>
     /// </summary>
     public static string FormatCategory(string category)
     {

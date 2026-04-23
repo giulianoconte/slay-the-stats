@@ -121,6 +121,11 @@ internal static class TooltipHelper
         Fonts.Normal = null;
         Fonts.Bold   = null;
         InvalidateStyles();
+
+        // Caches elsewhere that embed a translated string (not just a font
+        // reference) need an explicit flush too, otherwise stale names from
+        // the prior locale persist.
+        CardHoverShowPatch.ClearCharacterDisplayCache();
     }
 
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but

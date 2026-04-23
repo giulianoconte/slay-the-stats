@@ -228,22 +228,6 @@ public class EventOptionAggregate
 public static class EventIdHelpers
 {
     /// <summary>
-    /// Strips the <c>EVENT.</c> prefix and title-cases underscores.
-    /// e.g. "EVENT.DROWNING_BEACON" -> "Drowning Beacon".
-    /// </summary>
-    public static string FormatName(string eventId)
-    {
-        var name = eventId.StartsWith("EVENT.") ? eventId["EVENT.".Length..] : eventId;
-        var words = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
-        for (int i = 0; i < words.Length; i++)
-        {
-            if (words[i].Length > 0)
-                words[i] = char.ToUpper(words[i][0]) + words[i][1..].ToLower();
-        }
-        return string.Join(' ', words);
-    }
-
-    /// <summary>
     /// Extracts the terminal option name from the last entry of an option
     /// path. Title keys are shaped as
     /// <c>EVENT_ID.pages.PAGE.options.OPTION.title</c> — this returns

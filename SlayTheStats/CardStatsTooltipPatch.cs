@@ -388,8 +388,15 @@ public static class CardHoverShowPatch
 
     // Cache of per-character display BBCode (icon + name, or plain text
     // fallback) so we don't re-check the resource path on every tooltip
-    // repaint. Keyed by character ID (e.g. "CHARACTER.IRONCLAD").
+    // repaint. Keyed by character ID (e.g. "CHARACTER.IRONCLAD"). Invalidated
+    // on locale change via <see cref="ClearCharacterDisplayCache"/> so the
+    // cached name (embedded in the BBCode string) refreshes to the new locale.
     private static readonly Dictionary<string, string> _characterDisplayCache = new();
+
+    /// <summary>Invalidate <see cref="_characterDisplayCache"/>. Called from
+    /// <see cref="TooltipHelper.OnLocaleChanged"/> so the next tooltip rebuild
+    /// re-resolves character names in the new locale.</summary>
+    internal static void ClearCharacterDisplayCache() => _characterDisplayCache.Clear();
 
     /// <summary>
     /// Returns the footer-friendly character display: an inline BBCode [img]

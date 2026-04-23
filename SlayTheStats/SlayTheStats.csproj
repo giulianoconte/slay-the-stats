@@ -132,9 +132,21 @@
          preset from export_presets.cfg. Skipped (with a warning from
          CheckDependencyPaths) if GodotPath isn't configured, so dev machines
          without Godot can still iterate — the mod still loads, just without
-         the BaseLib UI translations. -->
+         the BaseLib UI translations.
+
+         Inputs/Outputs drive MSBuild's incremental-build check: when no input
+         is newer than the .pck on disk, the target is skipped (saves ~8s per
+         C#-only iteration). GodotPckInput enumerates the export config +
+         every file shipped in the pck (the SlayTheStats/ subtree matches the
+         <None Include="SlayTheStats/**" /> item group above). -->
+    <ItemGroup>
+        <GodotPckInput Include="project.godot;export_presets.cfg;SlayTheStats/**/*" />
+    </ItemGroup>
+
     <Target Name="GodotPublish" AfterTargets="CopyToModsFolderOnBuild"
-            Condition="'$(GodotPath)' != '' and Exists('$(GodotPath)') and '$(IsInnerGodotExport)' != 'true'">
+            Condition="'$(GodotPath)' != '' and Exists('$(GodotPath)') and '$(IsInnerGodotExport)' != 'true'"
+            Inputs="@(GodotPckInput)"
+            Outputs="$(ModsPath)$(MSBuildProjectName)/$(MSBuildProjectName).pck">
         <Message Text="Exporting Godot .pck to mods folder" Importance="high"/>
         <Exec Command="&quot;$(GodotPath)&quot; --headless --export-pack &quot;BasicExport&quot; &quot;$(ModsPath)$(MSBuildProjectName)/$(MSBuildProjectName).pck&quot;"
               EnvironmentVariables="IsInnerGodotExport=true;MSBUILDDISABLENODEREUSE=1"
