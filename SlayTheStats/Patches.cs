@@ -98,6 +98,16 @@ public static class MainMenuReadyPatch
 
     static void Postfix(NMainMenu __instance)
     {
+        // LocManager.Instance is not yet constructed when MainFile.Initialize()
+        // runs (mod init happens before the locale manager boots). Deferring L.Init
+        // + TooltipHelper.InitLocaleSubscription to NMainMenu._Ready — the first
+        // hook that fires after the locale manager is ready — lets the first
+        // RefreshFromGameLocale actually read the user's chosen language and the
+        // SubscribeToLocaleChange call complete successfully. Guarded by a flag so
+        // subsequent main-menu loads (after a run) don't re-run init.
+        L.InitIfNeeded();
+        TooltipHelper.InitLocaleSubscription();
+
         CardHoverShowPatch.RunCharacter = null;
         CardHoverShowPatch.IsInRun = false;
         if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: RunCharacter cleared, IsInRun=false");

@@ -352,7 +352,7 @@ public static class CardHoverShowPatch
         var characterLabel = GetCharacterLabel(filter);
         var filterCtx = BuildFilterContext(characterLabel, filter);
         var sb = new StringBuilder();
-        sb.Append($"[font=res://themes/kreon_regular_glyph_space_one.tres][color={TooltipHelper.NeutralShade}]No data[/color][/font]");
+        sb.Append($"[color={TooltipHelper.NeutralShade}]{L.T("tooltip.no_data")}[/color]");
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
         return sb.ToString();
     }
@@ -379,7 +379,7 @@ public static class CardHoverShowPatch
     internal static string GetCharacterLabel(AggregationFilter filter)
     {
         var ch = GetEffectiveCharacter(filter);
-        return ch != null ? FormatCharacterName(ch) : "All characters";
+        return ch != null ? FormatCharacterName(ch) : L.T("filter.all_characters");
     }
 
     // Cache of per-character display BBCode (icon + name, or plain text
@@ -715,7 +715,7 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR = 50.0, double pickRateBaseline = 100.0 / 3.0, string characterLabel = "All characters", int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
     {
         var sb = new StringBuilder();
 
@@ -724,10 +724,10 @@ public static class CardHoverShowPatch
 
         // Class card columns: Act | Runs (present/offered) | Pick% | Win%
         sb.Append("[table=4]");
-        sb.Append(TooltipHelper.HdrCell("Act", TooltipHelper.ColPadOuter));
-        sb.Append(TooltipHelper.HdrCell("Runs", TooltipHelper.ColPadInner));
-        sb.Append(TooltipHelper.HdrCell("Pick%", TooltipHelper.ColPadInner));
-        sb.Append(TooltipHelper.HdrCell("Win%", TooltipHelper.ColPadLast));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.act"), TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.runs"), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.pick_pct"), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
         int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
 
@@ -771,7 +771,7 @@ public static class CardHoverShowPatch
         var cTotNum   = TooltipHelper.ColN($"{totPresent}", totPresent);
         var cTotPr    = totPrPct >= 0 ? TooltipHelper.ColPR(totPr, totPrPct, totOffered, pickRateBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
         var cTotWr    = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
-        sb.Append(TooltipHelper.DataCell("All", TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.DataCell(L.T("tooltip.row.all"), TooltipHelper.ColPadOuter));
         sb.Append(TooltipHelper.FractionCell(cTotNum, $"{totOffered}", TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.DataCell(cTotPr, TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.DataCell(cTotWr, TooltipHelper.ColPadLast));
@@ -785,7 +785,7 @@ public static class CardHoverShowPatch
         // doesn't need a "character" marker — just "(baseline)" is enough.
         var prBaseStr = double.IsNaN(pickRateBaseline) ? "—" : $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = double.IsNaN(characterWR)     ? "—" : $"{Math.Round(characterWR):F0}%";
-        var baselineText = $"(baseline)    Pick% {prBaseStr}    Win% {wrStr}";
+        var baselineText = L.T("tooltip.baseline.card_pick", ("pick", prBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
 
         var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
@@ -805,10 +805,10 @@ public static class CardHoverShowPatch
         var sb = new StringBuilder();
         // Columns: Act | Runs | Buys (bought/seen) | Win%
         sb.Append("[table=4]");
-        sb.Append(TooltipHelper.HdrCell("Act", TooltipHelper.ColPadOuter));
-        sb.Append(TooltipHelper.HdrCell("Runs", TooltipHelper.ColPadInner));
-        sb.Append(TooltipHelper.HdrCell("Buys", TooltipHelper.ColPadInner));
-        sb.Append(TooltipHelper.HdrCell("Win%", TooltipHelper.ColPadLast));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.act"), TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.runs"), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.buys"), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
         int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
 
@@ -848,7 +848,7 @@ public static class CardHoverShowPatch
 
         var cTotRuns = TooltipHelper.ColN($"{totPresent}", totPresent);
         var cTotWr   = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, characterWR) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
-        sb.Append(TooltipHelper.DataCell("All", TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.DataCell(L.T("tooltip.row.all"), TooltipHelper.ColPadOuter));
         sb.Append(TooltipHelper.DataCell(cTotRuns, TooltipHelper.ColPadInner));
         sb.Append(FormatBuysFractionCell(totShopBought, totShopSeen, totBuysPct, shopBuyRateBaseline, TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.DataCell(cTotWr, TooltipHelper.ColPadLast));
@@ -859,7 +859,7 @@ public static class CardHoverShowPatch
         // NaN baselines (filter matched zero runs/contexts) render as "—".
         var wrStr        = double.IsNaN(characterWR)         ? "—" : $"{Math.Round(characterWR):F0}%";
         var buysBaseStr  = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
-        var baselineText = $"(baseline)    Buys {buysBaseStr}    Win% {wrStr}";
+        var baselineText = L.T("tooltip.baseline.card_buys", ("buys", buysBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
 
         var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";

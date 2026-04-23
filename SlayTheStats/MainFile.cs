@@ -28,10 +28,10 @@ public partial class MainFile : Node
             catch (Exception e) { Logger.Warn($"SlayTheStats: Patch {type.Name} skipped — {e.Message}"); }
         }
 
-        // Localization: load mod-owned JSON strings from disk and bind to the
-        // game's current locale. Safe to call before ModConfig registration —
-        // config descriptions will route through L.T once they're migrated.
-        L.Init();
+        // Localization init deferred to NMainMenu._Ready (see MainMenuReadyPatch).
+        // LocManager.Instance is null at this point in boot; trying to subscribe or
+        // read the current language here NREs and we fall back to the 'eng' table
+        // even on non-English locales.
 
         var config = new SlayTheStatsConfig();
         // BaseLib's ModConfig.Init() ran the cfg load inside the constructor above. Now

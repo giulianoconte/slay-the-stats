@@ -12,15 +12,19 @@ namespace SlayTheStats;
 /// is the fallback, and a missing key renders as the key itself so gaps are
 /// visible in-game rather than silently blank.
 ///
-/// JSON files live on disk at <c>{modPath}/localization/{lang}/*.json</c>. Keys
-/// are flat strings (e.g. <c>"tooltip.event.header"</c>); every JSON file inside a
-/// language dir is merged into one dict for that language at load time, so
-/// translators can split strings across as many files as they want.
+/// Translation files live on disk at <c>{modPath}/localization/{lang}/*.locjson</c>.
+/// The content is plain JSON — the <c>.locjson</c> extension exists only to dodge
+/// the game's mod-manifest scanner, which recursively reads every <c>*.json</c>
+/// under the mod dir as a would-be <c>ModManifest</c> and logs a noisy missing-
+/// <c>id</c> error for each of ours. Keys are flat strings (e.g.
+/// <c>"tooltip.col.runs"</c>); every file inside a language dir is merged into
+/// one dict for that language at load time, so translators can split strings
+/// across as many files as they want.
 ///
 /// We read from disk with <see cref="File.ReadAllText"/> rather than Godot's
 /// <c>ResourceLoader</c> because the mod doesn't ship a <c>.pck</c> (dropped in
-/// v0.3.1), so <c>res://</c> paths can't resolve mod-owned JSON. Trade-off: we
-/// don't hook into the game's Weblate / <see cref="LocTable"/> pipeline. If
+/// v0.3.1), so <c>res://</c> paths can't resolve mod-owned translations. Trade-off:
+/// we don't hook into the game's Weblate / <see cref="LocTable"/> pipeline. If
 /// community translators emerge and want Weblate integration we revisit.
 /// </summary>
 public static class L
@@ -36,10 +40,23 @@ public static class L
     /// referenced from a hover-tooltip code path would spam the log.</summary>
     private static readonly HashSet<string> _warnedMissing = new();
 
-    /// <summary>Called once from <see cref="MainFile.Initialize"/>. Needs
-    /// <see cref="ModManager.Mods"/> populated (true by the time a mod initializer
-    /// runs) and <see cref="LocManager.Instance"/> alive (always true before
-    /// mod load). Safe to call multiple times — reloads tables and re-binds.</summary>
+    private static bool _initDone;
+
+    /// <summary>Idempotent wrapper around <see cref="Init"/>. Called from
+    /// <c>MainMenuReadyPatch</c>, which fires on every return to the main menu —
+    /// the first call does the work, subsequent calls are no-ops.</summary>
+    public static void InitIfNeeded()
+    {
+        if (_initDone) return;
+        Init();
+        _initDone = true;
+    }
+
+    /// <summary>Loads JSON tables, binds to the game's current locale, and
+    /// subscribes to locale-change notifications. Must run after
+    /// <see cref="LocManager.Instance"/> is alive — mod-Initialize time is too
+    /// early, so this is called from <c>MainMenuReadyPatch</c>. Safe to call
+    /// multiple times; reloads tables and re-binds on each call.</summary>
     public static void Init()
     {
         try
@@ -65,7 +82,7 @@ public static class L
             {
                 var lang = Path.GetFileName(langDir);
                 var merged = new Dictionary<string, string>();
-                foreach (var jsonFile in Directory.GetFiles(langDir, "*.json"))
+                foreach (var jsonFile in Directory.GetFiles(langDir, "*.locjson"))
                 {
                     try
                     {

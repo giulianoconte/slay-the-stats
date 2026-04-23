@@ -1,4 +1,6 @@
 using Godot;
+using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Localization.Fonts;
 using MegaCrit.Sts2.Core.Nodes;
 
 namespace SlayTheStats;
@@ -24,9 +26,12 @@ internal static class TooltipHelper
 
     internal static FontSettings Fonts = new()
     {
-        Bold   = ResourceLoader.Load<Font>("res://themes/kreon_bold_glyph_space_one.tres"),
-        Normal = ResourceLoader.Load<Font>("res://themes/kreon_regular_glyph_space_one.tres"),
+        Bold   = BuildLocaleAwareKreon(KreonBoldPath,    FontType.Bold),
+        Normal = BuildLocaleAwareKreon(KreonRegularPath, FontType.Regular),
     };
+
+    private const string KreonRegularPath = "res://themes/kreon_regular_glyph_space_one.tres";
+    private const string KreonBoldPath    = "res://themes/kreon_bold_glyph_space_one.tres";
 
     private static bool           _headerStyleApplied;
     private static bool           _tableStyleApplied;
@@ -34,6 +39,7 @@ internal static class TooltipHelper
     private static Control?       _panel;
     private static NinePatchRect? _shadow;
     private static bool           _followerInjected;
+    private static bool           _localeSubscribed;
 
     // Godot disposes FontVariation resources on scene transitions (main menu ↔
     // in-run); the log shows `Asset not cached: kreon_*_glyph_space_one.tres`
@@ -42,11 +48,20 @@ internal static class TooltipHelper
     // Control.AddThemeFontOverride and takes down BuildUI / in-combat hover /
     // event tooltip. All font access MUST route through these accessors so
     // disposed refs are re-resolved from the resource path before use.
+    //
+    // The returned font is locale-aware: for CJK languages (zhs/jpn/kor/tha)
+    // and the game's legacy Cyrillic set (rus/pol), Kreon lacks glyph coverage,
+    // so we wrap the base Kreon font in a FontVariation whose Fallbacks chain
+    // points at the game's own locale-substitute font (via FontManager). Latin
+    // text still renders in Kreon; codepoints Kreon can't draw fall through to
+    // the substitute. On locale change (LocString.SubscribeToLocaleChange fires)
+    // the cached FontVariation is invalidated so the next accessor call rebuilds
+    // with the new locale's substitute.
     internal static Font? GetKreonFont()
     {
         if (Fonts.Normal == null || !GodotObject.IsInstanceValid(Fonts.Normal))
         {
-            Fonts.Normal = ResourceLoader.Load<Font>("res://themes/kreon_regular_glyph_space_one.tres");
+            Fonts.Normal = BuildLocaleAwareKreon(KreonRegularPath, FontType.Regular);
             InvalidateStyles();
         }
         return Fonts.Normal;
@@ -55,12 +70,58 @@ internal static class TooltipHelper
     {
         if (Fonts.Bold == null || !GodotObject.IsInstanceValid(Fonts.Bold))
         {
-            Fonts.Bold = ResourceLoader.Load<Font>("res://themes/kreon_bold_glyph_space_one.tres");
+            Fonts.Bold = BuildLocaleAwareKreon(KreonBoldPath, FontType.Bold);
             InvalidateStyles();
         }
         return Fonts.Bold;
     }
     internal static bool HasBoldFont => GetKreonBoldFont() != null;
+
+    private static Font? BuildLocaleAwareKreon(string kreonPath, FontType type)
+    {
+        var kreon = ResourceLoader.Load<Font>(kreonPath);
+        if (kreon == null) return null;
+
+        var lang = LocManager.Instance?.Language;
+        if (lang == null || !FontManager.NeedsFontSubstitution(lang)) return kreon;
+
+        var substitute = FontManager.GetSubstituteFont(lang, type);
+        if (substitute == null) return kreon;
+
+        var fv = new FontVariation { BaseFont = kreon };
+        fv.Fallbacks = new Godot.Collections.Array<Font> { substitute };
+        return fv;
+    }
+
+    /// <summary>Called once from <see cref="MainFile.Initialize"/> (after
+    /// <see cref="L.Init"/>). Subscribes to the game's locale-change signal so
+    /// the cached Kreon FontVariations rebuild with the new locale's substitute
+    /// and any theme styles that read those fonts re-apply on next show. Safe
+    /// to call multiple times; subscribes exactly once.</summary>
+    internal static void InitLocaleSubscription()
+    {
+        if (_localeSubscribed) return;
+        try
+        {
+            LocString.SubscribeToLocaleChange(OnLocaleChanged);
+            _localeSubscribed = true;
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[TooltipHelper] Locale subscription failed: {e.Message}");
+        }
+    }
+
+    private static void OnLocaleChanged()
+    {
+        // Null out so the accessors rebuild the FontVariation against the new
+        // locale's substitute. InvalidateStyles() ensures ApplyHeaderLabelStyles
+        // / ApplyTableStyle re-run on next show so the new fonts propagate to
+        // each RichTextLabel / Label theme override.
+        Fonts.Normal = null;
+        Fonts.Bold   = null;
+        InvalidateStyles();
+    }
 
     // Empirically matched to game's native tooltip width. Game panels report 359px logical but
     // visually 348 aligns best — likely due to stone texture transparent edges or canvas scaling.
@@ -555,26 +616,30 @@ internal static class TooltipHelper
 
     /// <summary>
     /// Wraps a filter-context string in the standard tooltip footer style
-    /// (Kreon regular, 16px, FooterGrey). Used by card/relic/encounter
-    /// tooltips to render the active-filter line below the stats table.
-    /// Returns empty if the input is empty.
+    /// (16px, FooterGrey). Used by card/relic/encounter tooltips to render
+    /// the active-filter line below the stats table. Returns empty if the
+    /// input is empty. Font inherits from the parent RichTextLabel's
+    /// <c>normal_font</c> theme override (locale-aware FontVariation via
+    /// <see cref="GetKreonFont"/>), so CJK glyphs fall through to the
+    /// game's substitute font automatically.
     /// </summary>
     internal static string FormatFooter(string filterCtx)
     {
         if (string.IsNullOrEmpty(filterCtx)) return "";
-        return $"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color={ThemeStyle.FooterGrey}]{filterCtx}[/color][/font_size][/font]";
+        return $"\n[font_size=16][color={ThemeStyle.FooterGrey}]{filterCtx}[/color][/font_size]";
     }
 
     /// <summary>
     /// Wraps baseline-body text (e.g. "Baseline Pick% 35%, Win% 48%") in the
     /// same footer style as FormatFooter. Separate entry point so callers can
     /// build the baseline line independently of the filter line (they often
-    /// render on separate lines below the table).
+    /// render on separate lines below the table). See FormatFooter for the
+    /// parent-font inheritance note.
     /// </summary>
     internal static string FormatBaselineLine(string body)
     {
         if (string.IsNullOrEmpty(body)) return "";
-        return $"\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16][color={ThemeStyle.FooterGrey}]{body}[/color][/font_size][/font]";
+        return $"\n[font_size=16][color={ThemeStyle.FooterGrey}]{body}[/color][/font_size]";
     }
 
     /// <summary>Wraps text in a BBCode color tag based on sample size. Bolds at n≥16 when bold font is loaded.</summary>

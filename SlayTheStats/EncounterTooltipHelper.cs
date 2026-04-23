@@ -107,7 +107,7 @@ public static class EncounterTooltipHelper
         {
             rendered.Add(charId);
             var icon = CharacterIcon(charId, 30);
-            var descriptor = $"{icon}{KreonBoldFontTag}{label}[/font]";
+            var descriptor = $"{icon}{KreonBoldFontTag}{label}[/b]";
             if (charStats.TryGetValue(charId, out var stat) && stat.Fought > 0)
             {
                 int startingHp = startingHps.GetValueOrDefault(charId, 0);
@@ -132,7 +132,7 @@ public static class EncounterTooltipHelper
             var label = FormatUnknownCharLabel(charId);
             int startingHp = startingHps.GetValueOrDefault(charId, 0);
             CollectPerCharMetrics(perCharMetrics, stat, startingHp);
-            allEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/font]"));
+            allEntries.Add((charId, stat, startingHp, $"{icon}{KreonBoldFontTag}{label}[/b]"));
             totalFought += stat.Fought;
             totalDied += stat.Died;
         }
@@ -192,7 +192,7 @@ public static class EncounterTooltipHelper
         // across the characters that had data. Gives a cross-character
         // density for this encounter alongside the baseline numbers.
         var allIcon = AllCharsIcon(22);
-        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)", parts: AllCharsDescriptorParts);
+        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/b] (baseline)", parts: AllCharsDescriptorParts);
         if (perCharMetrics.Count > 0)
         {
             AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
@@ -339,9 +339,15 @@ public static class EncounterTooltipHelper
     // Descriptor font is slightly bigger than the data cells so it reads as the
     // label for the row; data stays at the base mono font size (18 from the
     // RichTextLabel theme override).
-    private const string KreonRegFontTag  = "[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=18]";
-    private const string KreonRegClose    = "[/font_size][/font]";
-    private const string KreonBoldFontTag = "[font=res://themes/kreon_bold_glyph_space_one.tres]";
+    //
+    // Both regular and bold variants inherit the font from the parent
+    // RichTextLabel's normal_font / bold_font theme overrides — which route
+    // through TooltipHelper.GetKreonFont()/GetKreonBoldFont() and carry the
+    // locale-aware FontVariation with CJK fallback. Hardcoding the font path
+    // in BBCode bypasses that and breaks CJK glyph coverage.
+    private const string KreonRegFontTag  = "[font_size=18]";
+    private const string KreonRegClose    = "[/font_size]";
+    private const string KreonBoldFontTag = "[b]";
     private const string HeaderColor      = ThemeStyle.HeaderGrey;
     // Minimum baseline for potion coloration. Prevents extreme colors from tiny
     // absolute differences by ensuring the ratio denominator isn't near-zero.
@@ -1060,9 +1066,9 @@ public static class EncounterTooltipHelper
         var catLower = categoryLabel.ToLowerInvariant();
         var encColor = category != null ? EncounterIcons.CategoryColorHex(category) : null;
         var encNameRow1 = encColor != null
-            ? $"{KreonBoldFontTag}[color={encColor}]{encounterName}[/color][/font]"
-            : $"{KreonBoldFontTag}{encounterName}[/font]";
-        var encNameRow4 = $"{KreonBoldFontTag}{encounterName}[/font]";
+            ? $"{KreonBoldFontTag}[color={encColor}]{encounterName}[/color][/b]"
+            : $"{KreonBoldFontTag}{encounterName}[/b]";
+        var encNameRow4 = $"{KreonBoldFontTag}{encounterName}[/b]";
 
         var baselineSource = poolAct is { Fought: > 0 } ? poolAct.Value : poolAll;
         var (medianBase, iqrcBase, deathRateBase, turnsBase, potsBase) = DeriveBaselines(baselineSource);
@@ -1174,10 +1180,10 @@ public static class EncounterTooltipHelper
         if (biomeLabel != null)
         {
             var biomeColored = catColor != null
-                ? $"{KreonBoldFontTag}[color={catColor}]{biomeLabel}[/color][/font]"
-                : $"{KreonBoldFontTag}{biomeLabel}[/font]";
+                ? $"{KreonBoldFontTag}[color={catColor}]{biomeLabel}[/color][/b]"
+                : $"{KreonBoldFontTag}{biomeLabel}[/b]";
             var catPluralColored = catColor != null
-                ? $"{KreonBoldFontTag}[color={catColor}]{catPlural}[/color][/font]"
+                ? $"{KreonBoldFontTag}[color={catColor}]{catPlural}[/color][/b]"
                 : catPlural;
             AppendDescriptorCell(sb, $"{charIcon}vs {biomeColored} {catPluralColored}");
             AppendRow1PoolDataCells(sb, poolBiome, poolAll);
@@ -1403,7 +1409,7 @@ public static class EncounterTooltipHelper
     {
         var ascPrefix = FormatAscensionPrefix(ascensionMin, ascensionMax);
         var label = characterLabel ?? "All chars";
-        return $"[color={TooltipHelper.NeutralShade}]No encounter data\n[font=res://themes/kreon_regular_glyph_space_one.tres][font_size=16]{ascPrefix}{label}[/font_size][/font][/color]";
+        return $"[color={TooltipHelper.NeutralShade}]No encounter data\n[font_size=16]{ascPrefix}{label}[/font_size][/color]";
     }
 
     /// <summary>

@@ -74,7 +74,7 @@
     <ItemGroup>
         <PackageReference Include="Alchyr.Sts2.BaseLib" Version="3.0.9" PrivateAssets="All" />
         <PackageReference Include="Alchyr.Sts2.ModAnalyzers" Version="*" />
-        <AdditionalFiles Include="localization/**/*.json"/>
+        <AdditionalFiles Include="localization/**/*.locjson"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -114,7 +114,7 @@
         <Copy SourceFiles="SlayTheStats.json" DestinationFolder="$(ModsPath)$(MSBuildProjectName)/" />
         <Message Text="Copying localization files to mods folder." Importance="high" />
         <ItemGroup>
-            <LocalizationFiles Include="localization/**/*.json"/>
+            <LocalizationFiles Include="localization/**/*.locjson"/>
         </ItemGroup>
         <Copy SourceFiles="@(LocalizationFiles)"
               DestinationFiles="@(LocalizationFiles->'$(ModsPath)$(MSBuildProjectName)/localization/%(RecursiveDir)%(Filename)%(Extension)')" />
