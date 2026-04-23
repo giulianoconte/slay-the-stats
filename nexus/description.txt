@@ -1,6 +1,11 @@
-Supports ModConfig (https://www.nexusmods.com/slaythespire2/mods/2).
-
-Color blind setting available.
+------------------------------------------------------------------------
+NEW IN v0.3.0 -  BESTIARY UPDATE
+------------------------------------------------------------------------
+- Track encounter history - typical damage taken, turns, potions, etc for all encounters.
+- Encounter stats tooltip in-run when hovering over a monster.
+- Adds Bestiary Stats compendium page, optional.
+- Polish - font upgrades, tooltip format, much more.
+- Note, most but not all encounters have bestiary previews yet (Skulking Colony, Kaiser Crab, Doormaker).
 
 ------------------------------------------------------------------------
 WHAT IT DOES
@@ -63,17 +68,9 @@ Shop purchases (Buys): For colorless cards and relics, the tooltip shows how oft
 
 Colorless Cards, Event Cards, Ancient Relics, Curses, etc are all tracked.
 
-Mod settings can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional ModConfig mod (https://www.nexusmods.com/slaythespire2/mods/2):
+Mod settings (color blind mode, in-run stats toggle, master off switch, debug mode) can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional ModConfig mod (https://www.nexusmods.com/slaythespire2/mods/27). Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above.
 
-- Color Blind Mode -- teal/orange instead of green/red.
-- Show In-Run Stats -- toggle stat tooltips during a run.
-- Disable All Stat Tooltips -- master off switch.
-- Tutorial Seen / Bestiary Tutorial Seen -- toggle off to re-show the welcome overlay next time you open the compendium or the bestiary.
-- Encounter Stats (requires restart) -- dropdown: BestiaryAndTooltips (bestiary button + in-combat tooltip), Tooltips (in-combat only, bestiary button hidden), or Disabled (both off).
-- Data Directory -- override the SlayTheSpire2 data folder path.
-- Debug Mode -- verbose logging for bug reports.
-
-Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above. The bestiary has its own settings pane (bottom-left, next to the filter button) with a toggle to disable the live monster preview if you'd prefer zero GPU cost.
+This mod supports ModConfig (https://www.nexusmods.com/slaythespire2/mods/27).
 
 ------------------------------------------------------------------------
 ACCESSIBILITY
@@ -140,4 +137,4 @@ I was mistaken - you never needed GUMM to run this mod. Sorry! Here's how to uni
 COMING SOON
 ------------------------------------------------------------------------
 
-Event tracking -- per-option stats for non-combat events (Drowning Beacon, Crystal Sphere, Neow, etc.), with historical stats surfaced on the option buttons in-run.
+Event tracking, post-fight summary, localization.

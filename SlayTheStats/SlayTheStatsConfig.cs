@@ -55,6 +55,17 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool BestiaryTutorialSeen { get; set; } = false;
 
     /// <summary>
+    /// Mod version that was running on this install's most recent boot.
+    /// Written at the end of <c>MainFile.Initialize</c> after any one-shot
+    /// config migrations run. Empty string on fresh installs and on upgrades
+    /// from versions before this field existed (v0.3.0 and earlier) — both
+    /// cases are treated as "older than any version" by migration checks.
+    /// Persisted so subsequent boots short-circuit migrations that have
+    /// already been applied on this install.
+    /// </summary>
+    [ConfigHideInUI] public static string LastSeenModVersion { get; set; } = "";
+
+    /// <summary>
     /// Encounter-stats surfaces toggle: controls which of the two encounter-stats
     /// entrypoints (bestiary page + in-combat enemy hover tooltip) are enabled.
     /// Requires a game restart because the bestiary button injection happens at

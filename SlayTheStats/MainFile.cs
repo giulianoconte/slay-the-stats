@@ -40,6 +40,34 @@ public partial class MainFile : Node
         // and snap the live filter values back to the user's saved defaults. Filter
         // changes only persist across restarts if the user clicked "Save Defaults".
         SlayTheStatsConfig.RestoreDefaults();
+
+        // One-shot config migrations gated on LastSeenModVersion. Each migration
+        // decides its own eligibility window from the previously-seen version
+        // (empty string for fresh installs and for pre-v0.3.1 upgrades, since
+        // LastSeenModVersion didn't exist before v0.3.1). LastSeenModVersion is
+        // updated + saved at the end of this block so migrations only fire once
+        // per install.
+        string priorVersion = SlayTheStatsConfig.LastSeenModVersion;
+
+        // v0.3.1: the bestiary tutorial was rewritten from a single centered
+        // explainer into a four-phase walkthrough. Users upgrading from v0.3.0
+        // (or any earlier version) with BestiaryTutorialSeen=true need the flag
+        // reset once so the new version auto-fires on their next bestiary open.
+        // Fresh installs fall into this branch too — no-op since the flag is
+        // already false by default. Delete this block in v0.3.2 or later once
+        // pre-v0.3.1 installs are a non-concern.
+        if (IsVersionOlderThan(priorVersion, "v0.3.1"))
+        {
+            SlayTheStatsConfig.BestiaryTutorialSeen = false;
+            Logger.Info($"v0.3.1 migration: reset BestiaryTutorialSeen (prior version '{priorVersion}') so the new four-phase bestiary tutorial fires on first open.");
+        }
+
+        if (priorVersion != StatsDb.CurrentModVersion)
+        {
+            SlayTheStatsConfig.LastSeenModVersion = StatsDb.CurrentModVersion;
+            try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+            catch (Exception e) { Logger.Warn($"LastSeenModVersion save failed: {e.Message}"); }
+        }
         Logger.Info($"Boot: reverted live filters to saved defaults " +
             $"(asc {SlayTheStatsConfig.AscensionMin}..{SlayTheStatsConfig.AscensionMax}, " +
             $"ver {SlayTheStatsConfig.VersionMin}..{SlayTheStatsConfig.VersionMax}, " +
@@ -63,5 +91,34 @@ public partial class MainFile : Node
         // Belt-and-suspenders: create the tooltip panel early if GUMM adds MainFile to the scene tree.
         // EnsurePanelExists is the authoritative creation path used by the hover patch.
         CardHoverShowPatch.EnsurePanelExists();
+    }
+
+    /// <summary>Returns true when <paramref name="version"/> is lexically older
+    /// than <paramref name="target"/> under "vMAJOR.MINOR.PATCH" parsing. Empty,
+    /// null, or malformed <paramref name="version"/> counts as older than every
+    /// target (treats the field as "unrecorded"). A plain string-compare would
+    /// order "v0.10.0" before "v0.3.0"; parsing each component as an int keeps
+    /// semver ordering correct past single-digit minor/patch values.</summary>
+    internal static bool IsVersionOlderThan(string? version, string target)
+    {
+        if (!TryParseVersion(version, out var v)) return true;
+        if (!TryParseVersion(target,  out var t)) return false;
+        if (v.major != t.major) return v.major < t.major;
+        if (v.minor != t.minor) return v.minor < t.minor;
+        return v.patch < t.patch;
+    }
+
+    private static bool TryParseVersion(string? s, out (int major, int minor, int patch) v)
+    {
+        v = (0, 0, 0);
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var trimmed = s.TrimStart('v', 'V');
+        var parts = trimmed.Split('.');
+        if (parts.Length != 3) return false;
+        if (!int.TryParse(parts[0], out var major)) return false;
+        if (!int.TryParse(parts[1], out var minor)) return false;
+        if (!int.TryParse(parts[2], out var patch)) return false;
+        v = (major, minor, patch);
+        return true;
     }
 }

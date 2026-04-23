@@ -1,6 +1,6 @@
 # SlayTheStats
 
-A Slay the Spire 2 mod that tracks card and relic stats across your runs and shows them as tooltips when you hover over them.
+A Slay the Spire 2 mod that tracks card, relic, and encounter stats across your runs. Card and relic stats show as tooltips on hover; encounter stats show on a new Stats Bestiary compendium page, in a tooltip on combat enemy hovers, and in a comparison tooltip on the post-fight reward screen.
 
 ---
 
@@ -10,12 +10,22 @@ A Slay the Spire 2 mod that tracks card and relic stats across your runs and sho
 
 SlayTheStats reads your full run history retroactively. Stats are updated when you finish a run or start the game. Abandoned runs are skipped.
 
+**Card and relic stats:**
+
 - **Pick%** — how often you pick a card when it's offered on as a fight reward.
 - **Win%** — how often you win runs that include a given card or relic.
 - **Runs** — shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. `12/30`). For relics, just the number of runs it was present.
 - **Buys** — for colorless cards and relics: Shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. `12/30`).
 
 Stats are shown as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium. Stats are broken out by act acquired.
+
+**Encounter stats** (Stats Bestiary + in-combat + post-fight):
+
+- **Stats Bestiary** — new compendium page listing every encounter, grouped by biome/act and category (weak / normal / elite / boss / event). Shows Times Fought, median Damage taken, Mid 50% damage range, Spread (how swingy the fight is), average Turns, average Pots, and Death%.
+- **Live monster preview** — hover an encounter to see its monsters rendered live in the right-hand panel. A few encounters (Skulking Colony, Kaiser Crab, Doormaker) don't have previews yet and show a "Preview WIP" placeholder instead.
+- **Table Style selector** — switch between an all-characters comparison view and a per-character focused view with the full stat breakdown.
+- **In-combat tooltip** — hover an enemy (or its health bar) for ~0.75s during combat to see your historical stats for that encounter, scoped to your current run's character.
+- **Post-fight comparison tooltip** — after winning a fight, a tooltip on the reward screen compares this fight's damage / turns / potions to your historical average with a significance-colored delta.
 
 **Color coding** helps you read the data at a glance:
 - Pick% and Win% are colored relative to your personal baseline — your overall win rate for the current character, and your average pick rate across all fight reward screens (accounting for how often you skip). Green/teal means above baseline, orange/red means below.
@@ -39,7 +49,7 @@ To fully remove the mod (or wipe its state for a clean reinstall), delete these 
 1. The `SlayTheStats/` folder inside your STS2 `mods/` directory
 2. `SlayTheStats.cfg` in the `mod_configs/` folder next to your STS2 save data — stores mod settings and filter defaults
 3. `slay-the-stats.json` in your STS2 save data folder — stores the parsed run stats database
-4. *(only if you have the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) mod installed)* `SlayTheStats.json` in the `ModConfig/` folder next to `mod_configs/` — ModConfig keeps its own parallel copy of the same settings, so leaving it behind would resurrect old values on the next launch
+4. *(only if you have the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/27) mod installed)* `SlayTheStats.json` in the `ModConfig/` folder next to `mod_configs/` — ModConfig keeps its own parallel copy of the same settings, so leaving it behind would resurrect old values on the next launch
 
 Paths for items 2–4:
 - **Windows:** `%APPDATA%\Slay the Spire 2\`  (contains `mod_configs\SlayTheStats.cfg`, `slay-the-stats.json`, and `ModConfig\SlayTheStats.json`)
@@ -89,7 +99,7 @@ Filter changes you make while in a run are temporary — they let you slice the 
 
 **Colorless Cards**, **Event Cards**, **Ancient Relics**, **Curses**, etc are all tracked.
 
-Mod settings can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/2) mod:
+Mod settings can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/27) mod:
 
 - **Color Blind Mode** — teal/orange palette instead of green/red for stat coloring.
 - **Show In-Run Stats** — toggle stat tooltips during a run (card rewards, shop, relic hovers). When off, stats only appear in the compendium.

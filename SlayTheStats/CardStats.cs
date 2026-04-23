@@ -94,7 +94,7 @@ public class RunSummary
 /// </summary>
 public class StatsDb
 {
-    public const string CurrentModVersion = "v0.3.0";
+    public const string CurrentModVersion = "v0.3.1";
 
     /// <summary>
     /// Schema version — bumped whenever the db structure changes in a way
