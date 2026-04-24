@@ -586,6 +586,30 @@ internal static class TooltipHelper
         return $"[color={(pct >= baseline ? GoodShades : BadShades)[level]}]{inner}[/color]";
     }
 
+    // Shade bucket thresholds on |z-score|. Kept as three bands mirroring SigLevel
+    // so the color intensity jumps align with familiar "muted / medium / strong" reads.
+    // < 0.5σ stays neutral; 2σ+ shows the strongest shade and bolds.
+    private static int ZLevel(double absZ) => absZ switch { < 0.5 => -1, < 1.0 => 0, < 2.0 => 1, _ => 2 };
+
+    /// <summary>
+    /// Colors text directly from a z-score (standardized deviation from baseline),
+    /// with the inverted convention used by encounter stats: positive z (observed
+    /// above baseline) is bad (orange/red), negative is good (teal/green).
+    /// Using the same z-score that drives the significance sort guarantees color
+    /// intensity is monotonic with sort rank — no neutral cell ranked between
+    /// two colored cells of the same direction.
+    /// </summary>
+    internal static string ColByZScoreInverted(string text, double z)
+    {
+        if (double.IsNaN(z) || double.IsInfinity(z))
+            return $"[color={NeutralShade}]{text}[/color]";
+        var level = ZLevel(Math.Abs(z));
+        if (level < 0) return $"[color={NeutralShade}]{text}[/color]";
+        var shades = z >= 0 ? BadShades : GoodShades;
+        var inner = level == 2 && HasBoldFont ? $"[b]{text}[/b]" : text;
+        return $"[color={shades[level]}]{inner}[/color]";
+    }
+
     internal static StyleBox BuildPanelStyle()
     {
         var tex = ResourceLoader.Load<Texture2D>("res://images/ui/hover_tip.png");
@@ -695,6 +719,26 @@ public partial class SlayTheStatsPositionFollower : Node
         var logOnce = TooltipHelper.ShowGen != _lastDiagGen;
         if (logOnce) _lastDiagGen = TooltipHelper.ShowGen;
 
+        // Stay live across both positioning branches below (the children-present
+        // UpdatePanelPosition path and the no-children no-tip path) so the
+        // overflow-shift block at the bottom can skip ancient options too.
+        var ancientOptionBtn = AncientEventOptionFocusPatch.ActiveAncientOptionControl;
+        bool isAncientOption = ancientOptionBtn != null && GodotObject.IsInstanceValid(ancientOptionBtn);
+
+        // Some ancient options carry a card preview in cardHoverTipContainer
+        // (e.g. Dusty Tome's AncientCard). Shifting the whole tipSet up to
+        // correct panel overflow would drag that card preview off the top
+        // of the screen, so we skip the shift in that specific case and
+        // clamp our own panel Y instead. Ancients without a card preview
+        // (e.g. Touch of Orobas — only text hover tips for the upgraded
+        // relic) don't have anything sensitive to protect, so letting the
+        // normal shift run keeps our panel from flipping up over those
+        // text hover tips.
+        var cardTipContainer = tipSet?.GetNodeOrNull<Control>("cardHoverTipContainer");
+        bool hasAncientCardPreview = isAncientOption
+            && cardTipContainer != null
+            && cardTipContainer.GetChildCount() > 0;
+
         if (textContainer == null)
         {
             if (logOnce)
@@ -746,6 +790,20 @@ public partial class SlayTheStatsPositionFollower : Node
         {
             // Game has repositioned textHoverTipContainer beside the card — follow it.
             TooltipHelper.UpdatePanelPosition(p, textContainer);
+
+            // Ancient-option Y clamp: on the bottom option (e.g. Dusty Tome)
+            // the text container sits near the viewport bottom, pushing our
+            // panel past the edge. For ancients with a protected card preview
+            // we skip the tipSet shift below, so clamp our own panel Y here
+            // to keep it on-screen. For ancients without a card preview
+            // (Touch of Orobas), the tipSet-shift path runs instead and moves
+            // the whole column up together — no clamp needed here.
+            if (hasAncientCardPreview && p.Size.Y > 0)
+            {
+                var vp = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+                if (p.Position.Y + p.Size.Y > vp.Y)
+                    p.Position = new Vector2(p.Position.X, Math.Max(0f, vp.Y - p.Size.Y));
+            }
         }
         else
         {
@@ -772,7 +830,16 @@ public partial class SlayTheStatsPositionFollower : Node
                 var anchorPos = AncientEventOptionFocusPatch.AnchorGlobal;
                 x = anchorPos.X - TooltipHelper.ActiveWidth;
                 x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.ActiveWidth);
-                p.Position = new Vector2(x, anchorPos.Y);
+                // Clamp Y to fit within the viewport. For the bottom option
+                // (e.g. Dusty Tome) the anchor's own Y can push our panel
+                // past the viewport bottom; NOT clamping here and letting
+                // the overflow-shift block below shift the tipSet up
+                // dragged the game's card preview (e.g. Dusty Tome's
+                // AncientCard hover tip) off the top of the screen.
+                float y = anchorPos.Y;
+                if (p.Size.Y > 0 && y + p.Size.Y > viewportSize.Y)
+                    y = Math.Max(0f, viewportSize.Y - p.Size.Y);
+                p.Position = new Vector2(x, y);
             }
             else if (cardHolder != null && GodotObject.IsInstanceValid(cardHolder))
             {
@@ -809,7 +876,15 @@ public partial class SlayTheStatsPositionFollower : Node
         // game's NHoverTipSet (parent of textHoverTipContainer + cardHoverTipContainer)
         // upward by the overshoot so the whole tooltip column stays on screen.
         // p.Size.Y may be 0 on the very first frame before layout runs — skip in that case.
-        if (tipSet is Control tipSetCtrl && p.Size.Y > 0)
+        //
+        // Only skipped for ancient options that carry a card preview (e.g.
+        // Dusty Tome's AncientCard): those previews sit to the RIGHT of the
+        // option button and are already on-screen; shifting the tipSet up
+        // would drag them off the top. For ancients whose extra hover tips
+        // are text-only (e.g. Touch of Orobas' upgraded-relic tooltip) the
+        // shift must run — otherwise our panel Y-clamp flips our panel up
+        // over those tooltips.
+        if (tipSet is Control tipSetCtrl && p.Size.Y > 0 && !hasAncientCardPreview)
         {
             var vpSize    = p.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
             float overflow = (p.Position.Y + p.Size.Y) - vpSize.Y;

@@ -34,7 +34,6 @@ public partial class MainFile : Node
         // older versions or manual edits, so the next save writes clean values.
         SlayTheStatsConfig.Sanitize();
         ModConfigRegistry.Register(ModId, config);
-        ModConfigBridge.DeferredRegister();
 
         // On every boot, discard any unsaved filter tweaks from the previous session
         // and snap the live filter values back to the user's saved defaults. Filter

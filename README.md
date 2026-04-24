@@ -49,11 +49,10 @@ To fully remove the mod (or wipe its state for a clean reinstall), delete these 
 1. The `SlayTheStats/` folder inside your STS2 `mods/` directory
 2. `SlayTheStats.cfg` in the `mod_configs/` folder next to your STS2 save data — stores mod settings and filter defaults
 3. `slay-the-stats.json` in your STS2 save data folder — stores the parsed run stats database
-4. *(only if you have the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/27) mod installed)* `SlayTheStats.json` in the `ModConfig/` folder next to `mod_configs/` — ModConfig keeps its own parallel copy of the same settings, so leaving it behind would resurrect old values on the next launch
 
-Paths for items 2–4:
-- **Windows:** `%APPDATA%\Slay the Spire 2\`  (contains `mod_configs\SlayTheStats.cfg`, `slay-the-stats.json`, and `ModConfig\SlayTheStats.json`)
-- **Linux:** `~/.local/share/Slay the Spire 2/`  (contains `mod_configs/SlayTheStats.cfg`, `slay-the-stats.json`, and `ModConfig/SlayTheStats.json`)
+Paths for items 2–3:
+- **Windows:** `%APPDATA%\Slay the Spire 2\`  (contains `mod_configs\SlayTheStats.cfg` and `slay-the-stats.json`)
+- **Linux:** `~/.local/share/Slay the Spire 2/`  (contains `mod_configs/SlayTheStats.cfg` and `slay-the-stats.json`)
 
 If you only want to reset stats but keep your settings, delete just `slay-the-stats.json` — it will be rebuilt from your run history on next launch.
 
@@ -99,7 +98,7 @@ Filter changes you make while in a run are temporary — they let you slice the 
 
 **Colorless Cards**, **Event Cards**, **Ancient Relics**, **Curses**, etc are all tracked.
 
-Mod settings can be configured in-game from BaseLib's mod configuration page or, if you have it installed, the optional [ModConfig](https://www.nexusmods.com/slaythespire2/mods/27) mod:
+Mod settings can be configured in-game from BaseLib's mod configuration page:
 
 - **Color Blind Mode** — teal/orange palette instead of green/red for stat coloring.
 - **Show In-Run Stats** — toggle stat tooltips during a run (card rewards, shop, relic hovers). When off, stats only appear in the compendium.
@@ -196,7 +195,6 @@ dotnet test
 | `TooltipHelper.cs` | Shared tooltip rendering and color helpers |
 | `Patches.cs` | Harmony patches for run-end hook and character tracking |
 | `SlayTheStatsConfig.cs` | Mod settings (color blind mode, in-run stats toggle, master tooltip kill switch, debug mode, data directory) and persisted filter-pane state (ascension/version/profile/class/group-upgrades + their saved defaults) |
-| `ModConfigBridge.cs` | Optional ModConfig-STS2 integration for in-game settings UI |
 | `StatsLogger.cs` | Debug utility — logs per-act stat tables to the Godot log |
 
 ### How Stats Are Tracked

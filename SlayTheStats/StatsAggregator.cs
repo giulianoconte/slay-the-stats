@@ -680,6 +680,67 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Collects per-fight Dmg% values (<c>damage × 100 / startingHp</c>,
+    /// integer) across every matching encounter/context under the given
+    /// filter + category + biome. Used by the bestiary sparkline column
+    /// to show distribution density for pool rows (act/category/all-chars)
+    /// on a normalized axis — raw damage values pooled across encounters
+    /// would mix incomparable magnitudes.
+    /// </summary>
+    public static List<int> CollectDmgPctValues(
+        StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
+    {
+        var result = new List<int>();
+        var startingHps = db.CharacterStartingHp;
+
+        foreach (var (encId, contextMap) in db.Encounters)
+        {
+            if (category != null && db.EncounterMeta.TryGetValue(encId, out var meta) && meta.Category != category)
+                continue;
+            if (!MatchesBiome(db, encId, biome)) continue;
+
+            foreach (var (key, stat) in contextMap)
+            {
+                var ctx = RunContext.Parse(key);
+                if (!filter.Matches(ctx)) continue;
+                if (stat.DamageValues == null || stat.DamageValues.Count == 0) continue;
+                int startingHp = startingHps.GetValueOrDefault(ctx.Character, 0);
+                if (startingHp <= 0) continue;
+                foreach (var dmg in stat.DamageValues)
+                    result.Add(dmg * 100 / startingHp);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Per-fight Dmg% values for a single encounter across all filter-
+    /// matching contexts (i.e. all characters). Used by the bestiary
+    /// "All vs X" row in the focused view — mirrors
+    /// <see cref="CollectDmgPctValues"/> but restricted to one
+    /// encounter id.
+    /// </summary>
+    public static List<int> CollectDmgPctValuesForEncounter(
+        StatsDb db, string encounterId, AggregationFilter filter)
+    {
+        var result = new List<int>();
+        if (!db.Encounters.TryGetValue(encounterId, out var contextMap)) return result;
+        var startingHps = db.CharacterStartingHp;
+
+        foreach (var (key, stat) in contextMap)
+        {
+            var ctx = RunContext.Parse(key);
+            if (!filter.Matches(ctx)) continue;
+            if (stat.DamageValues == null || stat.DamageValues.Count == 0) continue;
+            int startingHp = startingHps.GetValueOrDefault(ctx.Character, 0);
+            if (startingHp <= 0) continue;
+            foreach (var dmg in stat.DamageValues)
+                result.Add(dmg * 100 / startingHp);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Aggregates all encounters matching a category and biome under the given filter
     /// into a single <see cref="EncounterEvent"/>. Used for pool-level context rows
     /// (e.g. "all elites in Hive for Defect"). Returns an event with Fought=0 if
@@ -972,16 +1033,31 @@ public static class StatsAggregator
     public static EventAggregate AggregateEvent(StatsDb db, string eventId, AggregationFilter? filter = null)
     {
         var agg = new EventAggregate { EventId = eventId, Options = new Dictionary<string, EventOptionAggregate>() };
-        if (!db.EventVisits.TryGetValue(eventId, out var visits)) return agg;
+        if (!db.EventVisits.TryGetValue(eventId, out var allVisits)) return agg;
 
-        // Single pass: each visit's TotalVisits increments once (the
-        // denominator for all option pick-rates — same model as shop pick%
-        // where denominator = times-shop-seen regardless of affordability).
+        // Classify shape from ALL visits, not filtered ones. Shape is a
+        // property of the event's option structure (game-level fact — e.g.
+        // Future of Potions always has a Rarity variable), not of the
+        // current user's slice. Classifying from a narrow filter (e.g.
+        // starting a fresh Ironclad run when historical visits are Defect-
+        // only) drops the filtered list below 2 and yields false-Unknown,
+        // collapsing all rarities into one bucket. Recomputed every
+        // aggregation (not persisted) so it still auto-corrects as more
+        // visits land — see slay-the-stats.md §v1.0.0 event shape
+        // classification.
+        ClassifyEventShape(allVisits, agg);
+
+        var visits = (filter == null ? allVisits : allVisits.Where(filter.Matches)).ToList();
+
+        // Single pass building buckets: each visit's TotalVisits increments
+        // once (the denominator for Shape1/Unknown option pick-rates —
+        // same model as shop pick% where denominator = times-shop-seen).
         // Each terminal segment in the visit's option_path gets +1 pick /
-        // +1 win. Option keys that the game reuses across depths (Slippery
-        // Bridge's OVERCOME, Abyssal Baths' LINGER) merge into one bucket —
-        // accepted lossiness per design decision.
-        foreach (var v in filter == null ? visits : visits.Where(filter.Matches))
+        // +1 win, bucketed per agg.Shape (Shape2 appends the BucketVariable
+        // value to the terminal). Option keys reused across recursive-event
+        // depths (Slippery Bridge's OVERCOME, Abyssal Baths' LINGER) merge
+        // into one bucket — accepted lossiness per design decision.
+        foreach (var v in visits)
         {
             agg.TotalVisits++;
             if (v.Won) agg.TotalWins++;
@@ -991,10 +1067,11 @@ public static class StatsAggregator
                 var term = EventIdHelpers.TerminalOptionOfKey(key);
                 if (string.IsNullOrEmpty(term)) continue;
 
-                if (!agg.Options.TryGetValue(term, out var bucket))
+                var bucketKey = agg.BuildBucketKey(term, v.Variables);
+                if (!agg.Options.TryGetValue(bucketKey, out var bucket))
                 {
-                    bucket = new EventOptionAggregate { OptionKey = term };
-                    agg.Options[term] = bucket;
+                    bucket = new EventOptionAggregate { OptionKey = bucketKey };
+                    agg.Options[bucketKey] = bucket;
                 }
                 bucket.Picks++;
                 if (v.Won) bucket.Wins++;
@@ -1002,6 +1079,100 @@ public static class StatsAggregator
         }
 
         return agg;
+    }
+
+    /// <summary>
+    /// Inspects the visits for an event and classifies its shape, writing
+    /// <see cref="EventAggregate.Shape"/> and <see cref="EventAggregate.BucketVariable"/>
+    /// on <paramref name="agg"/>. Pure function of <paramref name="visits"/>.
+    ///
+    /// Rules:
+    /// <list type="bullet">
+    ///   <item>0 or 1 visits → Unknown (insufficient to distinguish).</item>
+    ///   <item>≥2 distinct terminal keys → Shape1_DistinctKeys.</item>
+    ///   <item>Exactly 1 terminal key, some variable has ≥2 distinct values
+    ///         across visits → Shape2_VariableKey. BucketVariable picks the
+    ///         variable with the fewest distinct values (≥2), tie-broken
+    ///         alphabetically — prefers the most-aggregated semantic split
+    ///         (e.g. Future of Potions picks Rarity over Potion or Type
+    ///         because Rarity's cardinality ceiling is 4 while Potion is
+    ///         20+).</item>
+    ///   <item>1 terminal key, all variables stable (or no variables) →
+    ///         Unknown. Can't tell whether the player always picks the same
+    ///         option (Shape1) or whether we haven't seen enough variation
+    ///         yet (Shape2). Default to Shape1-style bucketing; flips to
+    ///         Shape2 on a future visit with a new variable value.</item>
+    /// </list>
+    /// </summary>
+    internal static void ClassifyEventShape(IReadOnlyList<EventVisit> visits, EventAggregate agg)
+    {
+        if (visits.Count < 2)
+        {
+            agg.Shape = EventShape.Unknown;
+            agg.BucketVariable = null;
+            return;
+        }
+
+        var terminals = new HashSet<string>();
+        // varName → set of distinct string values observed across visits.
+        var varValues = new Dictionary<string, HashSet<string>>();
+
+        foreach (var v in visits)
+        {
+            foreach (var key in v.OptionPath)
+            {
+                var term = EventIdHelpers.TerminalOptionOfKey(key);
+                if (!string.IsNullOrEmpty(term)) terminals.Add(term);
+            }
+            foreach (var kv in v.Variables)
+            {
+                if (string.IsNullOrEmpty(kv.Value)) continue;
+                if (!varValues.TryGetValue(kv.Key, out var set))
+                {
+                    set = new HashSet<string>();
+                    varValues[kv.Key] = set;
+                }
+                set.Add(kv.Value);
+            }
+        }
+
+        if (terminals.Count >= 2)
+        {
+            agg.Shape = EventShape.Shape1_DistinctKeys;
+            agg.BucketVariable = null;
+            return;
+        }
+
+        // Exactly 1 terminal key (Shape2 candidate). Look for a variable
+        // whose values vary across visits.
+        string? bestVar = null;
+        int bestDistinct = int.MaxValue;
+        foreach (var kv in varValues)
+        {
+            var count = kv.Value.Count;
+            if (count < 2) continue;
+            // Prefer fewest-distinct (most aggregated); tie-break
+            // alphabetically for deterministic output across runs.
+            if (count < bestDistinct || (count == bestDistinct && (bestVar == null || string.CompareOrdinal(kv.Key, bestVar) < 0)))
+            {
+                bestVar = kv.Key;
+                bestDistinct = count;
+            }
+        }
+
+        if (bestVar != null)
+        {
+            agg.Shape = EventShape.Shape2_VariableKey;
+            agg.BucketVariable = bestVar;
+        }
+        else
+        {
+            // 1 terminal key, no varying variables — ambiguous. Treat as
+            // Unknown so tooltip surfaces uncertainty; bucketing falls
+            // through to the plain terminal key.
+            agg.Shape = EventShape.Unknown;
+            agg.BucketVariable = null;
+        }
     }
 
     /// <summary>

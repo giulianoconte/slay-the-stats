@@ -87,7 +87,15 @@ internal static class EventHoverHelper
             var agg = StatsAggregator.AggregateEvent(MainFile.Db, eventId, filter);
             if (agg.TotalVisits == 0) return;
 
-            var hoveredOptionKey = TerminalOptionOf(holder.Option);
+            var hoveredTerminal = TerminalOptionOf(holder.Option);
+            // Shape2 buckets are keyed by terminal + BucketVariable value.
+            // Read the value off the option's Title LocString (same API the
+            // game uses to populate it, same representation that flows into
+            // the run file's event_choices[].variables), so our hover
+            // lookup matches the parsed bucket keys.
+            var hoveredVariables = ReadOptionVariables(holder.Option);
+            var hoveredOptionKey = agg.BuildBucketKey(hoveredTerminal, hoveredVariables);
+
             var effectiveChar  = CardHoverShowPatch.GetEffectiveCharacter(filter);
             var characterLabel = CardHoverShowPatch.GetCharacterLabel(filter);
             var wrBaseline = effectiveChar != null
@@ -350,7 +358,45 @@ internal static class EventHoverHelper
         var title = option?.Title;
         if (title == null) return "";
         var key = title.LocEntryKey;
-        return string.IsNullOrEmpty(key) ? "" : EventIdHelpers.TerminalOption(new List<string> { key });
+        if (string.IsNullOrEmpty(key)) return "";
+        var terminal = EventIdHelpers.TerminalOption(new List<string> { key });
+        // Locked variants (e.g. BARGAIN_BIN_LOCKED) are the same logical
+        // choice as their unlocked counterpart; strip the suffix so the
+        // hover lookup hits the unlocked option's stored bucket. Locked
+        // options have a null action so they're never picked — the
+        // database only ever contains the unlocked key, and without this
+        // mapping every locked-option hover reads 0/N.
+        const string LockedSuffix = "_LOCKED";
+        if (terminal.EndsWith(LockedSuffix, StringComparison.Ordinal))
+            terminal = terminal[..^LockedSuffix.Length];
+        return terminal;
+    }
+
+    /// <summary>
+    /// Reads the LocString variables attached to a hovered option's Title
+    /// into a plain string dict. Matches the shape the parser flattens
+    /// visit.Variables into — so agg.BuildBucketKey produces identical
+    /// bucket keys at hover vs. parse time.
+    /// </summary>
+    private static Dictionary<string, string> ReadOptionVariables(EventOption? option)
+    {
+        var dict = new Dictionary<string, string>();
+        var title = option?.Title;
+        if (title == null) return dict;
+        try
+        {
+            foreach (var kv in title.Variables)
+            {
+                if (kv.Value == null) continue;
+                var s = kv.Value.ToString();
+                if (!string.IsNullOrEmpty(s)) dict[kv.Key] = s;
+            }
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] ReadOptionVariables failed: {e.Message}");
+        }
+        return dict;
     }
 
     private const string ColPadOuter = "expand=1 padding=4,0,12,0";
@@ -363,9 +409,17 @@ internal static class EventHoverHelper
         => $"[cell {padding}][right]{content}[/right][/cell]";
 
     /// <summary>
-    /// Renders the tooltip body. Shows a single row for the hovered option
-    /// (columns: Picks "N/M" | Win%). The option identity is implicit — it's
-    /// whichever option the player is hovering.
+    /// Renders the tooltip body. One row for the hovered option. Columns
+    /// and the Picks format depend on <see cref="EventAggregate.Shape"/>:
+    /// <list type="bullet">
+    ///   <item>Shape1 / Unknown: Picks shown as "N/M" (N=picks for this
+    ///         option, M=TotalVisits — same model as shop pick%).</item>
+    ///   <item>Shape2: Picks shown as raw "N" with no denominator, and a
+    ///         footer note explains why. The game records what was picked
+    ///         per visit, never what was offered, so any denominator would
+    ///         conflate "was offered" with "chose given offered" — see
+    ///         slay-the-stats.md §v1.0.0 event shape classification.</item>
+    /// </list>
     /// </summary>
     private static string BuildStatsText(
         string eventId,
@@ -385,9 +439,23 @@ internal static class EventHoverHelper
 
         int picks = opt?.Picks ?? 0;
         int total = agg.TotalVisits;
-        string picksCell = picks > 0
-            ? $"{picks}/{total}"
-            : $"[color={ThemeStyle.NeutralShade}]0/{total}[/color]";
+        bool isShape2 = agg.Shape == EventShape.Shape2_VariableKey;
+
+        string picksCell;
+        if (isShape2)
+        {
+            // No denominator: offered counts are unknowable for Shape2 events.
+            picksCell = picks > 0
+                ? $"{picks}"
+                : $"[color={ThemeStyle.NeutralShade}]0[/color]";
+        }
+        else
+        {
+            picksCell = picks > 0
+                ? $"{picks}/{total}"
+                : $"[color={ThemeStyle.NeutralShade}]0/{total}[/color]";
+        }
+
         string winCell = picks > 0
             ? $"{Math.Round(100.0 * opt!.Wins / picks):F0}%"
             : $"[color={ThemeStyle.NeutralShade}]-[/color]";
@@ -397,8 +465,17 @@ internal static class EventHoverHelper
 
         sb.Append("[/table]");
 
-        var wrStr = double.IsNaN(wrBaseline) ? "—" : $"{Math.Round(wrBaseline):F0}%";
-        sb.Append(TooltipHelper.FormatBaselineLine($"(baseline) Win% {wrStr}"));
+        if (isShape2)
+        {
+            // Non-comparative note, rendered in the same muted style as the
+            // baseline/footer strip so it reads as metadata rather than data.
+            sb.Append(TooltipHelper.FormatBaselineLine("Offered data not recorded for this event"));
+        }
+        else
+        {
+            var wrStr = double.IsNaN(wrBaseline) ? "—" : $"{Math.Round(wrBaseline):F0}%";
+            sb.Append(TooltipHelper.FormatBaselineLine($"(baseline) Win% {wrStr}"));
+        }
 
         var filterCtx = CardHoverShowPatch.BuildFilterContext(characterLabel, filter);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));

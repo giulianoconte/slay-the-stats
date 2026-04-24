@@ -1,5 +1,6 @@
 using Godot;
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using System.Reflection;
@@ -300,14 +301,32 @@ public static class PostFightTooltipPatch
 
         if (_panel == null) return;
 
-        // Add to the scene tree if not already parented
-        var root = rewardsScreen.GetTree()?.Root;
-        if (root == null) return;
+        // Parent the panel to the game's HoverTipsContainer — the same parent
+        // that NHoverTipSet children (card previews) go into on hover. With
+        // a shared parent, any hover-tip added after us becomes a later
+        // sibling, which Godot renders on top by default tree order. Prior
+        // attempts to fight this with ZIndex alone didn't work: the hover-tip
+        // container apparently sits in a rendering context where our Root-
+        // attached ZIndex=50 panel still occluded card hover previews.
+        //
+        // Falls back to Root if HoverTipsContainer is unavailable (e.g. pre-
+        // _Ready), which keeps the existing single-panel show-path intact.
+        var container = NGame.Instance?.HoverTipsContainer ?? rewardsScreen.GetTree()?.Root;
+        if (container == null) return;
 
-        if (_panel.GetParent() == null)
+        // Add shadow first so it renders behind the panel (shadow has a +6,+6
+        // offset — it's a drop shadow and must be underneath). Without this
+        // ordering the shadow draws over the panel because they share a
+        // ZIndex and sibling order decides the tie.
+        if (_shadow != null && _shadow.GetParent() != container)
         {
-            root.AddChild(_panel);
-            if (_shadow != null) root.AddChild(_shadow);
+            _shadow.GetParent()?.RemoveChild(_shadow);
+            container.AddChild(_shadow);
+        }
+        if (_panel.GetParent() != container)
+        {
+            _panel.GetParent()?.RemoveChild(_panel);
+            container.AddChild(_panel);
         }
 
         _nameLabel!.Text = $"[b]{encounterName}[/b]";
@@ -407,7 +426,14 @@ public static class PostFightTooltipPatch
         };
         _panel.CustomMinimumSize = new Vector2(TooltipHelper.TooltipWidth, 0);
         _panel.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
-        _panel.ZIndex = 200;
+        // Parent is NGame.HoverTipsContainer (see Show), so rendering order
+        // within that container is governed by tree order — anything added
+        // after us (e.g. a card hover's NHoverTipSet) naturally draws on top.
+        // ZIndex stays at the default 0: HoverTipsContainer sits above the
+        // NOverlayStack backstop (so card hover tips aren't dimmed on reward
+        // screens), and a negative ZIndex here would push us behind that
+        // backstop and make the panel read as dimmed.
+        _panel.ZIndex = 0;
 
         var vbox = new VBoxContainer();
         vbox.Name = "PostFightVBox";
@@ -504,7 +530,7 @@ public static class PostFightTooltipPatch
         _shadow.PatchMarginTop = 43;
         _shadow.PatchMarginBottom = 32;
         _shadow.Modulate = new Color(0f, 0f, 0f, 0.25098f);
-        _shadow.ZIndex = 199;
+        _shadow.ZIndex = 0;
         _shadow.Visible = false;
         _shadow.MouseFilter = Control.MouseFilterEnum.Ignore;
     }

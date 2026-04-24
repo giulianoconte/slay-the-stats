@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Text;
+using Godot;
 
 namespace SlayTheStats;
 
@@ -54,6 +56,22 @@ public static class EncounterTooltipHelper
         public string CharacterRows;
         public string BaselineRow;
         public string Footer;
+        /// <summary>Sparkline textures, in marker-emission order. One
+        /// entry per <c>SparklinePoc.SparklineMarker</c> in
+        /// <see cref="CharacterRows"/>; nulls allowed for rows with
+        /// insufficient data. Consumed by
+        /// <c>SparklinePoc.PopulateLabelWithSparklines</c>.</summary>
+        public List<ImageTexture?> Sparklines;
+    }
+
+    /// <summary>Focused-view table: same BBCode-plus-sparkline pairing
+    /// as <see cref="AllCharsTableParts"/> but without the separate
+    /// header/baseline/footer slots — the focused view packs everything
+    /// into a single BBCode string.</summary>
+    internal struct FocusedTableParts
+    {
+        public string Text;
+        public List<ImageTexture?> Sparklines;
     }
 
     internal static AllCharsTableParts BuildEncounterStatsTextParts(
@@ -132,37 +150,56 @@ public static class EncounterTooltipHelper
         // expand-ratio math resolves to absolute pixel widths per column.
         var P = AllCharsColumns;
         var body = new StringBuilder();
-        body.Append("[table=8]");
+        body.Append("[table=9]");
         AppendSizingRow(body, AllCharsColumns, descParts: AllCharsDescriptorParts);
 
         // Header row
         AppendDescriptorCell(body, " ", isHeader: true, parts: AllCharsDescriptorParts);
         AppendHeaderCell(body, "Runs",    P.Fought);
+        AppendHeaderCell(body, "",        P.Spark);  // sparkline column has no header label — column it sits beside (Dmg%) names itself
         AppendHeaderCell(body, "Dmg%",    P.Dmg);
         AppendHeaderCell(body, "Mid 50%", P.Mid50);
         AppendHeaderCell(body, "Spread",  P.Spread);
         AppendHeaderCell(body, "Turns",   P.Turns);
-        AppendHeaderCell(body, "Potions", P.Pots);
+        AppendHeaderCell(body, "Pots", P.Pots);
         AppendHeaderCell(body, "Deaths",  P.Deaths);
 
         // Character rows — render in canonical order, emitting data cells for chars that
         // have a stat for this encounter and empty cells for those that don't.
+        // Every data-cells call (full or empty) emits exactly one Spark
+        // marker, so the sparklines list must gain one entry per row —
+        // null for no-data rows, a texture per row with values.
+        var sparklines = new List<ImageTexture?>();
         foreach (var (charId, stat, startingHp, descriptor) in allEntries)
         {
             AppendDescriptorCell(body, descriptor, parts: AllCharsDescriptorParts);
             if (stat != null)
+            {
                 AppendAllCharsDataCells(body, stat!, startingHp, allBaseline);
+                sparklines.Add(BuildDmgPctSparklineFromRawValues(stat.DamageValues, startingHp));
+            }
             else
+            {
                 AppendEmptyDataCells(body);
+                sparklines.Add(null);
+            }
         }
 
-        // Baseline (All) row
+        // Baseline (All) row — pool every per-character Dmg% value
+        // across the characters that had data. Gives a cross-character
+        // density for this encounter alongside the baseline numbers.
         var allIcon = AllCharsIcon(22);
         AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}All[/font] (baseline)", parts: AllCharsDescriptorParts);
         if (perCharMetrics.Count > 0)
+        {
             AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
+            sparklines.Add(BuildPooledAllRowSparkline(allEntries));
+        }
         else
+        {
             AppendEmptyDataCells(body);
+            sparklines.Add(null);
+        }
 
         body.Append("[/table]");
 
@@ -181,8 +218,61 @@ public static class EncounterTooltipHelper
             CharacterRows = body.ToString(),
             BaselineRow = "",
             Footer = footer.ToString(),
+            Sparklines = sparklines,
         };
     }
+
+    /// <summary>
+    /// Builds a sparkline texture from per-fight damage values normalized
+    /// by the character's starting HP. Dmg% values pool correctly across
+    /// characters (in the all-chars baseline row) and match the column
+    /// header ("Dmg%"). Returns null when there aren't enough samples.
+    /// </summary>
+    private static ImageTexture? BuildDmgPctSparklineFromRawValues(List<int>? rawDamage, int startingHp)
+    {
+        if (rawDamage == null || rawDamage.Count < 2) return null;
+        if (startingHp <= 0) return null;
+        var values = new double[rawDamage.Count];
+        for (int i = 0; i < values.Length; i++) values[i] = rawDamage[i] * 100.0 / startingHp;
+        return SparklinePoc.BuildSparklineTexture(values, BestiarySparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule);
+    }
+
+    /// <summary>
+    /// Builds a sparkline from an already-pooled list of Dmg% values
+    /// (e.g. from <see cref="StatsAggregator.CollectDmgPctValues"/>).
+    /// Null on fewer than 2 samples.
+    /// </summary>
+    private static ImageTexture? BuildDmgPctSparklineFromPctList(IReadOnlyList<int> pctValues)
+    {
+        if (pctValues == null || pctValues.Count < 2) return null;
+        var values = new double[pctValues.Count];
+        for (int i = 0; i < values.Length; i++) values[i] = pctValues[i];
+        return SparklinePoc.BuildSparklineTexture(values, BestiarySparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule);
+    }
+
+    /// <summary>
+    /// Pools every per-character fight into Dmg% values for the
+    /// "All (baseline)" row of the all-chars table. Each character
+    /// contributes its own fights normalized by its own starting HP
+    /// so the distribution is cross-character-comparable.
+    /// </summary>
+    private static ImageTexture? BuildPooledAllRowSparkline(
+        List<(string charId, EncounterEvent? stat, int startingHp, string descriptor)> entries)
+    {
+        var pooled = new List<int>();
+        foreach (var (_, stat, startingHp, _) in entries)
+        {
+            if (stat?.DamageValues == null || startingHp <= 0) continue;
+            foreach (var dmg in stat.DamageValues) pooled.Add(dmg * 100 / startingHp);
+        }
+        return BuildDmgPctSparklineFromPctList(pooled);
+    }
+
+    // Pixel size of the sparkline inside a table cell. Spark column =
+    // 2 parts × 27px = 54px cell with zero padding; the image is sized
+    // slightly narrower so if the label gets shrunk below its intended
+    // width the image doesn't anchor the column wider than its peers.
+    private static readonly Vector2I BestiarySparklineSize = new Vector2I(50, 22);
 
 
     // Section colors for focused-character view. Row descriptors (labels like
@@ -255,6 +345,7 @@ public static class EncounterTooltipHelper
     private struct ColumnPaddings
     {
         public readonly int FoughtParts;
+        public readonly int SparkParts;
         public readonly int DmgParts;
         public readonly int Mid50Parts;
         public readonly int SpreadParts;
@@ -263,6 +354,7 @@ public static class EncounterTooltipHelper
         public readonly int DeathsParts;
 
         public readonly string Fought;
+        public readonly string Spark;
         public readonly string Dmg;
         public readonly string Mid50;
         public readonly string Spread;
@@ -270,9 +362,10 @@ public static class EncounterTooltipHelper
         public readonly string Pots;
         public readonly string Deaths;
 
-        public ColumnPaddings(int fought, int dmg, int mid50, int spread, int turns, int pots, int deaths)
+        public ColumnPaddings(int fought, int spark, int dmg, int mid50, int spread, int turns, int pots, int deaths)
         {
             FoughtParts = fought;
+            SparkParts = spark;
             DmgParts = dmg;
             Mid50Parts = mid50;
             SpreadParts = spread;
@@ -280,6 +373,7 @@ public static class EncounterTooltipHelper
             PotsParts = pots;
             DeathsParts = deaths;
             Fought = $"expand={fought} {FoughtCellPadding}";
+            Spark  = $"expand={spark} {TightCellPadding}";
             Dmg    = $"expand={dmg} {TightCellPadding}";
             Mid50  = $"expand={mid50} {TightCellPadding}";
             Spread = $"expand={spread} {TightCellPadding}";
@@ -288,17 +382,24 @@ public static class EncounterTooltipHelper
             Deaths = $"expand={deaths} {TightCellPadding}";
         }
 
-        public int SumDataParts => FoughtParts + DmgParts + Mid50Parts + SpreadParts
+        public int SumDataParts => FoughtParts + SparkParts + DmgParts + Mid50Parts + SpreadParts
                                    + TurnsParts + PotsParts + DeathsParts;
     }
 
     // Both views share the same data-column part distribution so data columns render
     // at identical widths across the focused and all-chars tables.
-    // Distribution: Fought:2  Dmg:2  Mid50:3  Spread:3  Turns:2  Pots:3  Deaths:3.
+    // Distribution: Fought:2  Spark:2  Dmg:2  Mid50:3  Spread:2  Turns:2  Pots:2  Deaths:3.
+    // Total data parts = 18, matching the pre-sparkline layout (6 desc + 18 data
+    // = 24 parts = 648px) so the table fits the right-pane clipper without
+    // forcing the Spread column to shrink below its parts-based width.
+    //
+    // Why every column is 2 parts except Mid50 and Deaths: Spread "82%" fits
+    // easily in 54px; Mid50 "X-Y%" can reach 7-8 chars (e.g. "50-100%") so keeps
+    // 3 parts; Deaths "12/42" also needs 3.
     private static readonly ColumnPaddings FocusedColumns =
-        new(fought: 2, dmg: 2, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
+        new(fought: 2, spark: 2, dmg: 2, mid50: 3, spread: 2, turns: 2, pots: 2, deaths: 3);
     private static readonly ColumnPaddings AllCharsColumns =
-        new(fought: 2, dmg: 2, mid50: 3, spread: 3, turns: 2, pots: 3, deaths: 3);
+        new(fought: 2, spark: 2, dmg: 2, mid50: 3, spread: 2, turns: 2, pots: 2, deaths: 3);
 
     /// <summary>Focused-view descriptor parts — must match the default on
     /// <see cref="AppendDescriptorCell"/> and <see cref="AppendSizingRow"/>.</summary>
@@ -355,6 +456,7 @@ public static class EncounterTooltipHelper
         // different expand, breaking the layout.
         sb.Append($"[cell expand={descParts} {DescriptorCellPadding}][font_size=1]{EmSpaces(descParts * PartSizePx)}[/font_size][/cell]");
         AppendSizingDataCell(sb, P.Fought, P.FoughtParts * PartSizePx);
+        AppendSizingDataCell(sb, P.Spark,  P.SparkParts  * PartSizePx);
         AppendSizingDataCell(sb, P.Dmg,    P.DmgParts    * PartSizePx);
         AppendSizingDataCell(sb, P.Mid50,  P.Mid50Parts  * PartSizePx);
         AppendSizingDataCell(sb, P.Spread, P.SpreadParts * PartSizePx);
@@ -390,9 +492,10 @@ public static class EncounterTooltipHelper
         if (n == 0)
         {
             sb.Append(EmptyDataCell(P.Fought));
+            AppendSparkMarkerCell(sb, P);
             sb.Append(EmptyDataCell(P.Dmg));
             sb.Append(EmptyDataCell(P.Mid50));  sb.Append(EmptyDataCell(P.Spread));
-           
+
             sb.Append(EmptyDataCell(P.Turns));  sb.Append(EmptyDataCell(P.Pots));
             sb.Append(EmptyDataCell(P.Deaths));
             return;
@@ -414,6 +517,7 @@ public static class EncounterTooltipHelper
         var cDeaths  = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBase);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
+        AppendSparkMarkerCell(sb, P);
 
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
@@ -436,9 +540,13 @@ public static class EncounterTooltipHelper
         if (n == 0)
         {
             sb.Append(EmptyDataCell(P.Fought));
+            // Still emit a Spark marker on no-data rows so the parts
+            // list's 1:1 marker↔sparkline invariant holds. The caller
+            // will push a null texture into the list for this slot.
+            AppendSparkMarkerCell(sb, P);
             sb.Append(EmptyDataCell(P.Dmg));
             sb.Append(EmptyDataCell(P.Mid50));  sb.Append(EmptyDataCell(P.Spread));
-           
+
             sb.Append(EmptyDataCell(P.Turns));  sb.Append(EmptyDataCell(P.Pots));
             sb.Append(EmptyDataCell(P.Deaths));
             return;
@@ -453,14 +561,13 @@ public static class EncounterTooltipHelper
         var cN       = TooltipHelper.ColN($"{n}", n);
         var cDmg     = ColBadRelative($"{subject.Median:F0}", subject.Median, medianBase, n);
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        // Pool subject: use the pool's avg-of-IQRCs metric directly so the value
-        // compared against the baseline (also avg-of-IQRCs) is apples-to-apples.
         var cSpread  = FormatSpreadCell(subject.IQR.HasValue ? subject.Iqrc : (double?)null, n, iqrcBase);
         var cTurns   = ColBadRelative($"{subject.AvgTurns:F1}", subject.AvgTurns, turnsBase, n);
         var cPots    = ColBadRelative($"{subject.AvgPots:F1}", subject.AvgPots, potsBase, n, PotionBaselineFloor, PotionKScale);
         var cDeaths  = FormatDeathsCellInner(subject.Died, n, subject.DeathRate, deathRateBase);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
+        AppendSparkMarkerCell(sb, P);
 
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
@@ -482,9 +589,11 @@ public static class EncounterTooltipHelper
         if (n == 0)
         {
             sb.Append(EmptyDataCell(P.Fought, color));
+            // Marker emitted so parts.Sparklines stays 1:1 with slots.
+            AppendSparkMarkerCell(sb, P);
             sb.Append(EmptyDataCell(P.Dmg, color));
             sb.Append(EmptyDataCell(P.Mid50, color));  sb.Append(EmptyDataCell(P.Spread, color));
-           
+
             sb.Append(EmptyDataCell(P.Turns, color));  sb.Append(EmptyDataCell(P.Pots, color));
             sb.Append(EmptyDataCell(P.Deaths, color));
             return;
@@ -499,11 +608,12 @@ public static class EncounterTooltipHelper
         var fDeaths    = $"{m.Died}/{n}";
 
         sb.Append($"[cell {P.Fought}][right][color={color}]{fN}[/color][/right][/cell]");
+        AppendSparkMarkerCell(sb, P);
 
         sb.Append($"[cell {P.Dmg}][right][color={color}]{fDmg}[/color][/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right][color={color}]{fIqr}[/color][/right][/cell]");
         sb.Append($"[cell {P.Spread}][right][color={color}]{fSpread}[/color][/right][/cell]");
-       
+
         sb.Append($"[cell {P.Turns}][right][color={color}]{fTurns}[/color][/right][/cell]");
         sb.Append($"[cell {P.Pots}][right][color={color}]{fPots}[/color][/right][/cell]");
         sb.Append($"[cell {P.Deaths}][right][color={color}]{fDeaths}[/color][/right][/cell]");
@@ -639,6 +749,7 @@ public static class EncounterTooltipHelper
         string fDeaths  = $"{allDeathRate:F0}%";
 
         sb.Append($"[cell {P.Fought}][right][color={color}]{totalFought}[/color][/right][/cell]");
+        AppendSparkMarkerCell(sb, P);
         sb.Append($"[cell {P.Dmg}][right][color={color}]{fDmgPct}[/color][/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right][color={color}]{fIqr}[/color][/right][/cell]");
         sb.Append($"[cell {P.Spread}][right][color={color}]{fSpread}[/color][/right][/cell]");
@@ -724,6 +835,7 @@ public static class EncounterTooltipHelper
         var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, baselines.DeathRate);
 
         sb.Append($"[cell {P.Fought}][right]{cN}[/right][/cell]");
+        AppendSparkMarkerCell(sb, P);
         sb.Append($"[cell {P.Dmg}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {P.Mid50}][right]{cMid50}[/right][/cell]");
         sb.Append($"[cell {P.Spread}][right]{cSpread}[/right][/cell]");
@@ -739,12 +851,24 @@ public static class EncounterTooltipHelper
     {
         var P = AllCharsColumns;
         sb.Append(EmptyDataCell(P.Fought));
+        // Marker emitted even for no-data rows so parts.Sparklines stays
+        // 1:1 with marker slots in the BBCode. Caller pushes null for
+        // these slots; the populate helper skips AddImage.
+        AppendSparkMarkerCell(sb, P);
         sb.Append(EmptyDataCell(P.Dmg));
         sb.Append(EmptyDataCell(P.Mid50));
         sb.Append(EmptyDataCell(P.Spread));
         sb.Append(EmptyDataCell(P.Turns));
         sb.Append(EmptyDataCell(P.Pots));
         sb.Append(EmptyDataCell(P.Deaths));
+    }
+
+    /// <summary>Emits a Spark cell carrying the <see cref="SparklinePoc.SparklineMarker"/>
+    /// token. The bestiary render path splits its BBCode on the marker and
+    /// calls <c>RichTextLabel.AddImage</c> between the split segments.</summary>
+    private static void AppendSparkMarkerCell(StringBuilder sb, ColumnPaddings P)
+    {
+        sb.Append($"[cell {P.Spark}]{SparklinePoc.SparklineMarker}[/cell]");
     }
 
     /// <summary>FormatDeathsCell variant for the new table layout — no padding,
@@ -848,7 +972,7 @@ public static class EncounterTooltipHelper
     /// Biome is always the encounter's actual biome from metadata — not the selected tab.
     /// Row 3 (act pool) is skipped when it would be identical to row 2 (single-biome acts).
     /// </summary>
-    internal static string BuildEncounterStatsTextFocused(
+    internal static FocusedTableParts BuildEncounterStatsTextFocused(
         EncounterEvent encounterStat,
         PoolMetrics? poolAct,
         PoolMetrics poolAll,
@@ -858,8 +982,12 @@ public static class EncounterTooltipHelper
         string? actLabel,
         string categoryLabel,
         AggregationFilter filter,
-        string? category = null)
+        string? category = null,
+        IReadOnlyList<int>? poolActDmgPct = null,
+        IReadOnlyList<int>? poolAllDmgPct = null,
+        IReadOnlyList<int>? allCharsDmgPct = null)
     {
+        var focusedSparklines = new List<ImageTexture?>();
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
         var catLower = categoryLabel.ToLowerInvariant();
@@ -872,7 +1000,7 @@ public static class EncounterTooltipHelper
         var baselineSource = poolAct is { Fought: > 0 } ? poolAct.Value : poolAll;
         var (medianBase, iqrcBase, deathRateBase, turnsBase, potsBase) = DeriveBaselines(baselineSource);
 
-        sb.Append("[table=8]");
+        sb.Append("[table=9]");
         AppendSizingRow(sb);
 
         // Header row — empty descriptor cell + 7 column headers. Use FocusedColumns
@@ -882,32 +1010,46 @@ public static class EncounterTooltipHelper
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
         AppendHeaderCell(sb, "Runs",    FP.Fought);
+        AppendHeaderCell(sb, "",        FP.Spark);
         AppendHeaderCell(sb, "Dmg",     FP.Dmg);
         AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
         AppendHeaderCell(sb, "Spread",  FP.Spread);
         AppendHeaderCell(sb, "Turns",   FP.Turns);
-        AppendHeaderCell(sb, "Potions", FP.Pots);
+        AppendHeaderCell(sb, "Pots", FP.Pots);
         AppendHeaderCell(sb, "Deaths",  FP.Deaths);
 
         // Row 1: this encounter, this character — data cells colored against act pool baseline
         AppendDescriptorCell(sb, $"{charIcon}vs {encNameRow1}");
         AppendRow1DataCells(sb, encounterStat, medianBase, iqrcBase, deathRateBase, turnsBase, potsBase);
+        // AppendRow1DataCells always emits a Spark marker now, so the
+        // sparkline list needs a matching entry — texture if the row
+        // has data, null otherwise.
+        {
+            int startingHp = MainFile.Db.CharacterStartingHp.GetValueOrDefault(characterId, 0);
+            focusedSparklines.Add(
+                encounterStat.Fought > 0
+                    ? BuildDmgPctSparklineFromRawValues(encounterStat.DamageValues, startingHp)
+                    : null);
+        }
 
         // Row 2: act + category pool baseline — plain text (no coloring on context rows)
         if (poolAct.HasValue && actLabel != null)
         {
             AppendDescriptorCell(sb, $"{charIcon}vs {actLabel} {PluralizeCategory(catLower)} (baseline)");
             AppendPoolDataCells(sb, poolAct.Value);
+            focusedSparklines.Add(poolActDmgPct != null ? BuildDmgPctSparklineFromPctList(poolActDmgPct) : null);
         }
 
         // Row 3: all-acts category pool
         AppendDescriptorCell(sb, $"{charIcon}vs all {PluralizeCategory(catLower)}");
         AppendPoolDataCells(sb, poolAll);
+        focusedSparklines.Add(poolAllDmgPct != null ? BuildDmgPctSparklineFromPctList(poolAllDmgPct) : null);
 
         // Row 4: all chars vs this encounter — character-weighted aggregation
         var allCharsIcon = AllCharsIcon(22);
         AppendDescriptorCell(sb, $"{allCharsIcon}All vs {encNameRow4}");
         AppendPoolDataCells(sb, allCharsMetrics);
+        focusedSparklines.Add(allCharsDmgPct != null ? BuildDmgPctSparklineFromPctList(allCharsDmgPct) : null);
 
         sb.Append("[/table]");
 
@@ -915,7 +1057,7 @@ public static class EncounterTooltipHelper
         var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
-        return sb.ToString();
+        return new FocusedTableParts { Text = sb.ToString(), Sparklines = focusedSparklines };
     }
 
     /// <summary>
@@ -923,7 +1065,7 @@ public static class EncounterTooltipHelper
     /// layout as encounter view but without the encounter row; bottom row is all-chars
     /// for the category pool instead of a specific encounter.
     /// </summary>
-    internal static string BuildCategoryStatsTextFocused(
+    internal static FocusedTableParts BuildCategoryStatsTextFocused(
         PoolMetrics poolBiome,
         PoolMetrics poolAll,
         PoolMetrics allCharsPool,
@@ -931,14 +1073,18 @@ public static class EncounterTooltipHelper
         string? biomeLabel,
         string categoryLabel,
         AggregationFilter filter,
-        string? category = null)
+        string? category = null,
+        IReadOnlyList<int>? poolBiomeDmgPct = null,
+        IReadOnlyList<int>? poolAllDmgPct = null,
+        IReadOnlyList<int>? allCharsDmgPct = null)
     {
+        var sparklines = new List<ImageTexture?>();
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
         var catLower = categoryLabel.ToLowerInvariant();
         var catColor = category != null ? EncounterIcons.CategoryColorHex(category) : null;
 
-        sb.Append("[table=8]");
+        sb.Append("[table=9]");
         AppendSizingRow(sb);
 
         // Header row (see comment in BuildEncounterStatsTextFocused — use FocusedColumns
@@ -946,11 +1092,12 @@ public static class EncounterTooltipHelper
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
         AppendHeaderCell(sb, "Runs",    FP.Fought);
+        AppendHeaderCell(sb, "",        FP.Spark);
         AppendHeaderCell(sb, "Dmg",     FP.Dmg);
         AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
         AppendHeaderCell(sb, "Spread",  FP.Spread);
         AppendHeaderCell(sb, "Turns",   FP.Turns);
-        AppendHeaderCell(sb, "Potions", FP.Pots);
+        AppendHeaderCell(sb, "Pots", FP.Pots);
         AppendHeaderCell(sb, "Deaths",  FP.Deaths);
 
         var allCharsIcon = AllCharsIcon(22);
@@ -958,9 +1105,6 @@ public static class EncounterTooltipHelper
 
         if (biomeLabel != null)
         {
-            // Specific biome or act: 3 rows.
-            // Row 1 (colored): this char, scoped to biome/act — colored vs char's all-acts pool.
-            // The biome/act name is bold + category-colored so the scope stands out.
             var biomeColored = catColor != null
                 ? $"{KreonBoldFontTag}[color={catColor}]{biomeLabel}[/color][/font]"
                 : $"{KreonBoldFontTag}{biomeLabel}[/font]";
@@ -969,25 +1113,25 @@ public static class EncounterTooltipHelper
                 : catPlural;
             AppendDescriptorCell(sb, $"{charIcon}vs {biomeColored} {catPluralColored}");
             AppendRow1PoolDataCells(sb, poolBiome, poolAll);
+            sparklines.Add(poolBiomeDmgPct != null ? BuildDmgPctSparklineFromPctList(poolBiomeDmgPct) : null);
 
-            // Row 2 (neutral baseline): this char, all acts
             AppendDescriptorCell(sb, $"{charIcon}vs all {catPlural} (baseline)");
             AppendPoolDataCells(sb, poolAll);
+            sparklines.Add(poolAllDmgPct != null ? BuildDmgPctSparklineFromPctList(poolAllDmgPct) : null);
 
-            // Row 3 (neutral): all characters, scoped to same biome/act
             AppendDescriptorCell(sb, $"{allCharsIcon}All vs {biomeLabel} {catPlural}");
             AppendPoolDataCells(sb, allCharsPool);
+            sparklines.Add(allCharsDmgPct != null ? BuildDmgPctSparklineFromPctList(allCharsDmgPct) : null);
         }
         else
         {
-            // All acts: 2 rows.
-            // Row 1 (colored): this char, all acts — colored vs all-chars pool
             AppendDescriptorCell(sb, $"{charIcon}vs all {catPlural}");
             AppendRow1PoolDataCells(sb, poolBiome, allCharsPool);
+            sparklines.Add(poolBiomeDmgPct != null ? BuildDmgPctSparklineFromPctList(poolBiomeDmgPct) : null);
 
-            // Row 2 (neutral baseline): all characters, all acts
             AppendDescriptorCell(sb, $"{allCharsIcon}All vs all {catPlural} (baseline)");
             AppendPoolDataCells(sb, allCharsPool);
+            sparklines.Add(allCharsDmgPct != null ? BuildDmgPctSparklineFromPctList(allCharsDmgPct) : null);
         }
 
         sb.Append("[/table]");
@@ -996,7 +1140,7 @@ public static class EncounterTooltipHelper
         var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
-        return sb.ToString();
+        return new FocusedTableParts { Text = sb.ToString(), Sparklines = sparklines };
     }
 
     /// <summary>

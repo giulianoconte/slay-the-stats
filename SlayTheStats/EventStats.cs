@@ -117,10 +117,38 @@ public static class AncientEvents
 }
 
 /// <summary>
+/// Shape classification of an event's option set, derived at aggregation
+/// time from the recorded visits. Drives both how options are bucketed
+/// and how the tooltip renders them.
+/// </summary>
+public enum EventShape
+{
+    /// <summary>Fewer than 2 visits, or a single terminal key with stable
+    /// variables — can't distinguish Shape1 from Shape2. Default to
+    /// Shape1-style bucketing but note the uncertainty to the user.</summary>
+    Unknown,
+
+    /// <summary>≥2 distinct terminal option keys observed — the game
+    /// offers semantically distinct options each visit and run files
+    /// preserve which was picked. Pick% computed against TotalVisits is
+    /// meaningful. Most events land here.</summary>
+    Shape1_DistinctKeys,
+
+    /// <summary>All visits share the same terminal option key but one or
+    /// more variables vary — the game uses a single loc key for N options
+    /// with the distinction captured only in <c>variables</c> (e.g. Future
+    /// of Potions: every option is "POTION" with Rarity = Common/Uncommon/
+    /// Rare/Event). Run files never record options *offered*, only the one
+    /// picked. Bucket by terminal + BucketVariable; tooltip shows raw
+    /// Picks without a fraction and notes offered data is unavailable.</summary>
+    Shape2_VariableKey,
+}
+
+/// <summary>
 /// Read-time aggregate for one event under a filter. <see cref="Options"/>
-/// holds per-option breakdowns keyed by the terminal option name (e.g.
-/// "CLIMB", "FIGHT"). Totals sum across all matching visits regardless of
-/// option. Computed by <c>StatsAggregator.AggregateEvent</c>.
+/// holds per-option breakdowns; bucket key depends on <see cref="Shape"/>.
+/// Totals sum across all matching visits regardless of option. Computed by
+/// <c>StatsAggregator.AggregateEvent</c>.
 /// </summary>
 public class EventAggregate
 {
@@ -129,6 +157,36 @@ public class EventAggregate
     public int TotalWins;
     public double WinRate => TotalVisits > 0 ? (double)TotalWins / TotalVisits : 0.0;
     public Dictionary<string, EventOptionAggregate> Options = new();
+
+    /// <summary>Classification recomputed every aggregation — auto-corrects
+    /// as more visits land. Drives both bucketing and tooltip rendering.</summary>
+    public EventShape Shape = EventShape.Unknown;
+
+    /// <summary>For <see cref="EventShape.Shape2_VariableKey"/>: the
+    /// variable name whose value disambiguates otherwise-identical options.
+    /// Null for other shapes.</summary>
+    public string? BucketVariable;
+
+    /// <summary>
+    /// Bucket-key delimiter used to join terminal key + variable value when
+    /// <see cref="Shape"/> is Shape2. Pipe chosen because it doesn't occur
+    /// in event loc keys (dotted) or observed variable values (enum names
+    /// and id strings like <c>POTION.FIRE_POTION</c>).
+    /// </summary>
+    public const char BucketKeySep = '|';
+
+    /// <summary>
+    /// Composes the bucket key for a (terminal, variables) pair per the
+    /// aggregate's Shape. Shape2 appends the BucketVariable's value;
+    /// everything else returns the terminal unchanged.
+    /// </summary>
+    public string BuildBucketKey(string terminal, IReadOnlyDictionary<string, string>? variables)
+    {
+        if (Shape != EventShape.Shape2_VariableKey || BucketVariable == null) return terminal;
+        if (variables != null && variables.TryGetValue(BucketVariable, out var v) && !string.IsNullOrEmpty(v))
+            return terminal + BucketKeySep + v;
+        return terminal;
+    }
 }
 
 /// <summary>

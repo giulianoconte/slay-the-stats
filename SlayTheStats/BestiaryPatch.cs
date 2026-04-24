@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using System.Collections.Generic;
 
 namespace SlayTheStats;
 
@@ -946,6 +947,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         statsVbox.AddChild(_statsFooterLabel);
 
         MainFile.Logger.Info("[SlayTheStats] BuildUI stage: right panel (stats table + all-chars scroll) built");
+
+        // Sparkline POC — compares Unicode block characters vs a TextureRect
+        // bar-chart. Removed once a style is chosen; lives in the bestiary
+        // right pane so both renderings sit inside real game chrome and
+        // match the font / color environment we'd ship into.
+        if (SlayTheStatsConfig.DebugMode)
+            rightPanel.AddChild(SparklinePoc.BuildDebugPanel());
+
         rightPanel.AddChild(new HSeparator());
 
         // Clicks on the right-hand stats / preview area also release a locked row
@@ -3624,8 +3633,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (string.IsNullOrEmpty(catBiome) || catBiome == AllBiomeKey)
             catBiome = null;
 
-        string statsText;
-
         if (_sortCharacter != null)
         {
             // Focused single-character category view: biome pool → all pool → all chars
@@ -3656,13 +3663,27 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var biomeLabel = !string.IsNullOrEmpty(catBiome) ? FormatBiomeName(catBiome) : null;
             var charLabel = FormatCharacterLabel(_sortCharacter);
 
-            statsText = EncounterTooltipHelper.BuildCategoryStatsTextFocused(
+            // Pool Dmg% values for each row's sparkline. Dmg% is used
+            // (not raw damage) so cross-encounter pools have a single
+            // comparable axis — raw values would mix magnitudes across
+            // encounters within a category.
+            var poolBiomeDmgPct  = StatsAggregator.CollectDmgPctValues(MainFile.Db, charFilter, category, catBiome);
+            var poolAllDmgPct    = StatsAggregator.CollectDmgPctValues(MainFile.Db, charFilter, category);
+            var allCharsPoolDmgPct = !string.IsNullOrEmpty(catBiome)
+                ? StatsAggregator.CollectDmgPctValues(MainFile.Db, filter, category, catBiome)
+                : StatsAggregator.CollectDmgPctValues(MainFile.Db, filter, category);
+
+            var catFocusedParts = EncounterTooltipHelper.BuildCategoryStatsTextFocused(
                 poolBiome, poolAll, allCharsPool,
                 _sortCharacter, biomeLabel, categoryLabel, filter,
-                category);
+                category,
+                poolBiomeDmgPct, poolAllDmgPct, allCharsPoolDmgPct);
 
             var scopePrefix = biomeLabel ?? "All";
             SetStatsTitle($"{scopePrefix} {categoryLabel} Encounter Stats");
+            ShowSingleLabelStats(catFocusedParts);
+            ClearMonsterPreview();
+            return;
         }
         else
         {
@@ -3701,11 +3722,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             ClearMonsterPreview();
             return;
         }
-
-        ShowSingleLabelStats(statsText);
-
-        // Clear the monster preview area when hovering a category (no specific monsters to show)
-        ClearMonsterPreview();
     }
 
     private void OnEncounterUnhover()
@@ -3846,8 +3862,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var categoryLabel = category != null ? EncounterCategory.FormatCategory(category) : "";
         var encounterName = EncounterCategory.FormatName(encounterId);
 
-        string statsText;
-
         if (_sortCharacter != null)
         {
             // Focused single-character view: section-based layout
@@ -3888,13 +3902,24 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var charLabel = FormatCharacterLabel(_sortCharacter);
             var actLabel = encAct > 0 ? $"Act {encAct}" : null;
 
-            statsText = EncounterTooltipHelper.BuildEncounterStatsTextFocused(
+            // Pool-row Dmg% values for sparklines. Each row plots a
+            // separate distribution; encounters for the char are
+            // char-filtered, the "all chars vs encounter" row pools
+            // across characters for this encounter only.
+            var poolActDmgPct = encAct > 0
+                ? StatsAggregator.CollectDmgPctValues(MainFile.Db, charFilter, category, $"act:{encAct}")
+                : null;
+            var poolAllDmgPct  = StatsAggregator.CollectDmgPctValues(MainFile.Db, charFilter, category);
+            var allCharsDmgPct = StatsAggregator.CollectDmgPctValuesForEncounter(MainFile.Db, encounterId, filter);
+
+            var encFocusedParts = EncounterTooltipHelper.BuildEncounterStatsTextFocused(
                 encounterStat, poolAct, poolAll, allCharsMetrics,
                 encounterName, _sortCharacter, actLabel, categoryLabel, filter,
-                category);
+                category,
+                poolActDmgPct, poolAllDmgPct, allCharsDmgPct);
 
             SetStatsTitle($"{encounterName} Stats");
-            ShowSingleLabelStats(statsText);
+            ShowSingleLabelStats(encFocusedParts);
             return;
         }
         else
@@ -3923,9 +3948,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
             return;
         }
-
-        SetStatsTitle($"{EncounterCategory.FormatName(encounterId)} Stats");
-        ShowSingleLabelStats(statsText);
     }
 
     /// <summary>
@@ -3979,7 +4001,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_statsBaselineMarginContainer != null) _statsBaselineMarginContainer.Visible = false;
         if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = false;
 
-        if (_statsCharRowsLabel != null) _statsCharRowsLabel.Text = parts.CharacterRows;
+        if (_statsCharRowsLabel != null)
+        {
+            SparklinePoc.PopulateLabelWithSparklines(
+                _statsCharRowsLabel, parts.CharacterRows,
+                parts.Sparklines ?? new List<ImageTexture?>(),
+                50, 22);
+        }
         if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = true;
         if (_statsFooterLabel != null)
         {
@@ -4035,6 +4063,26 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private void ShowSingleLabelStats(string text)
     {
         if (_statsLabel != null) { _statsLabel.Text = text; _statsLabel.Visible = true; }
+        if (_statsLabelMargin != null) _statsLabelMargin.Visible = true;
+        if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = false;
+        if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = false;
+        if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = false;
+        if (_statsScrollBottomSep != null) _statsScrollBottomSep.Visible = false;
+        if (_statsBaselineMarginContainer != null) _statsBaselineMarginContainer.Visible = false;
+        if (_statsFooterLabel != null) _statsFooterLabel.Visible = false;
+    }
+
+    /// <summary>Focused-view table population: same visibility dance as
+    /// <see cref="ShowSingleLabelStats(string)"/> but routes the BBCode
+    /// through <see cref="SparklinePoc.PopulateLabelWithSparklines"/> so
+    /// the sparkline markers resolve to inline images.</summary>
+    private void ShowSingleLabelStats(EncounterTooltipHelper.FocusedTableParts parts)
+    {
+        if (_statsLabel != null)
+        {
+            SparklinePoc.PopulateLabelWithSparklines(_statsLabel, parts.Text, parts.Sparklines, 50, 22);
+            _statsLabel.Visible = true;
+        }
         if (_statsLabelMargin != null) _statsLabelMargin.Visible = true;
         if (_statsHeaderMarginContainer != null) _statsHeaderMarginContainer.Visible = false;
         if (_statsScrollTopSep != null) _statsScrollTopSep.Visible = false;
@@ -5223,76 +5271,15 @@ internal static class EncounterSorting
         if (raw == "—" || mode == EncounterSortMode.Name || mode == EncounterSortMode.Seen)
             return raw;
 
-        var score = Score(encounterId, mode, filter, sortCharacter, biome: biome);
-        if (score == null) return raw;
+        // Drive color directly from the same z-score the significance sort uses.
+        // When the user sorts by significance, color intensity is guaranteed monotonic
+        // with sort rank — no neutral cell can appear ranked between two colored cells
+        // of the same direction. When the user sorts by raw value, color still reads
+        // as "how far from category baseline" and is consistent across rows.
+        var z = Score(encounterId, mode, filter, sortCharacter, bySignificance: true, biome: biome);
+        if (z == null || double.IsNaN(z.Value)) return raw;
 
-        // Need the encounter's fought count for the n weighting in significance.
-        if (!MainFile.Db.Encounters.TryGetValue(encounterId, out var contextMap)) return raw;
-        var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
-        int fought = 0;
-        if (sortCharacter != null)
-        {
-            if (perChar.TryGetValue(sortCharacter, out var s)) fought = s.Fought;
-        }
-        else
-        {
-            foreach (var s in perChar.Values) fought += s.Fought;
-        }
-        if (fought == 0) return raw;
-
-        string? category = null;
-        if (MainFile.Db.EncounterMeta.TryGetValue(encounterId, out var meta))
-            category = meta.Category;
-
-        // Pick the matching baseline per mode using encounter-weighted pool metrics
-        // so coloration matches the display code's aggregation approach.
-        var pool = StatsAggregator.AggregateEncounterPoolWeighted(MainFile.Db, filter, category, biome);
-        double value, baseline;
-        bool useLog = false;
-        switch (mode)
-        {
-            case EncounterSortMode.MedianDamage:
-                value = score.Value;
-                baseline = pool.Median;
-                break;
-            case EncounterSortMode.DeathRate:
-                // Score returns died/fought (fraction); pool.DeathRate is 0–100.
-                value = score.Value * 100.0;
-                baseline = pool.DeathRate;
-                break;
-            case EncounterSortMode.Spread:
-                // Score already returns IQRC (ratio); pool.Iqrc is the baseline IQRC.
-                // Use log-space coloration so 4× and 1/4× color symmetrically, matching
-                // the Spread column's FormatSpreadCell in the stats table.
-                value = score.Value;
-                baseline = pool.Iqrc;
-                useLog = true;
-                break;
-            case EncounterSortMode.Turns:
-                value = score.Value;
-                baseline = pool.AvgTurns;
-                break;
-            default:
-                return raw;
-        }
-        if (baseline <= 0) return raw;
-
-        double pct;
-        if (useLog)
-        {
-            // Same formula as EncounterTooltipHelper.ColBadLog with scale=20.
-            double ratio = Math.Max(value, 1e-6) / baseline;
-            pct = 100.0 + Math.Log(ratio) * 20.0;
-        }
-        else
-        {
-            pct = value / baseline * 100.0;
-        }
-        // ColBad direction (high = bad): swap the deviation around the baseline before
-        // handing to ColWR (which uses high = good). Skip the ≤3-runs neutralizer so
-        // the encounter-list color gradient stays monotonic with the significance sort.
-        return TooltipHelper.ColWR(raw, 100.0 + (100.0 - pct), fought, 100.0,
-            skipSmallSampleFilter: true);
+        return TooltipHelper.ColByZScoreInverted(raw, z.Value);
     }
 }
 
