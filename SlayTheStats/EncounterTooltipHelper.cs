@@ -193,7 +193,7 @@ public static class EncounterTooltipHelper
         // across the characters that had data. Gives a cross-character
         // density for this encounter alongside the baseline numbers.
         var allIcon = AllCharsIcon(22);
-        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}{L.T("tooltip.row.all")}[/b] {L.T("descriptor.baseline_suffix")}", parts: AllCharsDescriptorParts);
+        AppendDescriptorCell(body, $"{allIcon}{KreonBoldFontTag}{TooltipHelper.TotalLabel()}[/b] {L.T("descriptor.baseline_suffix")}", parts: AllCharsDescriptorParts);
         if (perCharMetrics.Count > 0)
         {
             AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
@@ -1074,7 +1074,10 @@ public static class EncounterTooltipHelper
         var focusedSparklineValues = new List<double[]?>();
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
-        var catLower = categoryLabel.ToLowerInvariant();
+        // Canonical English id for category.*.plural key lookup — categoryLabel
+        // is the localized display name (e.g. "Обычный") and lowercasing it
+        // produces a Russian/CJK key that won't resolve.
+        var catLower = (category ?? categoryLabel).ToLowerInvariant();
         var encColor = category != null ? EncounterIcons.CategoryColorHex(category) : null;
         var encNameRow1 = encColor != null
             ? $"{KreonBoldFontTag}[color={encColor}]{encounterName}[/color][/b]"
@@ -1166,7 +1169,9 @@ public static class EncounterTooltipHelper
         var sparklineValues = new List<double[]?>();
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
-        var catLower = categoryLabel.ToLowerInvariant();
+        // Canonical English id for category.*.plural key lookup — see note in
+        // BuildEncounterStatsTextFocused.
+        var catLower = (category ?? categoryLabel).ToLowerInvariant();
         var catColor = category != null ? EncounterIcons.CategoryColorHex(category) : null;
 
         sb.Append("[table=9]");
@@ -1382,8 +1387,6 @@ public static class EncounterTooltipHelper
             ? CardHoverShowPatch.GetCharacterDisplay(character)
             : L.T("filter.all_characters");
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
-        // Category still renders English/game-casing; will localize when
-        // FormatCategory migrates as part of the bestiary phase-3 surface.
         var categoryLower = categoryLabel.ToLowerInvariant();
         var baselineLine = stat.Fought > 0
             ? L.T("tooltip.baseline.encounter",        ("category", categoryLower), ("dmg", baselineDmgAbs), ("spread", $"{spreadBase * 100:F0}"))

@@ -257,7 +257,7 @@ internal static class RelicHoverHelper
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";
         var cTotRuns   = TooltipHelper.ColN($"{totPresent}", totPresent);
         var cTotWr     = totWrPct >= 0 ? TooltipHelper.ColWR(totWr, totWrPct, totPresent, wrBaseline) : $"[color={TooltipHelper.NeutralShade}]-[/color]";
-        sb.Append(TooltipHelper.DataCell(L.T("tooltip.row.all"), TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.DataCell(TooltipHelper.TotalLabel(), TooltipHelper.ColPadOuter));
         sb.Append(TooltipHelper.DataCell(cTotRuns, TooltipHelper.ColPadInner));
         sb.Append(CardHoverShowPatch.FormatBuysFractionCell(totShopBought, totShopSeen, totShopPct, shopBuyRateBaseline, TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.DataCell(cTotWr, TooltipHelper.ColPadLast));

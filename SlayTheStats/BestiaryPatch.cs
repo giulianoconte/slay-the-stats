@@ -766,7 +766,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         tableStyleHeader.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         rightPanel.AddChild(tableStyleHeader);
 
-        var tableStyleLabel = new Label { Text = "Table Type" };
+        var tableStyleLabel = new Label { Text = L.T("bestiary.table_type.label") };
         tableStyleLabel.AddThemeColorOverride("font_color", Color.FromHtml(ThemeStyle.HeaderGrey));
         tableStyleLabel.AddThemeFontSizeOverride("font_size", 16);
         ApplyKreonFont(tableStyleLabel, bold: true);
@@ -1922,29 +1922,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // characters comparison vs. per-character focused view) and the Dmg
         // encoding each uses. Replaces the standalone footer note from the
         // prior single-section layout.
-        // TODO(localization): copy still hardcoded in English. The 2-section
-        // layout landed after phase-3 migration, so bestiary.legend.title/body
-        // keys in settings_ui.json match the old 1-section copy.
-        vbox.AddChild(MakeSectionTitle("Table type"));
-        vbox.AddChild(MakeSectionBody(string.Join('\n', new[]
-        {
-            prismaticIcon + " — compare all characters for this encounter. Damage represents percentage of starting max HP.",
-            charIcons + " etc — see how this encounter compares to others for this character. Damage represents raw damage taken.",
-        })));
+        vbox.AddChild(MakeSectionTitle(L.T("bestiary.legend.table_type.title")));
+        vbox.AddChild(MakeSectionBody(L.T("bestiary.legend.table_type.body",
+            ("prismatic_icon", prismaticIcon),
+            ("char_icons", charIcons))));
 
         // Section 2: Stat columns — per-column definitions.
-        vbox.AddChild(MakeSectionTitle("Stat columns"));
-        vbox.AddChild(MakeSectionBody(string.Join('\n', new[]
-        {
-            "[b][color=#efc851]Dmg[/color][/b] — median damage taken.",
-            "[b][color=#efc851]Mid 50%[/color][/b] — the damage range a typical fight lands in. A quarter of your fights took less than the lower number, half landed inside the range, a quarter took more than the upper number. (Shown as p25-p75; a.k.a. the IQR.)",
-            "[b][color=#efc851]Spread[/color][/b] — how much variance the encounter damage has. Higher spread means there are more instances of extreme highs or lows in that fight. A Spread of 100% means the Mid 50% range is as wide as the median damage.",
-            "[b][color=#efc851]Turns[/color][/b] — average turns.",
-            "[b][color=#efc851]Pots[/color][/b] — average potions.",
-            "[b][color=#efc851]Deaths[/color][/b] — runs ended by this encounter / total runs.",
-            "",
-            "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
-        })));
+        vbox.AddChild(MakeSectionTitle(L.T("bestiary.legend.stat_columns.title")));
+        vbox.AddChild(MakeSectionBody(L.T("bestiary.legend.stat_columns.body")));
 
         // Wrap the popup in a CanvasLayer + full-screen click-catcher so clicking
         // anywhere outside the popup dismisses it.
@@ -3623,7 +3608,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var categoryLabel = EncounterCategory.FormatCategory(category);
 
         // Scope the category aggregation to whatever the user has filtered the encounter
-        // list to: a specific biome ("BIOME.OVERGROWTH"), a synthetic act key ("act:1"
+        // list to: a specific biome ("ACT.OVERGROWTH"), a synthetic act key ("act:1"
         // → MatchesBiome filters by act), or all encounters (null when "all:" or unset).
         // Previously this read firstMeta.Biome, which collapsed an "Act 1" view down to
         // whichever biome happened to come first in the encounter list — making the act
@@ -4965,7 +4950,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var label = new Label
         {
             Name                = "MonsterPreviewWip",
-            Text                = "Preview WIP",
+            Text                = L.T("bestiary.placeholder.preview_wip"),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment   = VerticalAlignment.Center,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
@@ -5070,27 +5055,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (biome.StartsWith(ActPrefix) && int.TryParse(biome[ActPrefix.Length..], out var act))
             return L.T("bestiary.biome.act", ("act", act));
 
-        // Specific biome keys ("BIOME.OVERGROWTH" → "Overgrowth"). Phase 4
-        // will resolve these via the game's own biome / encounter loc table;
-        // until then, fall back to title-cased entry.
-        var dotIdx = biome.IndexOf('.');
-        var name = dotIdx >= 0 ? biome[(dotIdx + 1)..] : biome;
-        if (name.Length == 0) return biome;
-        return char.ToUpper(name[0]) + name[1..].ToLower().Replace('_', ' ');
+        // Specific biome keys (e.g. "ACT.OVERGROWTH" — see RunParser where
+        // biomes are read from the save's "acts" array). Resolves via the
+        // game's own acts loc table so new first-party acts pick up their
+        // localized map-screen titles automatically.
+        return L.BiomeName(biome);
     }
 
-    private static string FormatMonsterName(string monsterId)
-    {
-        var dotIdx = monsterId.IndexOf('.');
-        var name = dotIdx >= 0 ? monsterId[(dotIdx + 1)..] : monsterId;
-        var words = name.Split('_', StringSplitOptions.RemoveEmptyEntries);
-        for (int i = 0; i < words.Length; i++)
-        {
-            if (words[i].Length > 0)
-                words[i] = char.ToUpper(words[i][0]) + words[i][1..].ToLower();
-        }
-        return string.Join(' ', words);
-    }
+    private static string FormatMonsterName(string monsterId) => L.MonsterName(monsterId);
 }
 
 // ─────────────────────────────────────────────────────────────────────

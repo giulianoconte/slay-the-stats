@@ -35,11 +35,30 @@ internal static class TooltipHelper
 
     private static bool           _headerStyleApplied;
     private static bool           _tableStyleApplied;
+    // Language each style was applied against. Font size + font references are
+    // baked into theme overrides at application time, so if the first tooltip
+    // show happens before LocManager is ready (lang=null), the applied values
+    // are wrong for the player's actual locale. Re-applying only on explicit
+    // locale change (via OnLocaleChanged) doesn't help because boot-in-rus
+    // isn't a "change" — the game just starts there. Tracking per-style lang
+    // and re-applying when it differs from current handles both cases.
+    private static string?        _headerStyleAppliedLang;
+    private static string?        _tableStyleAppliedLang;
     private static StyleBox?      _stolenPanelStyle;
     private static Control?       _panel;
     private static NinePatchRect? _shadow;
     private static bool           _followerInjected;
     private static bool           _localeSubscribed;
+    // Language each cached font was built against. Initialized to a sentinel so
+    // the first real access always rebuilds — the static Fonts initializer runs
+    // before LocManager.Instance is ready, so it builds plain Kreon (no
+    // substitute). Without this check we'd keep that stale build until the
+    // first locale change fires OnLocaleChanged. Tracked separately per font
+    // because callers touch normal and bold independently and we don't want one
+    // accessor's rebuild to mark the other's stale cache as fresh.
+    private const  string         UninitLang = "<uninitialized>";
+    private static string?        _normalFontLang = UninitLang;
+    private static string?        _boldFontLang   = UninitLang;
 
     // Godot disposes FontVariation resources on scene transitions (main menu ↔
     // in-run); the log shows `Asset not cached: kreon_*_glyph_space_one.tres`
@@ -49,28 +68,38 @@ internal static class TooltipHelper
     // event tooltip. All font access MUST route through these accessors so
     // disposed refs are re-resolved from the resource path before use.
     //
-    // The returned font is locale-aware: for CJK languages (zhs/jpn/kor/tha)
-    // and the game's legacy Cyrillic set (rus/pol), Kreon lacks glyph coverage,
-    // so we wrap the base Kreon font in a FontVariation whose Fallbacks chain
-    // points at the game's own locale-substitute font (via FontManager). Latin
-    // text still renders in Kreon; codepoints Kreon can't draw fall through to
-    // the substitute. On locale change (LocString.SubscribeToLocaleChange fires)
-    // the cached FontVariation is invalidated so the next accessor call rebuilds
-    // with the new locale's substitute.
+    // The returned font is locale-aware: for locales with a FontPathSet
+    // (jpn/kor/pol/rus/tha/zhs) we return the game's substitute directly,
+    // matching FontControlUtils.ApplyLocaleFontSubstitution. A prior approach
+    // wrapped Kreon in a FontVariation with the substitute as fallback, but
+    // that only rescues codepoints Kreon can't draw — Kreon has full Cyrillic
+    // coverage, so rus/pol text rendered in wide Latin-style Kreon instead of
+    // the condensed Fira Sans the game uses on cards. Swapping the font
+    // entirely keeps our tooltip consistent with native card/keyword tooltips.
+    // On locale change (LocString.SubscribeToLocaleChange fires) the cached
+    // font is invalidated so the next accessor rebuilds against the new locale.
     internal static Font? GetKreonFont()
     {
-        if (Fonts.Normal == null || !GodotObject.IsInstanceValid(Fonts.Normal))
+        var lang = LocManager.Instance?.Language;
+        if (Fonts.Normal == null
+            || !GodotObject.IsInstanceValid(Fonts.Normal)
+            || _normalFontLang != lang)
         {
             Fonts.Normal = BuildLocaleAwareKreon(KreonRegularPath, FontType.Regular);
+            _normalFontLang = lang;
             InvalidateStyles();
         }
         return Fonts.Normal;
     }
     internal static Font? GetKreonBoldFont()
     {
-        if (Fonts.Bold == null || !GodotObject.IsInstanceValid(Fonts.Bold))
+        var lang = LocManager.Instance?.Language;
+        if (Fonts.Bold == null
+            || !GodotObject.IsInstanceValid(Fonts.Bold)
+            || _boldFontLang != lang)
         {
             Fonts.Bold = BuildLocaleAwareKreon(KreonBoldPath, FontType.Bold);
+            _boldFontLang = lang;
             InvalidateStyles();
         }
         return Fonts.Bold;
@@ -79,18 +108,13 @@ internal static class TooltipHelper
 
     private static Font? BuildLocaleAwareKreon(string kreonPath, FontType type)
     {
-        var kreon = ResourceLoader.Load<Font>(kreonPath);
-        if (kreon == null) return null;
-
         var lang = LocManager.Instance?.Language;
-        if (lang == null || !FontManager.NeedsFontSubstitution(lang)) return kreon;
-
-        var substitute = FontManager.GetSubstituteFont(lang, type);
-        if (substitute == null) return kreon;
-
-        var fv = new FontVariation { BaseFont = kreon };
-        fv.Fallbacks = new Godot.Collections.Array<Font> { substitute };
-        return fv;
+        if (lang != null && FontManager.NeedsFontSubstitution(lang))
+        {
+            var substitute = FontManager.GetSubstituteFont(lang, type);
+            if (substitute != null) return substitute;
+        }
+        return ResourceLoader.Load<Font>(kreonPath);
     }
 
     /// <summary>Called once from <see cref="MainFile.Initialize"/> (after
@@ -133,6 +157,35 @@ internal static class TooltipHelper
     internal const float TooltipWidth  = 348f;
     internal const float EncounterTooltipWidth = 640f;
     internal const float ShadowOffset  = 8f;
+
+    // Table font size for card/relic/event tooltips — dropped for substitution
+    // locales (rus/pol + CJK) on top of the condensed/substitute font because
+    // fixed-width tooltip + `expand=1` cells + wider-per-character Cyrillic
+    // headers leave data values floating in over-wide columns. Smaller font
+    // lets the same data fit the same tooltip with proportionally tighter gaps.
+    internal static int TableFontSize
+    {
+        get
+        {
+            var lang = LocManager.Instance?.Language;
+            return lang != null && FontManager.NeedsFontSubstitution(lang) ? 17 : 20;
+        }
+    }
+
+    /// <summary>Renders the <c>tooltip.row.all</c> label ("Total" row in card/
+    /// relic tables, baseline row in the all-chars bestiary view) at a smaller
+    /// font for substitution locales. The Russian translation <c>"Всего"</c>
+    /// and equivalents run wider than English <c>"All"</c> and push the rest
+    /// of the row; dropping 2pt here pulls the label back in line without
+    /// affecting data-cell widths.</summary>
+    internal static string TotalLabel()
+    {
+        var label = L.T("tooltip.row.all");
+        var lang = LocManager.Instance?.Language;
+        if (lang != null && FontManager.NeedsFontSubstitution(lang))
+            return $"[font_size=14]{label}[/font_size]";
+        return label;
+    }
 
     internal static bool FontStealConnected;
     internal static bool HasActiveHover;
@@ -273,9 +326,20 @@ internal static class TooltipHelper
         var table      = panel.GetNodeOrNull<RichTextLabel>("VBoxContainer/StatsLabel");
         if (titleLabel == null || brandLabel == null || table == null) return;
 
+        var currentLang = LocManager.Instance?.Language;
         bool firstStyle = !_headerStyleApplied;
-        if (!_headerStyleApplied) { ApplyHeaderLabelStyles(titleLabel, brandLabel); _headerStyleApplied = true; }
-        if (!_tableStyleApplied)  { ApplyTableStyle(table); _tableStyleApplied  = true; }
+        if (!_headerStyleApplied || _headerStyleAppliedLang != currentLang)
+        {
+            ApplyHeaderLabelStyles(titleLabel, brandLabel);
+            _headerStyleApplied = true;
+            _headerStyleAppliedLang = currentLang;
+        }
+        if (!_tableStyleApplied || _tableStyleAppliedLang != currentLang)
+        {
+            ApplyTableStyle(table);
+            _tableStyleApplied = true;
+            _tableStyleAppliedLang = currentLang;
+        }
 
         if (_stolenPanelStyle == null) _stolenPanelStyle = BuildPanelStyle();
         panel.AddThemeStyleboxOverride("panel", _stolenPanelStyle);
@@ -607,12 +671,13 @@ internal static class TooltipHelper
         var normalFont = GetKreonFont();
         var boldFont = GetKreonBoldFont();
         if (normalFont != null) label.AddThemeFontOverride("normal_font", normalFont);
+        var size = TableFontSize;
         if (boldFont != null)
         {
             label.AddThemeFontOverride("bold_font", boldFont);
-            label.AddThemeFontSizeOverride("bold_font_size", 20);
+            label.AddThemeFontSizeOverride("bold_font_size", size);
         }
-        label.AddThemeFontSizeOverride("normal_font_size", 20);
+        label.AddThemeFontSizeOverride("normal_font_size", size);
         label.AddThemeColorOverride("font_shadow_color", Fonts.Shadow);
         label.AddThemeConstantOverride("shadow_offset_x", Fonts.ShadowX);
         label.AddThemeConstantOverride("shadow_offset_y", Fonts.ShadowY);

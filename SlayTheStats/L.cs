@@ -103,4 +103,68 @@ public static class L
         }
         return fallback;
     }
+
+    /// <summary>Resolves an act/biome id (<c>"ACT.OVERGROWTH"</c> or bare
+    /// <c>"OVERGROWTH"</c>) to its localized display name via the game's
+    /// <c>"acts"</c> loc table — same source the map screen uses — so new
+    /// first-party acts localize automatically. Missing entries in the active
+    /// locale fall through to English via <see cref="LocTable"/>'s built-in
+    /// fallback chain; entries missing everywhere (modded acts without
+    /// loc entries, pre-LocManager call) fall back to a title-cased
+    /// derivation of the entry.</summary>
+    public static string BiomeName(string biomeIdOrEntry)
+    {
+        if (string.IsNullOrEmpty(biomeIdOrEntry)) return biomeIdOrEntry;
+        var dotIdx = biomeIdOrEntry.IndexOf('.');
+        var entry = dotIdx >= 0 ? biomeIdOrEntry[(dotIdx + 1)..] : biomeIdOrEntry;
+        if (entry.Length == 0) return biomeIdOrEntry;
+        try
+        {
+            var table = LocManager.Instance?.GetTable("acts");
+            var key = entry + ".title";
+            if (table != null && table.HasEntry(key))
+                return table.GetRawText(key);
+        }
+        catch (Exception e)
+        {
+            if (_warnedMissing.Add("biome:" + biomeIdOrEntry))
+                MainFile.Logger.Warn($"[L] BiomeName lookup failed for '{biomeIdOrEntry}': {e.Message}");
+        }
+        return char.ToUpper(entry[0]) + entry[1..].ToLowerInvariant().Replace('_', ' ');
+    }
+
+    /// <summary>Resolves a monster id (<c>"MONSTER.SLIMES"</c> or bare
+    /// <c>"SLIMES"</c>) to its localized display name via the game's
+    /// <c>"monsters"</c> loc table (key pattern <c>&lt;entry&gt;.name</c>, per
+    /// <c>MonsterModel.Title</c>). Missing entries in the active locale fall
+    /// through to English via <see cref="LocTable"/>'s fallback chain; entries
+    /// missing everywhere (modded or removed monsters) fall back to a
+    /// word-by-word title-cased derivation, so <c>"SPIKED_BLOCKER"</c> reads
+    /// as <c>"Spiked Blocker"</c>.</summary>
+    public static string MonsterName(string monsterIdOrEntry)
+    {
+        if (string.IsNullOrEmpty(monsterIdOrEntry)) return monsterIdOrEntry;
+        var dotIdx = monsterIdOrEntry.IndexOf('.');
+        var entry = dotIdx >= 0 ? monsterIdOrEntry[(dotIdx + 1)..] : monsterIdOrEntry;
+        if (entry.Length == 0) return monsterIdOrEntry;
+        try
+        {
+            var table = LocManager.Instance?.GetTable("monsters");
+            var key = entry + ".name";
+            if (table != null && table.HasEntry(key))
+                return table.GetRawText(key);
+        }
+        catch (Exception e)
+        {
+            if (_warnedMissing.Add("monster:" + monsterIdOrEntry))
+                MainFile.Logger.Warn($"[L] MonsterName lookup failed for '{monsterIdOrEntry}': {e.Message}");
+        }
+        var words = entry.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < words.Length; i++)
+        {
+            if (words[i].Length > 0)
+                words[i] = char.ToUpper(words[i][0]) + words[i][1..].ToLowerInvariant();
+        }
+        return string.Join(' ', words);
+    }
 }
