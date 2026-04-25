@@ -112,7 +112,7 @@ A: The mod cannot find your run history to populate data. In this case you'll ne
 
 Q: I lost my save data after installing.
 
-A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress. There are ways to transfer save data over to a modded profile. See the sts2-modding channel in the SlayTheSpire discord for how to do this. You can also use the mod UnifiedSavePath.
+A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress. There are ways to transfer save data over to a modded profile -- see TRANSFERRING A VANILLA PROFILE TO A MODDED PROFILE below. You can also use the mod UnifiedSavePath.
 
 ------------------------------------------------------------------------
 TROUBLESHOOTING
