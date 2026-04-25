@@ -6,10 +6,14 @@ namespace SlayTheStats;
 // Sparkline rendering proof-of-concept.
 //
 // Texture-based sparkline: a 1px polyline connecting the series values,
-// colored point-by-point on a green→yellow→red gradient (high = red) so
-// the peaks draw the eye. A translucent IQR band and a median line sit
-// behind the polyline to give a quick "where does this fight fall in
-// the distribution" read without numerical annotation.
+// colored point-by-point on a green→yellow→red gradient along the X
+// axis (left = low/good, right = high/bad). When all sparklines in a
+// table share an explicit XRange, pixel x maps to the same data x in
+// every row, so the color at any column reflects a fixed dmg% — letting
+// the eye compare the position of distributions across rows. A
+// translucent IQR band and a median line sit behind the polyline to
+// give a quick "where does this fight fall in the distribution" read
+// without numerical annotation.
 //
 // Colorblind notes: the green↔red pair isn't ideal for red-green
 // deficiencies, but stepping through yellow at the midpoint gives the
@@ -74,6 +78,18 @@ internal static class SparklinePoc
     private static readonly Color GradMid  = new Color(0.70f, 0.68f, 0.62f, 1f); // warm gray (same — flat low half)
     private static readonly Color GradHigh = new Color(0.86f, 0.28f, 0.20f, 1f); // red
 
+    // When true, the polyline draws in a single flat color (FlatCurveColor)
+    // and the gradient is bypassed — useful for evaluating whether the
+    // distribution shape alone reads well without color carrying meaning.
+    // Flip to false to restore the warm-grey→red x-axis ramp. Kept as
+    // static readonly (not const) so the gradient branch stays reachable
+    // and the compiler doesn't dead-code it (CS0162).
+    private static readonly bool UseFlatCurveColor = true;
+    // Matches ContextRowDataColor (#686868) used by non-significance row text
+    // so the curve sits at the same visual weight as the surrounding numeric
+    // data on context rows.
+    private static readonly Color FlatCurveColor = new Color(0.408f, 0.408f, 0.408f, 1f);
+
     // Percentile marker styling. Warm neutral fill with a dark
     // outline — same palette across all three marker variants so
     // only the glyph shape changes between them.
@@ -82,9 +98,17 @@ internal static class SparklinePoc
     private const float PercentileDotRadius                 = 2.0f;
     private const float PercentileMedianExtraRadius         = 0.6f;
 
-    // Shaded IQR + median rule variant.
+    // Shaded IQR + median rule variant. Median rule uses a cool steel-blue
+    // so it stays distinct from the warm-grey curve and the warm-cream IQR
+    // band — important on bumpy curves where the rule's tip would otherwise
+    // blend into a peak's color.
     private static readonly Color IqrFillColor        = new Color(0.95f, 0.92f, 0.82f, 0.12f);
-    private static readonly Color MedianRuleColor     = new Color(0.95f, 0.92f, 0.82f, 0.75f);
+    private static readonly Color MedianRuleColor     = new Color(0.55f, 0.78f, 0.95f, 0.85f);
+    // Pixel gap between the median rule's top and the curve at median x.
+    // Without it, the rule appears to merge into the curve in bimodal
+    // distributions where the median sits in the valley between two peaks
+    // (the rule terminates exactly on the curve, reading as one shape).
+    private const float MedianRuleGapPx               = 2.0f;
     private const float MedianRuleWidth               = 1.2f;
 
     // Stem variant.
@@ -143,9 +167,31 @@ internal static class SparklinePoc
             {
                 var tex = i < sparklines.Count ? sparklines[i] : null;
                 if (tex != null)
+                {
+                    MaybeLogSparklineSize(tex, sparkW, sparkH);
                     label.AddImage(tex, sparkW, sparkH);
+                }
             }
         }
+    }
+
+    // Tracks the last-logged (tex_w, tex_h, disp_w, disp_h) tuple so we
+    // emit one line per distinct size-pair rather than per row. Debug-
+    // only: flags when AddImage's display size drifts from the texture's
+    // native size (which is what causes Godot to scale + blur/alias the
+    // sparkline and what sets the column's min-content width floor).
+    private static (int, int, int, int)? _lastLoggedSparklineSize;
+
+    private static void MaybeLogSparklineSize(ImageTexture tex, int displayW, int displayH)
+    {
+        if (BuildInfo.IsRelease || !SlayTheStatsConfig.DebugMode) return;
+        int texW = tex.GetWidth();
+        int texH = tex.GetHeight();
+        var key = (texW, texH, displayW, displayH);
+        if (_lastLoggedSparklineSize == key) return;
+        _lastLoggedSparklineSize = key;
+        var tag = (texW == displayW && texH == displayH) ? "ok" : "MISMATCH (will scale)";
+        MainFile.Logger.Info($"[SlayTheStats] Sparkline size: texture={texW}x{texH} display={displayW}x{displayH} [{tag}]");
     }
 
     // Eight discrete bar heights from Unicode's block elements range
@@ -191,22 +237,33 @@ internal static class SparklinePoc
     /// <c>RichTextLabel.AddImage(tex, w, h)</c> the sparkline into a
     /// BBCode cell — no Control wrapping required.
     /// </summary>
+    /// <summary>Optional explicit x-domain. When supplied, the curve is plotted
+    /// against this range instead of the data's natural <c>min/max ± bandwidth</c>.
+    /// All sparklines in the same table should share a single range so the
+    /// horizontal color gradient (green→red along x) maps to the same data
+    /// values across rows — letting the eye compare e.g. dmg% positions at a
+    /// glance. Pass <c>null</c> for legacy per-row auto-fit (peak-driven y
+    /// gradient still applies but x is unanchored).</summary>
+    internal readonly record struct XRange(double Lo, double Hi);
+
     internal static ImageTexture BuildSparklineTexture(
         IReadOnlyList<double> values,
         Vector2I size,
-        MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule)
+        MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule,
+        XRange? explicitRange = null)
     {
-        return ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle));
+        return ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle, explicitRange));
     }
 
     internal static TextureRect BuildTextureSparkline(
         IReadOnlyList<double> values,
         Vector2I size,
-        MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule)
+        MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule,
+        XRange? explicitRange = null)
     {
         int w = System.Math.Max(size.X, 1);
         int h = System.Math.Max(size.Y, 1);
-        var texture = ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle));
+        var texture = ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle, explicitRange));
         return new TextureRect
         {
             Texture = texture,
@@ -215,10 +272,51 @@ internal static class SparklinePoc
         };
     }
 
+    // Percentile cutoffs for the shared-range computation. Asymmetric: pLow=0
+    // because dmg% has a natural floor (0 — no damage taken) so the actual
+    // min is never far from zero, no point clipping it. pHigh=0.95 keeps
+    // single-fight outliers at the high end (e.g. one disastrous near-death
+    // at 200% dmg) from stretching the global frame and squashing every
+    // other row's curve. Values outside the cutoffs still get plotted — the
+    // curve at those positions just sits beyond the rendered texture's edges
+    // and is clipped. Tighten pHigh (e.g. 0.90) if outliers still dominate;
+    // widen (1.0) to disable upper clipping.
+    private const double SharedRangePLow  = 0.0;
+    private const double SharedRangePHigh = 0.95;
+
+    /// <summary>Computes a global x-range across multiple value series for use
+    /// as <see cref="XRange"/>. Pools all values, sorts, and picks the
+    /// <c>p_lo</c>/<c>p_hi</c> percentile cutoffs (default 1%/99%) so a single
+    /// extreme outlier doesn't blow out the frame for every other row. Returns
+    /// <c>null</c> when every series is empty. Caller is responsible for any
+    /// bandwidth padding needed to keep curve tails from clipping at edges.</summary>
+    internal static XRange? ComputeSharedXRange(
+        IEnumerable<IReadOnlyList<double>?> series,
+        double pLow  = SharedRangePLow,
+        double pHigh = SharedRangePHigh)
+    {
+        var pooled = new List<double>();
+        foreach (var s in series)
+        {
+            if (s == null) continue;
+            for (int i = 0; i < s.Count; i++) pooled.Add(s[i]);
+        }
+        if (pooled.Count == 0) return null;
+        var arr = pooled.ToArray();
+        System.Array.Sort(arr);
+        double lo = Percentile(arr, pLow);
+        double hi = Percentile(arr, pHigh);
+        // Degenerate (all values equal, or pLow == pHigh): fall back to raw
+        // min/max so the renderer still has a valid non-empty domain.
+        if (hi <= lo) { lo = arr[0]; hi = arr[arr.Length - 1]; }
+        return new XRange(lo, hi);
+    }
+
     private static Image BuildSparklineImage(
         IReadOnlyList<double> values,
         Vector2I size,
-        MarkerStyle markerStyle)
+        MarkerStyle markerStyle,
+        XRange? explicitRange = null)
     {
         int w = System.Math.Max(size.X, 1);
         int h = System.Math.Max(size.Y, 1);
@@ -245,12 +343,25 @@ internal static class SparklinePoc
 
             if (range <= 0)
             {
-                // Degenerate: all values identical. Single dot at the
-                // panel center — KDE bandwidth would be zero otherwise.
-                double cx = (w - 1) * 0.5;
+                // Degenerate: all values identical. Place a single dot.
+                // With a shared range, position it at the value's x in
+                // the shared frame (so its column color matches its dmg%);
+                // without one, center the panel since there's no
+                // meaningful x reference.
+                double cx;
+                if (explicitRange.HasValue && explicitRange.Value.Hi > explicitRange.Value.Lo)
+                {
+                    var er = explicitRange.Value;
+                    cx = (values[0] - er.Lo) / (er.Hi - er.Lo) * (w - 1);
+                    cx = System.Math.Clamp(cx, 0, w - 1);
+                }
+                else
+                {
+                    cx = (w - 1) * 0.5;
+                }
                 double cy = (h - 1) * 0.5;
                 DrawAaDisc(image, cx, cy, LineRadius + 1f, PercentileDotOutlineColor);
-                DrawAaDisc(image, cx, cy, LineRadius,      ColorAt(values[0], min, range));
+                DrawAaDisc(image, cx, cy, LineRadius,      ColorAt(cx, 0, w - 1));
             }
             else
             {
@@ -270,11 +381,22 @@ internal static class SparklinePoc
                 double bandwidth = 0.9 * spread * System.Math.Pow(n, -0.2);
                 if (bandwidth < range * 0.03) bandwidth = range * 0.03;
 
-                // Pad the x range by one bandwidth on each side so the
-                // curve's Gaussian tails don't get clipped — panel
-                // shows the full shape rather than cutting at min/max.
-                double xLo    = min - bandwidth;
-                double xHi    = max + bandwidth;
+                // Per-row: pad the x range by one bandwidth on each side so
+                // the curve's Gaussian tails don't get clipped. Shared-range:
+                // honor the caller's explicit domain verbatim — they're
+                // responsible for any padding so all rows share one frame.
+                double xLo, xHi;
+                if (explicitRange.HasValue)
+                {
+                    xLo = explicitRange.Value.Lo;
+                    xHi = explicitRange.Value.Hi;
+                    if (xHi <= xLo) { xLo = min - bandwidth; xHi = max + bandwidth; }
+                }
+                else
+                {
+                    xLo = min - bandwidth;
+                    xHi = max + bandwidth;
+                }
                 double xRange = xHi - xLo;
 
                 double DataXAtPx(double px) => xLo + (px / (w - 1.0)) * xRange;
@@ -321,29 +443,33 @@ internal static class SparklinePoc
                             BlendOver(image, px, py, IqrFillColor);
                     }
 
-                    // Median rule stops exactly at the curve height at
-                    // median x — mirrors the IQR fill's top-silhouette
-                    // behavior. Drawing pre-curve means the curve's
-                    // anti-aliased line paints over any rule pixels
-                    // that happened to land on the same rows as the
-                    // line.
+                    // Median rule stops MedianRuleGapPx below the curve so a
+                    // visible gap separates the two shapes — important when
+                    // the median lands in a valley between bimodal peaks,
+                    // where the rule would otherwise read as part of the
+                    // curve. Skip drawing entirely when the gap would push
+                    // the rule's top past the baseline (curve already near
+                    // zero density at median).
                     double mxPre    = PxAtDataX(q2);
-                    double myTopPre = YOfDensity(Density(q2));
-                    DrawAaVerticalLine(image, mxPre, myTopPre, h - 1, MedianRuleWidth, MedianRuleColor);
+                    double myTopPre = YOfDensity(Density(q2)) + MedianRuleGapPx;
+                    if (myTopPre < h - 1)
+                        DrawAaVerticalLine(image, mxPre, myTopPre, h - 1, MedianRuleWidth, MedianRuleColor);
                 }
 
-                // Polyline through per-pixel density samples. Value
-                // carried to ColorAt is the DENSITY height itself
-                // (normalized by maxDensity), so the gradient runs
-                // along the y axis — low density (valleys/tails) are
-                // green, high density (the peak) is red.
+                // Polyline through per-pixel density samples. The value
+                // passed to the color ramp is the pixel x position, so
+                // the gradient runs along the X AXIS — left = good
+                // (Low/Mid grey), right = bad (High red). When all
+                // sparklines in the table share an XRange, pixel x maps
+                // to the same data x in every row, so colors align with
+                // dmg% values across rows for at-a-glance comparison.
                 for (int px = 0; px < w - 1; px++)
                 {
                     double y1 = YOfDensity(densities[px]);
                     double y2 = YOfDensity(densities[px + 1]);
                     DrawAaSegment(image, px, y1, px + 1, y2,
-                        densities[px], densities[px + 1],
-                        0, maxDensity, LineRadius);
+                        px, px + 1,
+                        0, w - 1, LineRadius);
                 }
 
                 // Post-curve percentile marker rendering. One branch
@@ -410,7 +536,35 @@ internal static class SparklinePoc
             }
         }
 
+        if (!BuildInfo.IsRelease && SlayTheStatsConfig.DebugMode)
+            DrawDebugBorder(image);
+
         return image;
+    }
+
+    // Cyan, distinct from the red cell border painted by BestiaryPatch's
+    // ApplyDebugTableOverlay. Together the two outlines let you see:
+    //   • red rect  = Godot table cell (column width × row height)
+    //   • cyan rect = sparkline texture bounds, scaled to display size
+    // Any gap between them is cell padding + display-size margin. If the
+    // cyan line renders non-uniformly thick, Godot is scaling the texture
+    // (i.e. AddImage(w,h) doesn't match BuildSparklineImage's Vector2I size).
+    private static readonly Color DebugBorderColor = new Color(0.20f, 0.90f, 0.95f, 0.90f);
+
+    private static void DrawDebugBorder(Image img)
+    {
+        int w = img.GetWidth();
+        int h = img.GetHeight();
+        for (int px = 0; px < w; px++)
+        {
+            img.SetPixel(px, 0,     DebugBorderColor);
+            img.SetPixel(px, h - 1, DebugBorderColor);
+        }
+        for (int py = 0; py < h; py++)
+        {
+            img.SetPixel(0,     py, DebugBorderColor);
+            img.SetPixel(w - 1, py, DebugBorderColor);
+        }
     }
 
     /// <summary>Ascending-sorted copy of <paramref name="values"/> as int[] — used by the debug panel header for human-readable value lists.</summary>
@@ -437,6 +591,7 @@ internal static class SparklinePoc
     /// <summary>Maps a value's position in [min..min+range] to the green→yellow→red gradient.</summary>
     private static Color ColorAt(double v, double min, double range)
     {
+        if (UseFlatCurveColor) return FlatCurveColor;
         double norm = range <= 0 ? 0.5 : System.Math.Clamp((v - min) / range, 0, 1);
         return norm < 0.5
             ? LerpColor(GradLow,  GradMid,  norm * 2.0)

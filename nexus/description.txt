@@ -28,14 +28,14 @@ Color coding helps you read the data at a glance:
 REQUIREMENTS
 ------------------------------------------------------------------------
 
-- BaseLib v0.2.5 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- BaseLib v3.0.9 or later: https://www.nexusmods.com/slaythespire2/mods/103
 - **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "UNINSTALLING GUMM" below.
 
 ------------------------------------------------------------------------
 INSTALLATION
 ------------------------------------------------------------------------
 
-1. Download and extract BaseLib (v0.2.5 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
+1. Download and extract BaseLib (v3.0.9 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
 2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll and SlayTheStats.json
 
 ------------------------------------------------------------------------
@@ -111,6 +111,22 @@ A: The mod cannot find your run history to populate data. In this case you'll ne
 Q: I lost my save data after installing.
 
 A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress. There are ways to transfer save data over to a modded profile -- see TRANSFERRING A VANILLA PROFILE TO A MODDED PROFILE below. You can also use the mod UnifiedSavePath.
+
+------------------------------------------------------------------------
+TRANSFERRING A VANILLA PROFILE TO A MODDED PROFILE
+------------------------------------------------------------------------
+
+Disclaimer - this is how I did it on 2026-04-24. It may no longer work. To see the most up-to-date way to do this, ask the sts2-modding channel on the Slay The Spire discord.
+
+The game stores modded saves in a separate "modded" subfolder, so installing mods makes it look like your vanilla progress is gone.
+
+- BACK UP your vanilla profile folder first. And do NOT later try to copy modded saves back over vanilla -- modded run history can contain data vanilla cannot parse and will corrupt the file. Vanilla -> modded only.
+- Launch with mods loaded and switch in-game to a profile slot OTHER than the one you want to overwrite (e.g. if you want to import vanilla profile 1, first switch to modded profile 2 or 3). The game holds the active slot in memory and would otherwise overwrite your copy on the next save.
+- Assuming you want to copy profile1: Leaving the game running, copy the contents of profile1/ into modded/profile1 (same profile number). Save roots are below; you can also open the in-game console (` or ~) and type `open saves` to jump there.
+  - Windows: %APPDATA%\SlayTheSpire2\steam\<STEAM_ID>\
+  - macOS:   ~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/
+  - Linux:   ~/.local/share/SlayTheSpire2/steam/<STEAM_ID>/
+- Back in-game, switch to the target profile slot. Your vanilla progress should now be loaded under mods.
 
 ------------------------------------------------------------------------
 TROUBLESHOOTING

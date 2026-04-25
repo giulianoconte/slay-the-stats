@@ -156,7 +156,7 @@ public static class EncounterTooltipHelper
         // Header row
         AppendDescriptorCell(body, " ", isHeader: true, parts: AllCharsDescriptorParts);
         AppendHeaderCell(body, "Runs",    P.Fought);
-        AppendHeaderCell(body, "",        P.Spark);  // sparkline column has no header label — column it sits beside (Dmg%) names itself
+        AppendHeaderCell(body, "Dist",    P.Spark);  // density distribution sparkline
         AppendHeaderCell(body, "Dmg%",    P.Dmg);
         AppendHeaderCell(body, "Mid 50%", P.Mid50);
         AppendHeaderCell(body, "Spread",  P.Spread);
@@ -169,19 +169,22 @@ public static class EncounterTooltipHelper
         // Every data-cells call (full or empty) emits exactly one Spark
         // marker, so the sparklines list must gain one entry per row —
         // null for no-data rows, a texture per row with values.
-        var sparklines = new List<ImageTexture?>();
+        // Two-pass sparkline build: collect Dmg% values per row first, then
+        // materialize all textures with a single shared x-domain (see
+        // BuildSparklinesFromValues for why).
+        var sparklineValues = new List<double[]?>();
         foreach (var (charId, stat, startingHp, descriptor) in allEntries)
         {
             AppendDescriptorCell(body, descriptor, parts: AllCharsDescriptorParts);
             if (stat != null)
             {
                 AppendAllCharsDataCells(body, stat!, startingHp, allBaseline);
-                sparklines.Add(BuildDmgPctSparklineFromRawValues(stat.DamageValues, startingHp));
+                sparklineValues.Add(GetDmgPctValuesFromRawValues(stat.DamageValues, startingHp));
             }
             else
             {
                 AppendEmptyDataCells(body);
-                sparklines.Add(null);
+                sparklineValues.Add(null);
             }
         }
 
@@ -193,13 +196,14 @@ public static class EncounterTooltipHelper
         if (perCharMetrics.Count > 0)
         {
             AppendAllRowFromPerCharMetrics(body, perCharMetrics, totalFought);
-            sparklines.Add(BuildPooledAllRowSparkline(allEntries));
+            sparklineValues.Add(GetPooledAllRowDmgPctValues(allEntries));
         }
         else
         {
             AppendEmptyDataCells(body);
-            sparklines.Add(null);
+            sparklineValues.Add(null);
         }
+        var sparklines = BuildSparklinesFromValues(sparklineValues);
 
         body.Append("[/table]");
 
@@ -223,40 +227,43 @@ public static class EncounterTooltipHelper
     }
 
     /// <summary>
-    /// Builds a sparkline texture from per-fight damage values normalized
-    /// by the character's starting HP. Dmg% values pool correctly across
+    /// Builds a Dmg% values array from per-fight damage normalized by the
+    /// character's starting HP. Dmg% values pool correctly across
     /// characters (in the all-chars baseline row) and match the column
     /// header ("Dmg%"). Returns null when there aren't enough samples.
+    /// Texture build is deferred to <see cref="BuildSparklinesFromValues"/>
+    /// so all rows in the table can share one x-domain.
     /// </summary>
-    private static ImageTexture? BuildDmgPctSparklineFromRawValues(List<int>? rawDamage, int startingHp)
+    private static double[]? GetDmgPctValuesFromRawValues(List<int>? rawDamage, int startingHp)
     {
         if (rawDamage == null || rawDamage.Count < 2) return null;
         if (startingHp <= 0) return null;
         var values = new double[rawDamage.Count];
         for (int i = 0; i < values.Length; i++) values[i] = rawDamage[i] * 100.0 / startingHp;
-        return SparklinePoc.BuildSparklineTexture(values, BestiarySparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule);
+        return values;
     }
 
     /// <summary>
-    /// Builds a sparkline from an already-pooled list of Dmg% values
-    /// (e.g. from <see cref="StatsAggregator.CollectDmgPctValues"/>).
-    /// Null on fewer than 2 samples.
+    /// Builds a Dmg% values array from an already-pooled list of Dmg%
+    /// integers (e.g. from <see cref="StatsAggregator.CollectDmgPctValues"/>).
+    /// Null on fewer than 2 samples. Texture build is deferred — see
+    /// <see cref="GetDmgPctValuesFromRawValues"/>.
     /// </summary>
-    private static ImageTexture? BuildDmgPctSparklineFromPctList(IReadOnlyList<int> pctValues)
+    private static double[]? GetDmgPctValuesFromPctList(IReadOnlyList<int>? pctValues)
     {
         if (pctValues == null || pctValues.Count < 2) return null;
         var values = new double[pctValues.Count];
         for (int i = 0; i < values.Length; i++) values[i] = pctValues[i];
-        return SparklinePoc.BuildSparklineTexture(values, BestiarySparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule);
+        return values;
     }
 
     /// <summary>
-    /// Pools every per-character fight into Dmg% values for the
-    /// "All (baseline)" row of the all-chars table. Each character
-    /// contributes its own fights normalized by its own starting HP
-    /// so the distribution is cross-character-comparable.
+    /// Pools every per-character fight into a single Dmg% values array
+    /// for the "All (baseline)" row of the all-chars table. Each
+    /// character contributes its fights normalized by its own starting
+    /// HP so the distribution is cross-character-comparable.
     /// </summary>
-    private static ImageTexture? BuildPooledAllRowSparkline(
+    private static double[]? GetPooledAllRowDmgPctValues(
         List<(string charId, EncounterEvent? stat, int startingHp, string descriptor)> entries)
     {
         var pooled = new List<int>();
@@ -265,7 +272,35 @@ public static class EncounterTooltipHelper
             if (stat?.DamageValues == null || startingHp <= 0) continue;
             foreach (var dmg in stat.DamageValues) pooled.Add(dmg * 100 / startingHp);
         }
-        return BuildDmgPctSparklineFromPctList(pooled);
+        return GetDmgPctValuesFromPctList(pooled);
+    }
+
+    /// <summary>
+    /// Materializes <see cref="ImageTexture"/>s for every collected row's
+    /// Dmg% values, using a single x-domain computed from the union of
+    /// all values. With one shared x-axis, the polyline's horizontal
+    /// color gradient (green→red along x) anchors to the same dmg% in
+    /// every row, so the eye can compare distributions cross-row by color
+    /// alone. Returns nulls in slots whose values were null.
+    /// </summary>
+    private static List<ImageTexture?> BuildSparklinesFromValues(IReadOnlyList<double[]?> valuesPerRow)
+    {
+        var range = SparklinePoc.ComputeSharedXRange(valuesPerRow);
+        var result = new List<ImageTexture?>(valuesPerRow.Count);
+        foreach (var values in valuesPerRow)
+        {
+            if (values == null)
+            {
+                result.Add(null);
+                continue;
+            }
+            result.Add(SparklinePoc.BuildSparklineTexture(
+                values,
+                BestiarySparklineSize,
+                SparklinePoc.MarkerStyle.ShadedIqrMedianRule,
+                range));
+        }
+        return result;
     }
 
     // Pixel size of the sparkline inside a table cell. Spark column =
@@ -273,6 +308,16 @@ public static class EncounterTooltipHelper
     // slightly narrower so if the label gets shrunk below its intended
     // width the image doesn't anchor the column wider than its peers.
     private static readonly Vector2I BestiarySparklineSize = new Vector2I(50, 22);
+
+    // Calibration: U+2003 EM SPACE at [font_size=1] does NOT advance at 1
+    // device pixel — empirically it advances at ~1.67 px (54 em-spaces in
+    // a Spark cell with no other content rendered as a ~90 px column).
+    // The sizing-row mechanism below converts target-px into em-space count
+    // by dividing by this ratio so `widthPx` actually maps to `widthPx`
+    // pixels of column floor. Tune if column widths drift after font or
+    // theme changes — verify by setting a known target (e.g.
+    // PartsToPx(SparkParts) = 54) and measuring the rendered cell.
+    private const float EmSpacePxAtFs1 = 1.67f;
 
 
     // Section colors for focused-character view. Row descriptors (labels like
@@ -322,21 +367,31 @@ public static class EncounterTooltipHelper
     /// inter-data-col spacing comes entirely from the text content minimums.</summary>
     private const string FoughtCellPadding      = "padding=2,0,0,0";
 
-    /// <summary>Column widths in absolute pixels, expressed as "parts" where one part =
-    /// <see cref="PartSizePx"/> pixels. Mechanism: each cell carries an expand ratio
-    /// (Godot requires it), and the caller pins the RichTextLabel's total width to
-    /// <c>total_parts × PartSizePx</c>. With that pinning, each column's expand allocation
-    /// resolves to <c>(parts / total_parts) × (total_parts × PartSizePx) = parts ×
-    /// PartSizePx</c> — independent of which table or its total parts. Data columns
-    /// therefore render pixel-identical across focused and all-chars tables even when
-    /// descriptor parts differ. Leftover label width sits unused to the right.
+    /// <summary>Column widths in absolute pixels, expressed as "parts" where one part
+    /// = <see cref="PartSizePx"/> / 2 pixels (i.e. ~13.5 px each). The doubled-units
+    /// scheme allows ~25% column-width steps (1 part change on a 4-part column) where
+    /// the prior single-unit scheme only allowed ~50% steps (1 part change on a
+    /// 2-part column). Use <see cref="PartsToPx"/> to compute pixel widths.
+    /// Mechanism: each cell carries an <c>expand</c> ratio (Godot requires it), and
+    /// the caller pins the RichTextLabel's total width to <c>PartsToPx(total_parts)</c>.
+    /// With that pinning, each column's expand allocation resolves to
+    /// <c>(parts / total_parts) × tableWidthPx = PartsToPx(parts)</c> — independent
+    /// of which table or its total parts. Data columns therefore render pixel-
+    /// identical across focused and all-chars tables even when descriptor parts
+    /// differ. Leftover label width sits unused to the right.
     /// Width pinning is done in <c>BestiaryPatch</c>: focused via <see cref="FocusedTableWidthPx"/>
     /// on <c>_statsLabel.CustomMinimumSize</c>; all-chars via <see cref="AllCharsTableWidthPx"/>
     /// in <c>SetupStatsCharRowsLayout</c>.
-    /// Fallback: if any column's real content width exceeds <c>parts × PartSizePx</c>
+    /// Fallback: if any column's real content width exceeds <c>PartsToPx(parts)</c>
     /// that column grows to fit (or text wraps). Accepted as an edge case — Mid50
-    /// "999-999%" ≈ 85px may briefly push 3×24=72 → grows a few px for those rows.</summary>
+    /// "999-999%" ≈ 85px may briefly push 6 parts (~81 px) → grows a few px for
+    /// those rows.</summary>
     private const int PartSizePx = 27;
+
+    /// <summary>Converts a part count to pixels under the doubled-units scheme:
+    /// <c>parts × PartSizePx / 2</c>. Even part counts are exact (e.g. 4 parts = 54 px),
+    /// odd counts truncate by 0.5 px (e.g. 5 parts = 67 px, conceptually 67.5).</summary>
+    private static int PartsToPx(int parts) => parts * PartSizePx / 2;
 
     /// <summary>Per-column parts + padding, parameterized so focused and all-chars views
     /// can use different values per column. Stores the parts alongside the pre-formatted
@@ -388,29 +443,32 @@ public static class EncounterTooltipHelper
 
     // Both views share the same data-column part distribution so data columns render
     // at identical widths across the focused and all-chars tables.
-    // Distribution: Fought:2  Spark:2  Dmg:2  Mid50:3  Spread:2  Turns:2  Pots:2  Deaths:3.
-    // Total data parts = 18, matching the pre-sparkline layout (6 desc + 18 data
-    // = 24 parts = 648px) so the table fits the right-pane clipper without
-    // forcing the Spread column to shrink below its parts-based width.
+    // Distribution (doubled units; 1 part = ~13.5 px):
+    //   Fought:4  Spark:4  Dmg:4  Mid50:6  Spread:5  Turns:5  Pots:4  Deaths:6.
+    // Total data parts = 38. All-chars total = 12 desc + 38 data = 50 parts = 675 px;
+    // focused total = 22 desc + 38 data = 60 parts = 810 px.
     //
-    // Why every column is 2 parts except Mid50 and Deaths: Spread "82%" fits
-    // easily in 54px; Mid50 "X-Y%" can reach 7-8 chars (e.g. "50-100%") so keeps
-    // 3 parts; Deaths "12/42" also needs 3.
+    // Per-column pixel widths (PartsToPx):
+    //   Fought=54  Spark=54  Dmg=54  Mid50=81  Spread=67  Turns=67  Pots=54  Deaths=81.
+    // Mid50 "X-Y%" can reach 7-8 chars (e.g. "50-100%") so it gets 6 parts; Deaths
+    // "12/42" also gets 6. Turns previously sat at 4 parts (54 px) but ran too close
+    // to Spread visually — bumped to 5; Spread dropped from 6 to 5 to compensate so
+    // the data-parts total stays at 38.
     private static readonly ColumnPaddings FocusedColumns =
-        new(fought: 2, spark: 2, dmg: 2, mid50: 3, spread: 2, turns: 2, pots: 2, deaths: 3);
+        new(fought: 4, spark: 4, dmg: 4, mid50: 6, spread: 5, turns: 5, pots: 4, deaths: 6);
     private static readonly ColumnPaddings AllCharsColumns =
-        new(fought: 2, spark: 2, dmg: 2, mid50: 3, spread: 2, turns: 2, pots: 2, deaths: 3);
+        new(fought: 4, spark: 4, dmg: 4, mid50: 6, spread: 5, turns: 5, pots: 4, deaths: 6);
 
     /// <summary>Focused-view descriptor parts — must match the default on
     /// <see cref="AppendDescriptorCell"/> and <see cref="AppendSizingRow"/>.</summary>
-    public const int FocusedDescriptorParts = 11;
+    public const int FocusedDescriptorParts = 22;
     public static readonly int FocusedTotalParts = FocusedDescriptorParts + FocusedColumns.SumDataParts;
-    public static readonly int FocusedTableWidthPx = FocusedTotalParts * PartSizePx;
+    public static readonly int FocusedTableWidthPx = PartsToPx(FocusedTotalParts);
     /// <summary>All-chars-view descriptor parts — narrower than focused since character-
     /// name descriptors are shorter than focused's pool labels.</summary>
-    public const int AllCharsDescriptorParts = 6;
+    public const int AllCharsDescriptorParts = 12;
     public static readonly int AllCharsTotalParts = AllCharsDescriptorParts + AllCharsColumns.SumDataParts;
-    public static readonly int AllCharsTableWidthPx = AllCharsTotalParts * PartSizePx;
+    public static readonly int AllCharsTableWidthPx = PartsToPx(AllCharsTotalParts);
 
     private static string EmptyDataCell(string padding, string? color = null, string align = "right")
     {
@@ -422,7 +480,7 @@ public static class EncounterTooltipHelper
     /// cell of each row. `parts` is the column's expand ratio (plus drives the sizing row's
     /// pixel floor via <see cref="AppendSizingRow"/>). Focused view uses parts=11 by default;
     /// all-chars passes parts=5.</summary>
-    private static void AppendDescriptorCell(StringBuilder sb, string text, bool isHeader = false, int parts = 11)
+    private static void AppendDescriptorCell(StringBuilder sb, string text, bool isHeader = false, int parts = 22)
     {
         var color = isHeader ? HeaderColor : BaselineSectionColor;
         sb.Append($"[cell expand={parts} {DescriptorCellPadding}]{KreonRegFontTag}[color={color}]{text}[/color]{KreonRegClose}[/cell]");
@@ -435,16 +493,17 @@ public static class EncounterTooltipHelper
     private const string DescriptorSizingRef =
         "\u00A0\u00A0\u00A0vs Act 9 elites (baseline)";
 
-    /// <summary>Emits an invisible 1px-tall sizing row at the top of a [table=8] to set
+    /// <summary>Emits an invisible 1px-tall sizing row at the top of a [table=9] to set
     /// column widths in absolute pixels. Each cell contains U+2003 em-space characters at
-    /// font_size=1 (≈1px per em-space), so N em-spaces ≈ N pixels. Widths are expressed
-    /// in "parts" where 1 part = <see cref="PartSizePx"/> pixels, and data-column parts
-    /// are shared (FoughtParts, DmgParts, …). Descriptor parts are per-view: focused passes
-    /// 12, all-chars passes 8. A column's final width = max(parts×PartSizePx, widest real
-    /// content in that column); content override can happen when real text at font 18
-    /// exceeds the parts-based floor (Mid50 "999-999%" is the notable case).</summary>
+    /// font_size=1 (calibrated px per em-space — see <see cref="EmSpacePxAtFs1"/>). Widths
+    /// are expressed in "parts" where 1 part = <see cref="PartSizePx"/>/2 pixels (doubled-
+    /// units scheme), and data-column parts are shared (FoughtParts, DmgParts, …).
+    /// Descriptor parts are per-view: focused passes 22, all-chars passes 12. A column's
+    /// final width = max(<see cref="PartsToPx"/>(parts), widest real content in that
+    /// column); content override can happen when real text at font 18 exceeds the parts-
+    /// based floor (Mid50 "999-999%" is the notable case).</summary>
     /// <summary>Overload that selects the focused view's ColumnPaddings by default.</summary>
-    private static void AppendSizingRow(StringBuilder sb, int descParts = 11)
+    private static void AppendSizingRow(StringBuilder sb, int descParts = 22)
     {
         AppendSizingRow(sb, FocusedColumns, descParts);
     }
@@ -454,23 +513,29 @@ public static class EncounterTooltipHelper
         // Sizing row cells must carry the SAME expand attribute as their real-row counterparts
         // — mismatch would cause Godot to treat the sizing cell as a separate column with
         // different expand, breaking the layout.
-        sb.Append($"[cell expand={descParts} {DescriptorCellPadding}][font_size=1]{EmSpaces(descParts * PartSizePx)}[/font_size][/cell]");
-        AppendSizingDataCell(sb, P.Fought, P.FoughtParts * PartSizePx);
-        AppendSizingDataCell(sb, P.Spark,  P.SparkParts  * PartSizePx);
-        AppendSizingDataCell(sb, P.Dmg,    P.DmgParts    * PartSizePx);
-        AppendSizingDataCell(sb, P.Mid50,  P.Mid50Parts  * PartSizePx);
-        AppendSizingDataCell(sb, P.Spread, P.SpreadParts * PartSizePx);
-        AppendSizingDataCell(sb, P.Turns,  P.TurnsParts  * PartSizePx);
-        AppendSizingDataCell(sb, P.Pots,   P.PotsParts   * PartSizePx);
-        AppendSizingDataCell(sb, P.Deaths, P.DeathsParts * PartSizePx);
+        sb.Append($"[cell expand={descParts} {DescriptorCellPadding}][font_size=1]{EmSpacesForPx(PartsToPx(descParts))}[/font_size][/cell]");
+        AppendSizingDataCell(sb, P.Fought, PartsToPx(P.FoughtParts));
+        AppendSizingDataCell(sb, P.Spark,  PartsToPx(P.SparkParts));
+        AppendSizingDataCell(sb, P.Dmg,    PartsToPx(P.DmgParts));
+        AppendSizingDataCell(sb, P.Mid50,  PartsToPx(P.Mid50Parts));
+        AppendSizingDataCell(sb, P.Spread, PartsToPx(P.SpreadParts));
+        AppendSizingDataCell(sb, P.Turns,  PartsToPx(P.TurnsParts));
+        AppendSizingDataCell(sb, P.Pots,   PartsToPx(P.PotsParts));
+        AppendSizingDataCell(sb, P.Deaths, PartsToPx(P.DeathsParts));
     }
 
     private static void AppendSizingDataCell(StringBuilder sb, string padding, int widthPx)
     {
-        sb.Append($"[cell {padding}][font_size=1]{EmSpaces(widthPx)}[/font_size][/cell]");
+        sb.Append($"[cell {padding}][font_size=1]{EmSpacesForPx(widthPx)}[/font_size][/cell]");
     }
 
     private static string EmSpaces(int count) => new string('\u2003', count);
+
+    // Emit enough em-spaces (at [font_size=1]) to span <paramref name="widthPx"/>
+    // pixels of column min-content floor \u2014 see <see cref="EmSpacePxAtFs1"/> for
+    // why the count is the target px divided by the per-em-space advance.
+    private static string EmSpacesForPx(int widthPx)
+        => EmSpaces(widthPx <= 0 ? 0 : (int)System.Math.Round(widthPx / EmSpacePxAtFs1));
 
     /// <summary>Column header cell. Uses the same monospace font as data cells (via
     /// the RichTextLabel's theme override) so auto-sized column widths align with
@@ -865,10 +930,13 @@ public static class EncounterTooltipHelper
 
     /// <summary>Emits a Spark cell carrying the <see cref="SparklinePoc.SparklineMarker"/>
     /// token. The bestiary render path splits its BBCode on the marker and
-    /// calls <c>RichTextLabel.AddImage</c> between the split segments.</summary>
+    /// calls <c>RichTextLabel.AddImage</c> between the split segments. The
+    /// <c>[right]</c> wrapper right-aligns the inline image within the cell so
+    /// any leftover width (cell px - image px) sits on the left side, anchoring
+    /// the curve flush to the next column's edge.</summary>
     private static void AppendSparkMarkerCell(StringBuilder sb, ColumnPaddings P)
     {
-        sb.Append($"[cell {P.Spark}]{SparklinePoc.SparklineMarker}[/cell]");
+        sb.Append($"[cell {P.Spark}][right]{SparklinePoc.SparklineMarker}[/right][/cell]");
     }
 
     /// <summary>FormatDeathsCell variant for the new table layout — no padding,
@@ -987,7 +1055,10 @@ public static class EncounterTooltipHelper
         IReadOnlyList<int>? poolAllDmgPct = null,
         IReadOnlyList<int>? allCharsDmgPct = null)
     {
-        var focusedSparklines = new List<ImageTexture?>();
+        // Two-pass sparkline build: collect Dmg% values per row, then
+        // materialize textures with a shared x-domain (see
+        // BuildSparklinesFromValues).
+        var focusedSparklineValues = new List<double[]?>();
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
         var catLower = categoryLabel.ToLowerInvariant();
@@ -1010,7 +1081,7 @@ public static class EncounterTooltipHelper
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
         AppendHeaderCell(sb, "Runs",    FP.Fought);
-        AppendHeaderCell(sb, "",        FP.Spark);
+        AppendHeaderCell(sb, "Dist",    FP.Spark);
         AppendHeaderCell(sb, "Dmg",     FP.Dmg);
         AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
         AppendHeaderCell(sb, "Spread",  FP.Spread);
@@ -1026,9 +1097,9 @@ public static class EncounterTooltipHelper
         // has data, null otherwise.
         {
             int startingHp = MainFile.Db.CharacterStartingHp.GetValueOrDefault(characterId, 0);
-            focusedSparklines.Add(
+            focusedSparklineValues.Add(
                 encounterStat.Fought > 0
-                    ? BuildDmgPctSparklineFromRawValues(encounterStat.DamageValues, startingHp)
+                    ? GetDmgPctValuesFromRawValues(encounterStat.DamageValues, startingHp)
                     : null);
         }
 
@@ -1037,19 +1108,19 @@ public static class EncounterTooltipHelper
         {
             AppendDescriptorCell(sb, $"{charIcon}vs {actLabel} {PluralizeCategory(catLower)} (baseline)");
             AppendPoolDataCells(sb, poolAct.Value);
-            focusedSparklines.Add(poolActDmgPct != null ? BuildDmgPctSparklineFromPctList(poolActDmgPct) : null);
+            focusedSparklineValues.Add(GetDmgPctValuesFromPctList(poolActDmgPct));
         }
 
         // Row 3: all-acts category pool
         AppendDescriptorCell(sb, $"{charIcon}vs all {PluralizeCategory(catLower)}");
         AppendPoolDataCells(sb, poolAll);
-        focusedSparklines.Add(poolAllDmgPct != null ? BuildDmgPctSparklineFromPctList(poolAllDmgPct) : null);
+        focusedSparklineValues.Add(GetDmgPctValuesFromPctList(poolAllDmgPct));
 
         // Row 4: all chars vs this encounter — character-weighted aggregation
         var allCharsIcon = AllCharsIcon(22);
         AppendDescriptorCell(sb, $"{allCharsIcon}All vs {encNameRow4}");
         AppendPoolDataCells(sb, allCharsMetrics);
-        focusedSparklines.Add(allCharsDmgPct != null ? BuildDmgPctSparklineFromPctList(allCharsDmgPct) : null);
+        focusedSparklineValues.Add(GetDmgPctValuesFromPctList(allCharsDmgPct));
 
         sb.Append("[/table]");
 
@@ -1057,7 +1128,7 @@ public static class EncounterTooltipHelper
         var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
-        return new FocusedTableParts { Text = sb.ToString(), Sparklines = focusedSparklines };
+        return new FocusedTableParts { Text = sb.ToString(), Sparklines = BuildSparklinesFromValues(focusedSparklineValues) };
     }
 
     /// <summary>
@@ -1078,7 +1149,8 @@ public static class EncounterTooltipHelper
         IReadOnlyList<int>? poolAllDmgPct = null,
         IReadOnlyList<int>? allCharsDmgPct = null)
     {
-        var sparklines = new List<ImageTexture?>();
+        // Two-pass sparkline build (see BuildSparklinesFromValues).
+        var sparklineValues = new List<double[]?>();
         var sb = new StringBuilder();
         var charIcon = CharacterIcon(characterId, 30);
         var catLower = categoryLabel.ToLowerInvariant();
@@ -1092,7 +1164,7 @@ public static class EncounterTooltipHelper
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
         AppendHeaderCell(sb, "Runs",    FP.Fought);
-        AppendHeaderCell(sb, "",        FP.Spark);
+        AppendHeaderCell(sb, "Dist",    FP.Spark);
         AppendHeaderCell(sb, "Dmg",     FP.Dmg);
         AppendHeaderCell(sb, "Mid 50%", FP.Mid50);
         AppendHeaderCell(sb, "Spread",  FP.Spread);
@@ -1113,25 +1185,25 @@ public static class EncounterTooltipHelper
                 : catPlural;
             AppendDescriptorCell(sb, $"{charIcon}vs {biomeColored} {catPluralColored}");
             AppendRow1PoolDataCells(sb, poolBiome, poolAll);
-            sparklines.Add(poolBiomeDmgPct != null ? BuildDmgPctSparklineFromPctList(poolBiomeDmgPct) : null);
+            sparklineValues.Add(GetDmgPctValuesFromPctList(poolBiomeDmgPct));
 
             AppendDescriptorCell(sb, $"{charIcon}vs all {catPlural} (baseline)");
             AppendPoolDataCells(sb, poolAll);
-            sparklines.Add(poolAllDmgPct != null ? BuildDmgPctSparklineFromPctList(poolAllDmgPct) : null);
+            sparklineValues.Add(GetDmgPctValuesFromPctList(poolAllDmgPct));
 
             AppendDescriptorCell(sb, $"{allCharsIcon}All vs {biomeLabel} {catPlural}");
             AppendPoolDataCells(sb, allCharsPool);
-            sparklines.Add(allCharsDmgPct != null ? BuildDmgPctSparklineFromPctList(allCharsDmgPct) : null);
+            sparklineValues.Add(GetDmgPctValuesFromPctList(allCharsDmgPct));
         }
         else
         {
             AppendDescriptorCell(sb, $"{charIcon}vs all {catPlural}");
             AppendRow1PoolDataCells(sb, poolBiome, allCharsPool);
-            sparklines.Add(poolBiomeDmgPct != null ? BuildDmgPctSparklineFromPctList(poolBiomeDmgPct) : null);
+            sparklineValues.Add(GetDmgPctValuesFromPctList(poolBiomeDmgPct));
 
             AppendDescriptorCell(sb, $"{allCharsIcon}All vs all {catPlural} (baseline)");
             AppendPoolDataCells(sb, allCharsPool);
-            sparklines.Add(allCharsDmgPct != null ? BuildDmgPctSparklineFromPctList(allCharsDmgPct) : null);
+            sparklineValues.Add(GetDmgPctValuesFromPctList(allCharsDmgPct));
         }
 
         sb.Append("[/table]");
@@ -1140,7 +1212,7 @@ public static class EncounterTooltipHelper
         var filterCtx = CardHoverShowPatch.BuildFilterContext("All chars", filter, includeCharacter: false);
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
-        return new FocusedTableParts { Text = sb.ToString(), Sparklines = sparklines };
+        return new FocusedTableParts { Text = sb.ToString(), Sparklines = BuildSparklinesFromValues(sparklineValues) };
     }
 
     /// <summary>
