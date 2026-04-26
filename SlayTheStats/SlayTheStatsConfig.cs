@@ -284,10 +284,52 @@ internal class SlayTheStatsConfig : SimpleModConfig
     // BuildSafeFilter remains as a defensive helper until the bestiary is fully on the new
     // pane.
 
-    private const int    AscMinDefault = 0;
-    private const int    AscMaxDefault = 20;
     private static readonly string[] BadVersionSentinels =
         { "", "__lowest__", "__highest__", "__none__", "any", "Any" };
+
+    /// <summary>
+    /// Resolves raw config ascension bounds (which use <see cref="AscensionLowest"/>
+    /// = int.MinValue and <see cref="AscensionHighest"/> = int.MaxValue as sentinels
+    /// for "lowest in data" / "highest in data") into the typed nullable bounds
+    /// the AggregationFilter expects. Single source of truth — both
+    /// <see cref="BuildSafeFilterCore"/> and the card-tooltip filter builders
+    /// share this so display, sentinel resolution, and matching all agree.
+    ///
+    /// Sentinel combinations:
+    ///   (Lowest,  Highest) → (null, null)        full range, no constraint
+    ///   (Lowest,  N)       → (null, N)           bounded above only
+    ///   (M,       Highest) → (M, null)           bounded below only
+    ///   (M,       N)       → (M, N)              explicit range
+    ///   (Lowest,  Lowest)  → (dataMin, dataMin)  resolves to data's lowest
+    ///   (Highest, Highest) → (dataMax, dataMax)  resolves to data's highest
+    ///   (Highest, N)       → (null, N)           defensive: nonsense combo, drop lower bound
+    ///   (M,       Lowest)  → (M, null)           defensive: nonsense combo, drop upper bound
+    /// </summary>
+    public static (int? min, int? max) ResolveAscensionBounds(int rawMin, int rawMax)
+    {
+        bool minIsLowest  = rawMin == AscensionLowest;
+        bool minIsHighest = rawMin == AscensionHighest;
+        bool maxIsLowest  = rawMax == AscensionLowest;
+        bool maxIsHighest = rawMax == AscensionHighest;
+
+        if (minIsLowest && maxIsLowest)
+        {
+            var data = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+            int dataMin = data.Count > 0 ? data[0] : 0;
+            return (dataMin, dataMin);
+        }
+
+        if (minIsHighest && maxIsHighest)
+        {
+            var data = StatsAggregator.GetDistinctAscensions(MainFile.Db);
+            int dataMax = data.Count > 0 ? data[^1] : 10;
+            return (dataMax, dataMax);
+        }
+
+        int? min = (minIsLowest || minIsHighest) ? null : (int?)rawMin;
+        int? max = (maxIsLowest || maxIsHighest) ? null : (int?)rawMax;
+        return (min, max);
+    }
 
     /// <summary>
     /// Builds an AggregationFilter from the current LIVE static properties,
@@ -318,22 +360,19 @@ internal class SlayTheStatsConfig : SimpleModConfig
         var filter = new AggregationFilter();
         if (includeMultiplayer) filter.GameMode = null!;
 
-        // Stash the raw values verbatim for footer rendering before any
-        // sanitisation. FilterDisplayRaw preserves sentinel info that the
-        // matching-side fields lose after clamping.
+        // Stash raw values verbatim for footer rendering — FilterDisplayRaw
+        // preserves the sentinels that ResolveAscensionBounds collapses.
         filter.Display.RawAscMin   = ascMin;
         filter.Display.RawAscMax   = ascMax;
         filter.Display.RawVerMin   = versionMin ?? "";
         filter.Display.RawVerMax   = versionMax ?? "";
         filter.Display.RawProfile  = profile ?? "";
 
-        // Clamp into [0, 20]; reset any garbage values to defaults.
-        if (ascMin < 0 || ascMin > 20) ascMin = AscMinDefault;
-        if (ascMax < 0 || ascMax > 20) ascMax = AscMaxDefault;
-        if (ascMin > ascMax) (ascMin, ascMax) = (AscMinDefault, AscMaxDefault);
-
-        if (ascMin > 0)  filter.AscensionMin = ascMin;
-        if (ascMax < 20) filter.AscensionMax = ascMax;
+        var (resolvedMin, resolvedMax) = ResolveAscensionBounds(ascMin, ascMax);
+        if (resolvedMin.HasValue && resolvedMax.HasValue && resolvedMin > resolvedMax)
+            (resolvedMin, resolvedMax) = (null, null);
+        filter.AscensionMin = resolvedMin;
+        filter.AscensionMax = resolvedMax;
 
         if (!IsUnboundedFilterVersion(versionMin))
             filter.VersionMin = versionMin;
@@ -391,9 +430,10 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// </summary>
     public static void Sanitize()
     {
-        if (AscensionMin < 0 || AscensionMin > 20) AscensionMin = AscMinDefault;
-        if (AscensionMax < 0 || AscensionMax > 20) AscensionMax = AscMaxDefault;
-        if (AscensionMin > AscensionMax) { AscensionMin = AscMinDefault; AscensionMax = AscMaxDefault; }
+        // No range clamp on ascension: the data drives what's valid (mods may
+        // introduce negative or 20+ ascensions). Only the cross-check stays
+        // — a min > max is unambiguously broken; reset to unbounded sentinels.
+        if (AscensionMin > AscensionMax) { AscensionMin = AscensionLowest; AscensionMax = AscensionHighest; }
         // Reset genuinely broken values to the proper "no bound" sentinel, NOT
         // to empty string — the filter pane dropdowns look up the selected
         // index by matching the persisted value against their option list,

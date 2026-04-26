@@ -5137,7 +5137,7 @@ internal static class EncounterSorting
                 EncounterSortMode.Seen         => fought,
                 EncounterSortMode.DeathRate    => (double)stat.Died / fought,
                 EncounterSortMode.MedianDamage => stat.DamageMedian() ?? (double)stat.DamageTakenSum / fought,
-                EncounterSortMode.Spread       => ComputeIqrc(stat),
+                EncounterSortMode.Spread       => StatsAggregator.Iqrc(stat.DamageIQR(), stat.DamageMedian()) ?? 0,
                 EncounterSortMode.Turns        => (double)stat.TurnsTakenSum / fought,
                 _ => double.NaN,
             };
@@ -5201,18 +5201,6 @@ internal static class EncounterSorting
             }
         }
         return raw;
-    }
-
-    /// <summary>IQRC (IQR coefficient) = (p75 - p25) / max(median, 1). Returns 0
-    /// when there's no valid IQR. Matches the display-side FormatSpreadCell logic
-    /// so sort order aligns with what the Spread column shows.</summary>
-    private static double ComputeIqrc(EncounterEvent stat)
-    {
-        var iqr = stat.DamageIQR();
-        if (!iqr.HasValue) return 0;
-        var median = stat.DamageMedian();
-        if (!median.HasValue) return 0;
-        return (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
     }
 
     /// <summary>

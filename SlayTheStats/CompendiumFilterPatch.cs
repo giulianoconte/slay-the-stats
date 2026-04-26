@@ -1172,17 +1172,17 @@ public static partial class CompendiumFilterPatch
     {
         public const int LowestSentinel = int.MinValue;
         public const int HighestSentinel = int.MaxValue;
-        public const int MinExplicit = 0;
 
         /// <summary>
-        /// Explicit upper bound for the stepper — dynamic, derived from the
-        /// highest ascension actually present in the data. As runs start
-        /// landing on higher ascensions (extensions / mods), this grows
-        /// automatically. Falls back to 10 (current STS2 ceiling) on a
-        /// fresh install before any runs are parsed. Instance field (not
-        /// const) so each newly built stepper re-reads it — the pane is
-        /// rebuilt on every show, so stale values aren't an issue.
+        /// Explicit lower / upper bounds for the stepper — dynamic, derived
+        /// from the ascensions actually present in the data. Lower floor: 0
+        /// (current STS2 floor); drops below 0 if data has negative
+        /// ascensions (mods). Upper floor: 10 (current STS2 ceiling); grows
+        /// above 10 as runs land on higher ascensions. Instance fields so
+        /// each newly built stepper re-reads them — the pane is rebuilt on
+        /// every show, so stale values aren't an issue.
         /// </summary>
+        public readonly int MinExplicit;
         public readonly int MaxExplicit;
 
         private int _value;
@@ -1192,7 +1192,7 @@ public static partial class CompendiumFilterPatch
         public int Value
         {
             get => _value;
-            set { _value = value; if (_display != null) _display.Text = Format(value, MaxExplicit); }
+            set { _value = value; if (_display != null) _display.Text = Format(value, MinExplicit, MaxExplicit); }
         }
 
         public Label DisplayLabel => _display;
@@ -1202,18 +1202,22 @@ public static partial class CompendiumFilterPatch
             AddThemeConstantOverride("separation", 4);
             Alignment = AlignmentMode.Center;
 
-            // Read the data's actual ascension ceiling. Never lower than 10
-            // (the current STS2 ceiling) because an empty / single-run
-            // fresh install shouldn't stop the user from navigating up to
-            // the known max; only EXPANDS above 10 once extension/mod data
-            // arrives.
-            int dataMax = 10;
+            // Read the data's actual ascension range. Floors are the current
+            // STS2 bounds (0–10); a fresh / single-run install can still
+            // navigate the full vanilla range. Bounds EXPAND outward when
+            // data (mods, extensions) lands outside [0, 10].
+            int dataMin = 0, dataMax = 10;
             try
             {
                 var ascs = StatsAggregator.GetDistinctAscensions(MainFile.Db);
-                if (ascs.Count > 0) dataMax = Math.Max(10, ascs[^1]);
+                if (ascs.Count > 0)
+                {
+                    dataMin = Math.Min(0, ascs[0]);
+                    dataMax = Math.Max(10, ascs[^1]);
+                }
             }
             catch { /* keep fallback */ }
+            MinExplicit = dataMin;
             MaxExplicit = dataMax;
 
             // Label on the left, vertically-stacked ▲/▼ arrow buttons on the right.
@@ -1281,7 +1285,7 @@ public static partial class CompendiumFilterPatch
             }
         }
 
-        public static string Format(int value, int maxExplicit = 10)
+        public static string Format(int value, int minExplicit = 0, int maxExplicit = 10)
         {
             if (value == LowestSentinel)  return L.T("filter.sentinel.lowest");
             if (value == HighestSentinel) return L.T("filter.sentinel.highest");
@@ -1290,7 +1294,7 @@ public static partial class CompendiumFilterPatch
             // constructor clamp. Sentinels fall through the branches above.
             int clamped = value;
             if (clamped > maxExplicit) clamped = maxExplicit;
-            if (clamped < MinExplicit) clamped = MinExplicit;
+            if (clamped < minExplicit) clamped = minExplicit;
             return $"A{clamped}";
         }
 

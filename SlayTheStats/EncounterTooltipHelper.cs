@@ -645,7 +645,7 @@ public static class EncounterTooltipHelper
         var cN       = TooltipHelper.ColN($"{n}", n);
         var cDmg     = ColBadRelative($"{dmgMedian:F0}", dmgMedian, medianBase, n);
         var cMid50   = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread  = FormatSpreadCell(IqrcFromBounds(iqr, dmgMedian), n, iqrcBase);
+        var cSpread  = FormatSpreadCell(StatsAggregator.Iqrc(iqr, dmgMedian), n, iqrcBase);
         var cTurns   = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBase, n);
         var cPots    = ColBadRelative($"{avgPots:F1}", avgPots, potsBase, n, PotionBaselineFloor, PotionKScale);
         var cDeaths  = FormatDeathsCellInner(stat.Died, n, deathRate, deathRateBase);
@@ -734,7 +734,7 @@ public static class EncounterTooltipHelper
         }
 
         string fIqr    = m.IQR.HasValue ? $"{m.IQR.Value.p25:F0}-{m.IQR.Value.p75:F0}" : "-";
-        string fSpread = FormatSpreadValue(m.IQR, m.Median);
+        string fSpread = m.IQR.HasValue ? $"{m.Iqrc * 100:F0}%" : "-";
         var fN         = $"{n}";
         var fDmg       = $"{m.Median:F0}";
         var fTurns     = $"{m.AvgTurns:F1}";
@@ -753,15 +753,6 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {P.Deaths}][right][color={color}]{fDeaths}[/color][/right][/cell]");
     }
 
-    /// <summary>Formats the IQRC as a percentage string ("82%"). Returns "-" when
-    /// there's insufficient data for an IQR or the median is zero.</summary>
-    private static string FormatSpreadValue((double p25, double p75)? iqr, double median)
-    {
-        if (!iqr.HasValue) return "-";
-        double iqrc = (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median, 1.0);
-        return $"{iqrc * 100:F0}%";
-    }
-
     /// <summary>Formats the Spread cell for colored row-1 use. IQRC displayed as
     /// percent ("82%"), colored by ColBadLog against the IQRC baseline so ratio
     /// deviations are symmetric — a 4× swingier encounter colors with equal
@@ -773,15 +764,6 @@ public static class EncounterTooltipHelper
             return $"[color={TooltipHelper.NeutralShade}]-[/color]";
         string text = $"{iqrc.Value * 100:F0}%";
         return ColBadLog(text, iqrc.Value, iqrcBaseline, n);
-    }
-
-    /// <summary>Computes IQRC = (p75 - p25) / max(median, 1) from raw IQR bounds.
-    /// Returns null if IQR or median is unavailable. Used by single-encounter
-    /// callers that store raw per-fight damage values.</summary>
-    private static double? IqrcFromBounds((double p25, double p75)? iqr, double? median)
-    {
-        if (!iqr.HasValue || median == null) return null;
-        return (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
     }
 
     /// <summary>Computes median of dmg% values: each raw DamageValues entry divided by
@@ -814,6 +796,7 @@ public static class EncounterTooltipHelper
         public double DmgPctMedian;
         public double? IqrP25;
         public double? IqrP75;
+        public double? Iqrc;        // per-character IQRC = (IqrP75 - IqrP25) / max(DmgPctMedian, 1)
         public double AvgTurns;
         public double AvgPots;
         public double DeathRate;
@@ -826,27 +809,21 @@ public static class EncounterTooltipHelper
         int n = stat.Fought;
         double? dmgPct = DmgPctMedian(stat, startingHp);
         var iqrPct = DmgPctIQR(stat, startingHp);
+        double dmgPctValue = dmgPct ?? (stat.DmgPctSum / n * 100.0);
+        double? perCharIqrc = iqrPct.HasValue
+            ? (iqrPct.Value.p75 - iqrPct.Value.p25) / Math.Max(dmgPctValue, 1.0)
+            : (double?)null;
 
         list.Add(new AllCharsPerCharMetrics
         {
-            DmgPctMedian = dmgPct ?? (stat.DmgPctSum / n * 100.0),
+            DmgPctMedian = dmgPctValue,
             IqrP25 = iqrPct?.p25,
             IqrP75 = iqrPct?.p75,
+            Iqrc = perCharIqrc,
             AvgTurns = (double)stat.TurnsTakenSum / n,
             AvgPots = (double)stat.PotionsUsedSum / n,
             DeathRate = 100.0 * stat.Died / n,
         });
-    }
-
-    /// <summary>Median of a list of doubles. Returns 0 if empty.</summary>
-    private static double MedianOfDoubles(List<double> values)
-    {
-        if (values.Count == 0) return 0;
-        values.Sort();
-        int n = values.Count;
-        return n % 2 == 1
-            ? values[n / 2]
-            : (values[n / 2 - 1] + values[n / 2]) / 2.0;
     }
 
     /// <summary>Renders the All (baseline) row from per-character metrics. Percentile
@@ -860,13 +837,13 @@ public static class EncounterTooltipHelper
         var P = AllCharsColumns;
 
         // Median-of-medians for dmg%
-        double allDmgPct = MedianOfDoubles(metrics.Select(m => m.DmgPctMedian).ToList());
+        double allDmgPct = StatsAggregator.MedianOf(metrics.Select(m => m.DmgPctMedian).ToList());
 
         // Median-of-p25s and median-of-p75s for IQR
         var p25s = metrics.Where(m => m.IqrP25.HasValue).Select(m => m.IqrP25!.Value).ToList();
         var p75s = metrics.Where(m => m.IqrP75.HasValue).Select(m => m.IqrP75!.Value).ToList();
         (double p25, double p75)? allIqr = p25s.Count > 0 && p75s.Count > 0
-            ? (MedianOfDoubles(p25s), MedianOfDoubles(p75s))
+            ? (StatsAggregator.MedianOf(p25s), StatsAggregator.MedianOf(p75s))
             : null;
 
         // Mean-of-means for turns, pots, death rate (character-weighted, matching
@@ -875,9 +852,16 @@ public static class EncounterTooltipHelper
         double allPots      = metrics.Average(m => m.AvgPots);
         double allDeathRate = metrics.Average(m => m.DeathRate);
 
+        // Median-of-per-character-IQRCs (matches the unified Spread aggregation
+        // used by StatsAggregator.AggregateMetricsFromEvents). Composes cleanly:
+        // each character's displayed Spread is their own IQRC; medianing across
+        // characters gives "typical character's Spread for this encounter".
+        var perCharIqrcs = metrics.Where(m => m.Iqrc.HasValue).Select(m => m.Iqrc!.Value).ToList();
+        double? allIqrc = perCharIqrcs.Count > 0 ? StatsAggregator.MedianOf(perCharIqrcs) : (double?)null;
+
         string fDmgPct  = $"{allDmgPct:F0}%";
         string fIqr     = allIqr.HasValue ? $"{allIqr.Value.p25:F0}-{allIqr.Value.p75:F0}%" : "-";
-        string fSpread  = FormatSpreadValue(allIqr, allDmgPct);
+        string fSpread  = allIqrc.HasValue ? $"{allIqrc.Value * 100:F0}%" : "-";
         string fTurns   = $"{allTurns:F1}";
         string fPots    = $"{allPots:F1}";
         string fDeaths  = $"{allDeathRate:F0}%";
@@ -897,7 +881,7 @@ public static class EncounterTooltipHelper
     private struct AllRowBaselines
     {
         public double DmgPct;       // median-of-medians dmg%
-        public double Iqrc;         // IQRC computed from median-of-median IQR / median dmg%
+        public double Iqrc;         // median of per-character IQRCs
         public double AvgTurns;     // mean-of-means turns
         public double AvgPots;      // mean-of-means potions
         public double DeathRate;    // mean-of-means death rate (0–100)
@@ -909,17 +893,10 @@ public static class EncounterTooltipHelper
         if (metrics.Count == 0)
             return new AllRowBaselines { DmgPct = 20, Iqrc = 1.0, AvgTurns = 3, AvgPots = 0.3, DeathRate = 10 };
 
-        double dmgPct = MedianOfDoubles(metrics.Select(m => m.DmgPctMedian).ToList());
+        double dmgPct = StatsAggregator.MedianOf(metrics.Select(m => m.DmgPctMedian).ToList());
 
-        var p25s = metrics.Where(m => m.IqrP25.HasValue).Select(m => m.IqrP25!.Value).ToList();
-        var p75s = metrics.Where(m => m.IqrP75.HasValue).Select(m => m.IqrP75!.Value).ToList();
-        double iqrc = 1.0;
-        if (p25s.Count > 0 && p75s.Count > 0)
-        {
-            double medP25 = MedianOfDoubles(p25s);
-            double medP75 = MedianOfDoubles(p75s);
-            iqrc = (medP75 - medP25) / Math.Max(dmgPct, 1.0);
-        }
+        var perCharIqrcs = metrics.Where(m => m.Iqrc.HasValue).Select(m => m.Iqrc!.Value).ToList();
+        double iqrc = perCharIqrcs.Count > 0 ? StatsAggregator.MedianOf(perCharIqrcs) : 1.0;
 
         return new AllRowBaselines
         {
@@ -963,7 +940,7 @@ public static class EncounterTooltipHelper
         var cN      = TooltipHelper.ColN($"{n}", n);
         var cDmg    = ColBad(fDmgPct, displayDmgPct, n, baselines.DmgPct);
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread = FormatSpreadCell(IqrcFromBounds(iqrPct, displayDmgPct), n, baselines.Iqrc);
+        var cSpread = FormatSpreadCell(StatsAggregator.Iqrc(iqrPct, displayDmgPct), n, baselines.Iqrc);
         var cTurns  = ColBadRelative(fTurns, avgTurns, baselines.AvgTurns, n);
         var cPots   = ColBadRelative(fPots, avgPots, baselines.AvgPots, n, PotionBaselineFloor, PotionKScale);
         var cDeaths = FormatDeathsCellInner(stat.Died, n, deathRate, baselines.DeathRate);
@@ -1307,13 +1284,15 @@ public static class EncounterTooltipHelper
     /// <summary>
     /// Derives coloration baselines from an encounter-weighted PoolMetrics. Used as
     /// the reference for coloring the focused encounter row. The median baseline is
-    /// the median of per-encounter medians; the IQRC baseline is the mean of
-    /// per-encounter IQRCs (documented `GetEncounterIqrcBaseline` algorithm, which
+    /// the median of per-encounter medians; the IQRC baseline is the median of
+    /// per-encounter IQRCs (see <c>GetEncounterIqrcBaseline</c>, which
     /// <see cref="StatsAggregator.AggregateMetricsFromEvents"/> pre-computes into
     /// <c>m.Iqrc</c>). Using <c>m.Iqrc</c> here keeps the focused-view Spread cell
     /// aligned with the encounter-list per-row Spread coloring (both ratio the
-    /// encounter's own IQRC against the same pool baseline). The other baselines
-    /// stay mean-aggregated.
+    /// encounter's own IQRC against the same pool baseline) and stays robust to
+    /// outlier encounters where the per-encounter median is 0/floored. The other
+    /// baselines stay mean-aggregated. See slay-the-stats-discuss.2026-04-25.txt
+    /// for the rationale on switching from mean to median.
     /// </summary>
     private static (double medianBase, double iqrcBase, double deathRateBase, double turnsBase, double potsBase) DeriveBaselines(PoolMetrics m)
     {
@@ -1480,7 +1459,7 @@ public static class EncounterTooltipHelper
         var cN      = TooltipHelper.ColN($"{n}", n);
         var cDmg    = ColBadRelative($"{dmgMedian:F0}", dmgMedian, dmgBaseline, n);
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread = FormatSpreadCell(IqrcFromBounds(iqr, dmgMedian), n, iqrcBaseline);
+        var cSpread = FormatSpreadCell(StatsAggregator.Iqrc(iqr, dmgMedian), n, iqrcBaseline);
         var cTurns  = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBaseline, n);
 
         sb.Append($"[cell {CombatCellPadding}][right]{cN}[/right][/cell]");

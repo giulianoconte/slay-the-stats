@@ -607,7 +607,8 @@ public static class StatsAggregator
     /// Generic encounter-weighted metrics aggregation. Each EncounterEvent in the input
     /// contributes one observation per metric: per-encounter median, p25, p75, avg turns,
     /// avg potions, dmg%, death rate, IQRC. Percentile-based metrics (median, p25, p75)
-    /// aggregate via median-of-values; mean-based metrics aggregate via average.
+    /// and IQRC aggregate via median-of-values (robust to outlier groups); mean-based
+    /// metrics (turns, pots, dmg%, death rate) aggregate via average.
     ///
     /// Used both for pool aggregations across multiple encounter types (each event = one
     /// encounter type) and for cross-character aggregations of a single encounter (each
@@ -641,8 +642,8 @@ public static class StatsAggregator
             {
                 p25s.Add(iqr.Value.p25);
                 p75s.Add(iqr.Value.p75);
-                if (median.HasValue)
-                    iqrcs.Add((iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0));
+                var iqrc = Iqrc(iqr, median);
+                if (iqrc.HasValue) iqrcs.Add(iqrc.Value);
             }
 
             avgTurnsList.Add((double)e.TurnsTakenSum / e.Fought);
@@ -663,13 +664,13 @@ public static class StatsAggregator
             AvgPots   = avgPotsList .Count > 0 ? avgPotsList .Average() : 0,
             AvgDmgPct = avgDmgPcts  .Count > 0 ? avgDmgPcts  .Average() : 0,
             DeathRate = deathRates  .Count > 0 ? deathRates  .Average() : 0,
-            Iqrc      = iqrcs       .Count > 0 ? iqrcs       .Average() : 1.0,
+            Iqrc      = iqrcs       .Count > 0 ? MedianOf(iqrcs)         : 1.0,
         };
     }
 
     /// <summary>Median of a list of doubles. Returns 0 for an empty list. For even-length
-    /// lists, returns the average of the two middle values.</summary>
-    private static double MedianOf(List<double> values)
+    /// lists, returns the average of the two middle values. Non-mutating (sorts a copy).</summary>
+    internal static double MedianOf(List<double> values)
     {
         if (values.Count == 0) return 0;
         var sorted = values.OrderBy(v => v).ToList();
@@ -677,6 +678,15 @@ public static class StatsAggregator
         return n % 2 == 1
             ? sorted[n / 2]
             : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+    }
+
+    /// <summary>Single-pool IQR coefficient: <c>(p75 − p25) / max(median, 1)</c>.
+    /// Returns null if either input is missing. The <c>max(·,1)</c> floor stops
+    /// tiny medians from inflating the ratio.</summary>
+    internal static double? Iqrc((double p25, double p75)? iqr, double? median)
+    {
+        if (!iqr.HasValue || !median.HasValue) return null;
+        return (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
     }
 
     /// <summary>
@@ -888,13 +898,14 @@ public static class StatsAggregator
     /// Computes the pooled IQR coefficient (IQRC = IQR / median) across all encounters
     /// matching the filter in a given category and biome. For each encounter, aggregates
     /// all DamageValues across matching contexts, computes that encounter's IQRC, then
-    /// averages across encounters (weighted equally, skipping encounters with insufficient
-    /// data for a meaningful IQR). Falls back to 1.0 if no qualifying encounters.
+    /// takes the median across encounters (robust to outlier encounters where the median
+    /// damage is small / floored — see slay-the-stats-discuss.2026-04-25.txt for the
+    /// switch from mean to median). Skips encounters with insufficient data for a
+    /// meaningful IQR. Falls back to 1.0 if no qualifying encounters.
     /// </summary>
     public static double GetEncounterIqrcBaseline(StatsDb db, AggregationFilter filter, string? category = null, string? biome = null)
     {
-        double totalIqrc = 0;
-        int count = 0;
+        var iqrcs = new List<double>();
 
         foreach (var (encId, contextMap) in db.Encounters)
         {
@@ -917,17 +928,13 @@ public static class StatsAggregator
 
             if (merged == null || merged.Count < 4) continue; // need enough data for meaningful IQR
 
-            // Compute this encounter's IQRC
             var tempEvent = new EncounterEvent { DamageValues = merged };
-            var median = tempEvent.DamageMedian();
-            var iqr = tempEvent.DamageIQR();
-            if (median == null || iqr == null) continue;
-
-            totalIqrc += (iqr.Value.p75 - iqr.Value.p25) / Math.Max(median.Value, 1.0);
-            count++;
+            var iqrc = Iqrc(tempEvent.DamageIQR(), tempEvent.DamageMedian());
+            if (!iqrc.HasValue) continue;
+            iqrcs.Add(iqrc.Value);
         }
 
-        return count == 0 ? 1.0 : totalIqrc / count;
+        return iqrcs.Count == 0 ? 1.0 : MedianOf(iqrcs);
     }
 
     /// <summary>
