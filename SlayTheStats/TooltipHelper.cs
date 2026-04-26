@@ -30,7 +30,10 @@ internal static class TooltipHelper
         Normal = BuildLocaleAwareKreon(KreonRegularPath, FontType.Regular),
     };
 
-    private const string KreonRegularPath = "res://themes/kreon_regular_glyph_space_one.tres";
+    // Internal so EncounterTooltipHelper can pin its invisible sizing-row em-spaces
+    // to Kreon via BBCode `[font=…]` regardless of the locale-substituted run-time
+    // font — see EncounterTooltipHelper.EmSpacePxAtFs1 for why the metric matters.
+    internal const string KreonRegularPath = "res://themes/kreon_regular_glyph_space_one.tres";
     private const string KreonBoldPath    = "res://themes/kreon_bold_glyph_space_one.tres";
 
     private static bool           _headerStyleApplied;

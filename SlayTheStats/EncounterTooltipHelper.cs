@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Godot;
+using MegaCrit.Sts2.Core.Localization;
 
 namespace SlayTheStats;
 
@@ -311,14 +312,24 @@ public static class EncounterTooltipHelper
     private static readonly Vector2I BestiarySparklineSize = new Vector2I(50, 22);
 
     // Calibration: U+2003 EM SPACE at [font_size=1] does NOT advance at 1
-    // device pixel — empirically it advances at ~1.67 px (54 em-spaces in
-    // a Spark cell with no other content rendered as a ~90 px column).
+    // device pixel — empirically it advances at ~1.67 px in Kreon (54 em-spaces
+    // in a Spark cell with no other content rendered as a ~90 px column).
     // The sizing-row mechanism below converts target-px into em-space count
     // by dividing by this ratio so `widthPx` actually maps to `widthPx`
     // pixels of column floor. Tune if column widths drift after font or
     // theme changes — verify by setting a known target (e.g.
     // PartsToPx(SparkParts) = 54) and measuring the rendered cell.
+    //
+    // Locale caveat: this calibration is Kreon-specific. For locales where the
+    // RichTextLabel font is swapped to a substitute (rus/pol → Fira Sans
+    // Condensed; jpn/kor/zhs/tha → Noto-family), U+2003 renders closer to spec
+    // (~1 em = font_size, so ~1 px at fs=1) and the floor would collapse to
+    // ~60% of the intended px. Sizing-row em-spaces are therefore wrapped in
+    // `[font=KreonRegularPath]` to pin the metric to Kreon in every locale —
+    // the content is invisible (fs=1) so font choice has no visual effect.
     private const float EmSpacePxAtFs1 = 1.67f;
+    private static readonly string SizingFontOpen  = $"[font={TooltipHelper.KreonRegularPath}]";
+    private const           string SizingFontClose = "[/font]";
 
 
     // Section colors for focused-character view. Row descriptors (labels like
@@ -449,10 +460,27 @@ public static class EncounterTooltipHelper
 
         public int SumDataParts => FoughtParts + SparkParts + DmgParts + Mid50Parts + SpreadParts
                                    + TurnsParts + PotsParts + DeathsParts;
+
+        /// <summary>Returns a copy with the named columns overridden, all other columns
+        /// preserved. Lets per-locale entries in <see cref="FocusedByLocale"/> /
+        /// <see cref="AllCharsByLocale"/> express themselves as deltas off the English
+        /// default — e.g. <c>FocusedDefault.With(turns: 3)</c> — instead of restating
+        /// every column.</summary>
+        public ColumnPaddings With(int? fought = null, int? spark = null, int? dmg = null,
+            int? mid50 = null, int? spread = null, int? turns = null, int? pots = null, int? deaths = null)
+            => new(
+                fought:  fought  ?? FoughtParts,
+                spark:   spark   ?? SparkParts,
+                dmg:     dmg     ?? DmgParts,
+                mid50:   mid50   ?? Mid50Parts,
+                spread:  spread  ?? SpreadParts,
+                turns:   turns   ?? TurnsParts,
+                pots:    pots    ?? PotsParts,
+                deaths:  deaths  ?? DeathsParts);
     }
 
-    // Both views share the same data-column part distribution so data columns render
-    // at identical widths across the focused and all-chars tables.
+    // English (default) part distribution. Both views share the same data columns so
+    // data values render at identical widths across the focused and all-chars tables.
     // Distribution (doubled units; 1 part = ~13.5 px):
     //   Fought:4  Spark:4  Dmg:4  Mid50:6  Spread:5  Turns:5  Pots:4  Deaths:6.
     // Total data parts = 38. All-chars total = 12 desc + 38 data = 50 parts = 675 px;
@@ -464,21 +492,59 @@ public static class EncounterTooltipHelper
     // "12/42" also gets 6. Turns previously sat at 4 parts (54 px) but ran too close
     // to Spread visually — bumped to 5; Spread dropped from 6 to 5 to compensate so
     // the data-parts total stays at 38.
-    private static readonly ColumnPaddings FocusedColumns =
+    private static readonly ColumnPaddings FocusedDefault =
         new(fought: 4, spark: 4, dmg: 4, mid50: 6, spread: 5, turns: 5, pots: 4, deaths: 6);
-    private static readonly ColumnPaddings AllCharsColumns =
+    private static readonly ColumnPaddings AllCharsDefault =
         new(fought: 4, spark: 4, dmg: 4, mid50: 6, spread: 5, turns: 5, pots: 4, deaths: 6);
+
+    // Per-locale overrides. English headers fit the defaults above; substitution-locale
+    // headers (rus/pol → Fira Sans Condensed; jpn/kor/zhs/tha → Noto-family) have
+    // different per-character widths and per-string lengths, so each language can
+    // shrink (or grow) any individual column without touching others. Use
+    // <c>FocusedDefault.With(turns: N)</c> for partial overrides. Add entries
+    // measurement-driven — open the bestiary in-locale and trim columns with
+    // visible slack until the header sits comfortably above the data without
+    // crowding its neighbour.
+    private static readonly Dictionary<string, ColumnPaddings> FocusedByLocale = new()
+    {
+        // "Ходы" (Russian "Turns") is appreciably narrower than English "Turns" and
+        // sits on top of the same 1-2 digit data values; provisional 3 parts (~40 px)
+        // pending visual confirmation. Adjust if data values get clipped.
+        ["rus"] = FocusedDefault.With(turns: 3),
+    };
+    private static readonly Dictionary<string, ColumnPaddings> AllCharsByLocale = new()
+    {
+        ["rus"] = AllCharsDefault.With(turns: 3),
+    };
+
+    private static ColumnPaddings FocusedColumns
+    {
+        get
+        {
+            var lang = LocManager.Instance?.Language;
+            return lang != null && FocusedByLocale.TryGetValue(lang, out var p) ? p : FocusedDefault;
+        }
+    }
+
+    private static ColumnPaddings AllCharsColumns
+    {
+        get
+        {
+            var lang = LocManager.Instance?.Language;
+            return lang != null && AllCharsByLocale.TryGetValue(lang, out var p) ? p : AllCharsDefault;
+        }
+    }
 
     /// <summary>Focused-view descriptor parts — must match the default on
     /// <see cref="AppendDescriptorCell"/> and <see cref="AppendSizingRow"/>.</summary>
     public const int FocusedDescriptorParts = 22;
-    public static readonly int FocusedTotalParts = FocusedDescriptorParts + FocusedColumns.SumDataParts;
-    public static readonly int FocusedTableWidthPx = PartsToPx(FocusedTotalParts);
+    public static int FocusedTotalParts   => FocusedDescriptorParts + FocusedColumns.SumDataParts;
+    public static int FocusedTableWidthPx => PartsToPx(FocusedTotalParts);
     /// <summary>All-chars-view descriptor parts — narrower than focused since character-
     /// name descriptors are shorter than focused's pool labels.</summary>
     public const int AllCharsDescriptorParts = 12;
-    public static readonly int AllCharsTotalParts = AllCharsDescriptorParts + AllCharsColumns.SumDataParts;
-    public static readonly int AllCharsTableWidthPx = PartsToPx(AllCharsTotalParts);
+    public static int AllCharsTotalParts   => AllCharsDescriptorParts + AllCharsColumns.SumDataParts;
+    public static int AllCharsTableWidthPx => PartsToPx(AllCharsTotalParts);
 
     private static string EmptyDataCell(string padding, string? color = null, string align = "right")
     {
@@ -516,7 +582,7 @@ public static class EncounterTooltipHelper
         // Sizing row cells must carry the SAME expand attribute as their real-row counterparts
         // — mismatch would cause Godot to treat the sizing cell as a separate column with
         // different expand, breaking the layout.
-        sb.Append($"[cell expand={descParts} {DescriptorCellPadding}][font_size=1]{EmSpacesForPx(PartsToPx(descParts))}[/font_size][/cell]");
+        sb.Append($"[cell expand={descParts} {DescriptorCellPadding}]{SizingFontOpen}[font_size=1]{EmSpacesForPx(PartsToPx(descParts))}[/font_size]{SizingFontClose}[/cell]");
         AppendSizingDataCell(sb, P.Fought, PartsToPx(P.FoughtParts));
         AppendSizingDataCell(sb, P.Spark,  PartsToPx(P.SparkParts));
         AppendSizingDataCell(sb, P.Dmg,    PartsToPx(P.DmgParts));
@@ -529,7 +595,7 @@ public static class EncounterTooltipHelper
 
     private static void AppendSizingDataCell(StringBuilder sb, string padding, int widthPx)
     {
-        sb.Append($"[cell {padding}][font_size=1]{EmSpacesForPx(widthPx)}[/font_size][/cell]");
+        sb.Append($"[cell {padding}]{SizingFontOpen}[font_size=1]{EmSpacesForPx(widthPx)}[/font_size]{SizingFontClose}[/cell]");
     }
 
     private static string EmSpaces(int count) => new string('\u2003', count);
