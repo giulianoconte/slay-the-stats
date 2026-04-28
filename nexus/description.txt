@@ -10,21 +10,58 @@ NEW IN v1.0.0
 - Requires BaseLib v3.0.9 or later (was 0.2.5).
 
 ------------------------------------------------------------------------
-WHAT IT DOES
+CARD & RELIC STATS
 ------------------------------------------------------------------------
 
-SlayTheStats reads your full run history retroactively. Stats are updated when you finish a run or start the game. Abandoned runs are skipped.
+SlayTheStats reads your run history retroactively. Abandoned runs are skipped.
+
+Stats appear as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium. They're split out by act -- the act in which you acquired your first copy of the card.
 
 - Pick% -- how often you pick a card when it's offered as a fight reward.
 - Win% -- how often you win runs that include a given card or relic.
-- Runs -- shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. 12/30). For relics, just the number of runs present. It is split out by act - the act in which you acquired your first copy of the card.
+- Runs -- shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. 12/30). For relics, just the number of runs present.
 - Buys -- for colorless cards and relics: shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. 12/30).
 
-Stats are shown as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium.
+------------------------------------------------------------------------
+ENCOUNTER STATS
+------------------------------------------------------------------------
 
-Color coding helps you read the data at a glance:
-- Pick% and Win% are colored relative to your personal baseline. Your baseline is the average win rate and pick rate on fight rewards for the character.
-- Color intensity is sensitive to both sample size and deviation, so a high winrate over a few runs can be considered as significant as a moderately high winrate across many runs.
+Every combat encounter in your run history is parsed and tracked: how often you fought it, how much damage you took, how many turns it took, how many potions you used, and which encounters killed you on losing runs. Three surfaces:
+
+- In-combat tooltip -- hover an enemy (or its health bar) for ~0.75s during combat to see your historical stats for that encounter, scoped to the current run's character.
+- Post-fight tooltip -- after winning a fight, a tooltip on the reward screen compares this fight's damage / turns / potions to your historical average, with a significance-colored delta and a percentile rank.
+- Stats Bestiary -- a new page in the compendium listing every encounter, grouped by biome / act and category (weak / normal / elite / boss / event). Live monster preview on hover, multiple sort modes (Name, Times Fought, Dmg, Spread, Turns, Death%), and a Raw vs. Significance ranking toggle. Has its own filter pane subset (ascension / version / profile only -- class and upgrade-grouping don't apply to encounters).
+
+Columns shown across these surfaces:
+
+- Fights -- how many times you fought this encounter.
+- Dist -- sparkline of damage-taken distribution across fights. See VISUALIZATION below.
+- Dmg -- median damage taken.
+- Mid 50% -- the range typical fight damage lands in (a quarter of fights below the lower number, half within, a quarter above).
+- Spread -- the Mid 50% range as a fraction of the median. Higher means damage is less consistent fight-to-fight.
+- Turns -- average turns.
+- Pots -- average potions used.
+- Deaths -- runs ended by this encounter as a fraction of total fights.
+
+------------------------------------------------------------------------
+EVENT STATS
+------------------------------------------------------------------------
+
+Hover an event option button in-run to see your historical stats for that specific choice -- how many times you've picked it, your win rate when you did, and a baseline for comparison. Aggregated by character, ascension, act, profile, and version, same as the card and relic stats.
+
+Multi-step events (The Lantern Key, etc.) bucket per terminal option so each branch of the choice tree gets its own stats. Variable-outcome events like Future of Potions split per offered rarity (Common / Uncommon / Rare / Event) -- the tooltip shows raw Picks counts there since the game doesn't record what wasn't offered, so a Pick% denominator wouldn't be meaningful.
+
+Ancient events (Neow, Pael, Vakuu, etc.) are excluded -- their relic-only options are already covered by the relic stats above.
+
+------------------------------------------------------------------------
+VISUALIZATION
+------------------------------------------------------------------------
+
+Two visualization layers make the numbers readable at a glance.
+
+Significance coloration. Pick%, Win%, encounter Dmg, post-fight deltas, and other comparable stats are colored relative to a baseline -- green/teal for above baseline, orange/red for below. Color intensity scales with both sample size and deviation, so a moderate deviation across many runs reads as significant as a strong deviation across few. A color-blind palette (teal/orange instead of green/red) is available in settings.
+
+Density curves. The Dist column in encounter stats renders each row's fight-by-fight damage distribution as a sparkline -- a smooth distribution curve with a shaded Mid-50% region and a median line. All rows in a table share the same x-axis, so the same horizontal position means the same damage value across rows -- distributions can be read side-by-side to compare consistency between encounters or characters.
 
 ------------------------------------------------------------------------
 REQUIREMENTS
@@ -50,7 +87,8 @@ Open the in-game compendium (Card Library or Relic Collection) and click the Sla
 - Version range -- restrict to specific game versions.
 - Profile -- restrict to a single save profile, or aggregate across all profiles.
 - Class -- "All", "Match class card" (use the card's owning class for class cards, all-chars for colorless/curse), or filter to a specific character.
-- Group card upgrades -- merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately.
+- Group card upgrades -- merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately. Default on.
+- Include multiplayer runs -- include co-op runs alongside standard runs. Default off (only standard runs are counted, matching prior behavior).
 
 Active filters are highlighted in green so it's obvious which controls are diverging from your defaults. Three action buttons at the bottom:
 
@@ -70,13 +108,7 @@ Shop purchases (Buys): For colorless cards and relics, the tooltip shows how oft
 
 Colorless Cards, Event Cards, Ancient Relics, Curses, etc are all tracked.
 
-Mod settings (color blind mode, in-run stats toggle, master off switch, debug mode) can be configured in-game from BaseLib's mod configuration page. Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above.
-
-------------------------------------------------------------------------
-ACCESSIBILITY
-------------------------------------------------------------------------
-
-ColorBlindMode (teal/orange instead of green/red) is available in settings.
+Mod settings (color blind mode, in-run stats toggle, master off switch) can be configured in-game from BaseLib's mod configuration page. Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above.
 
 ------------------------------------------------------------------------
 SAVE DATA
@@ -148,12 +180,6 @@ I was mistaken - you never needed GUMM to run this mod. Sorry! Here's how to uni
 - Delete the GUMM file from your game's data folder:
   - Windows: %APPDATA%\Slay the Spire 2\
   - Linux: ~/.local/share/Slay the Spire 2/
-
-------------------------------------------------------------------------
-COMING SOON
-------------------------------------------------------------------------
-
-Event tracking, post-fight summary, localization.
 
 ------------------------------------------------------------------------
 TRANSLATIONS
