@@ -12,7 +12,7 @@ SlayTheStats reads your full run history retroactively. Stats are updated when y
 
 **Card and relic stats:**
 
-- **Pick%** — how often you pick a card when it's offered on as a fight reward.
+- **Pick%** — how often you pick a card when it's offered as a fight reward.
 - **Win%** — how often you win runs that include a given card or relic.
 - **Runs** — shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. `12/30`). For relics, just the number of runs it was present.
 - **Buys** — for colorless cards and relics: Shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. `12/30`).
@@ -21,11 +21,17 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 
 **Encounter stats** (Stats Bestiary + in-combat + post-fight):
 
-- **Stats Bestiary** — new compendium page listing every encounter, grouped by biome/act and category (weak / normal / elite / boss / event). Shows Times Fought, median Damage taken, Mid 50% damage range, Spread (how swingy the fight is), average Turns, average Pots, and Death%.
+- **Stats Bestiary** — new compendium page listing every encounter, grouped by biome/act and category (weak / normal / elite / boss / event). Columns: Fights, Dist (damage distribution sparkline), Dmg (median damage taken), Mid 50% (typical damage range), Spread (Mid 50% as a fraction of the median), Turns, Pots, and Deaths.
 - **Live monster preview** — hover an encounter to see its monsters rendered live in the right-hand panel. A few encounters (Skulking Colony, Kaiser Crab, Doormaker) don't have previews yet and show a "Preview WIP" placeholder instead.
 - **Table Style selector** — switch between an all-characters comparison view and a per-character focused view with the full stat breakdown.
 - **In-combat tooltip** — hover an enemy (or its health bar) for ~0.75s during combat to see your historical stats for that encounter, scoped to your current run's character.
 - **Post-fight comparison tooltip** — after winning a fight, a tooltip on the reward screen compares this fight's damage / turns / potions to your historical average with a significance-colored delta.
+
+**Event stats** (in-run hover):
+
+- Hover an event option in-run to see how many times you've picked it, your win rate when you did, and a baseline for comparison.
+- Multi-step events (e.g. Slippery Bridge) bucket per terminal option so each branch of the choice tree gets its own stats.
+- Some events don't record what was offered, only what was picked — e.g. Future of Potions, where the rarity is randomized per visit. For those, the tooltip shows raw pick counts rather than a Pick%, since the denominator (times offered) isn't recoverable from the run history.
 
 **Color coding** helps you read the data at a glance:
 - Pick% and Win% are colored relative to your personal baseline — your overall win rate for the current character, and your average pick rate across all fight reward screens (accounting for how often you skip). Green/teal means above baseline, orange/red means below.
@@ -34,13 +40,13 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 
 ### Requirements
 
-- [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v3.0.9 or later.
+- [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v3.1.0 or later.
 - **NOTE:** GUMM is NOT required. If you previously installed it for this mod, see [Uninstalling GUMM](#uninstalling-gumm) below.
 
 ### Installation
 
-1. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v3.0.9 or later) into your mods folder if you haven't already
-2. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll` and `SlayTheStats.json`
+1. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v3.1.0 or later) into your mods folder if you haven't already
+2. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll`, `SlayTheStats.json`, and `SlayTheStats.pck`
 
 ### Uninstalling
 
@@ -73,8 +79,9 @@ Open the in-game compendium (Card Library or Relic Collection) and click the **S
 - **Ascension range** — show stats only from runs within an ascension band. The "Lowest" and "Highest" entries auto-track the actual ascensions present in your data, so they keep working if mods add new levels.
 - **Version range** — restrict to specific game versions, useful for ignoring runs from old balance patches.
 - **Profile** — restrict to a single save profile, or aggregate across all profiles.
-- **Class** — `All`, `Match class card` (use the card's owning class for class cards, all-chars for colorless/curse), or filter to a specific character.
-- **Group card upgrades** — merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately. Defaults to on.
+- **Class** — `Auto` restricts to the character class for the card. You can also force a specific character — e.g. to show only Silent's stats for colorless cards.
+- **Group card upgrades** — merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately. Default on.
+- **Include multiplayer runs** — include co-op runs alongside standard runs. Default off (only standard runs are counted, matching prior behavior). **Multiplayer stats tracking is untested.**
 
 Active filters are highlighted in green so it's obvious which controls are diverging from your defaults. Three action buttons at the bottom:
 
@@ -121,6 +128,12 @@ Color intensity reflects both sample size and magnitude of deviation from your b
 **Why don't I see stats for a card I've used?**
 Open the filter pane in the compendium and check your filters. If your ascension range is restricted, runs outside that band are hidden. If your class filter is set to a specific character, cards from other characters are hidden. If **Group card upgrades** is off, the upgraded and base versions of each card are tracked separately, which can split sparse data. You may also just need more runs with the card.
 
+**I'm seeing "no data" for everything.**
+The mod can't find your run history. Set the **Data Directory** setting (in BaseLib's mod configuration page) to the `SlayTheSpire2` folder containing your save data — `%APPDATA%\SlayTheSpire2` on Windows, `~/.local/share/SlayTheSpire2/` on Linux. Note that you need the full path. Please file a bug report so I can fix the platform default.
+
+**I lost my save data after installing.**
+It's not lost. The game separates modded profiles from normal ones by default, so installing mods makes vanilla progress look gone. If you want vanilla untouched, create a new modded profile and use an unlock mod for progress. To copy a vanilla profile into a modded slot, see [Transferring a Vanilla Profile to a Modded Profile](#transferring-a-vanilla-profile-to-a-modded-profile) below. The UnifiedSavePath mod is another option.
+
 ### Where Stats Are Saved
 
 Stats are stored in `slay-the-stats.json`:
@@ -129,11 +142,32 @@ Stats are stored in `slay-the-stats.json`:
 
 On startup, if the mod version has changed since your last session, all run history is reprocessed to update stats.
 
+### Transferring a Vanilla Profile to a Modded Profile
+
+> Disclaimer — this is how I did it on 2026-04-24. It may no longer work. For the most up-to-date method, ask in the `sts2-modding` channel on the Slay the Spire Discord.
+
+The game stores modded saves in a separate `modded/` subfolder, so installing mods makes vanilla progress look gone. To copy a vanilla profile over:
+
+1. **BACK UP your vanilla profile folder first.** Do **not** later try to copy modded saves back over vanilla — modded run history can contain data vanilla can't parse and will corrupt the file. Vanilla → modded only.
+2. Launch with mods loaded and switch in-game to a profile slot **other** than the one you want to overwrite (e.g. to import vanilla profile 1, first switch to modded profile 2 or 3). The game holds the active slot in memory and would otherwise overwrite your copy on the next save.
+3. Leaving the game running, copy the contents of `profile1/` (or whichever) into `modded/profile1` (same profile number). Save roots:
+   - **Windows:** `%APPDATA%\SlayTheSpire2\steam\<STEAM_ID>\`
+   - **macOS:** `~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/`
+   - **Linux:** `~/.local/share/SlayTheSpire2/steam/<STEAM_ID>/`
+   - You can also open the in-game console (`` ` `` or `~`) and type `open saves` to jump there.
+4. Back in-game, switch to the target profile slot. Your vanilla progress should now be visible.
+
 ### Troubleshooting
 
 Check the Godot log for `[SlayTheStats]` entries:
 - **Windows:** `%APPDATA%\Godot\app_userdata\Slay the Spire 2\logs\godot.log`
 - **Linux:** `~/.local/share/godot/app_userdata/Slay the Spire 2/logs/godot.log`
+
+### Translations
+
+The mod is localized into Russian and Simplified Chinese in-game; the locale follows the game's language setting. Native-speaker translation review is pending — if you spot awkward or wrong translations, please leave a comment or ping me on Discord.
+
+Want to help translate the mod into another language? DM me on the Slay the Spire Discord — my handle is `.theshoe`.
 
 ---
 

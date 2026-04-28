@@ -3,11 +3,10 @@ Translations: Русский · 中文 — see TRANSLATIONS at the bottom of thi
 ------------------------------------------------------------------------
 NEW IN v1.0.0
 ------------------------------------------------------------------------
-- Event tracking - hover an event option in-run to see your historical pick rate, win rate, and floor-deltas for that specific choice. Aggregated across runs by character / ascension / act / profile, same as the existing card and relic stats.
-- Localization - the mod is now translated to Chinese (Simplified) and Russian. The locale follows the game's setting. Native-speaker translation review pending; flag any awkward translations on the Discord and they'll be polished in a follow-up release.
-- Bestiary Dist column - new sparkline column showing each row's fight-by-fight damage distribution. KDE curve + IQR fill + median rule. All rows in a table share an x-axis so distributions are directly comparable across rows. Help popup explains the visualization and how Dist relates to the Dmg / Mid 50% / Spread numeric columns.
-- Spread unification - Spread is now consistently the median-of-encounter-IQRCs across all four display sites (in-run tooltip, bestiary list, all-chars table, focused view). Robust to outlier encounters that would otherwise pull a simple average around.
-- Requires BaseLib v3.0.9 or later (was 0.2.5).
+- Event tracking.
+- Localization - Chinese (Simplified) and Russian language support.
+- Bestiary encounter distribution graph - Shows distribution of damage taken from the encounter.
+- Requires BaseLib v3.1.0
 
 ------------------------------------------------------------------------
 CARD & RELIC STATS
@@ -15,7 +14,7 @@ CARD & RELIC STATS
 
 SlayTheStats reads your run history retroactively. Abandoned runs are skipped.
 
-Stats appear as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium. They're split out by act -- the act in which you acquired your first copy of the card.
+Stats appear as tooltips when hovering over cards and relics in-run and in the compendium.
 
 - Pick% -- how often you pick a card when it's offered as a fight reward.
 - Win% -- how often you win runs that include a given card or relic.
@@ -26,72 +25,70 @@ Stats appear as a tooltip when you hover over cards and relics during a run, in 
 ENCOUNTER STATS
 ------------------------------------------------------------------------
 
-Every combat encounter in your run history is parsed and tracked: how often you fought it, how much damage you took, how many turns it took, how many potions you used, and which encounters killed you on losing runs. Three surfaces:
+Every combat encounter in your run history is parsed and tracked: times fought, damage taken, potions used, etc. Hover over an encounter during a fight to see encounter stats.
 
-- In-combat tooltip -- hover an enemy (or its health bar) for ~0.75s during combat to see your historical stats for that encounter, scoped to the current run's character.
-- Post-fight tooltip -- after winning a fight, a tooltip on the reward screen compares this fight's damage / turns / potions to your historical average, with a significance-colored delta and a percentile rank.
-- Stats Bestiary -- a new page in the compendium listing every encounter, grouped by biome / act and category (weak / normal / elite / boss / event). Live monster preview on hover, multiple sort modes (Name, Times Fought, Dmg, Spread, Turns, Death%), and a Raw vs. Significance ranking toggle. Has its own filter pane subset (ascension / version / profile only -- class and upgrade-grouping don't apply to encounters).
+Post-fight tooltip -- a tooltip on the reward screen compares this fight's damage, turns, and potions to your historical average. Columns:
+- vs hist. -- the difference between this fight and historical.
+- pctile -- percentile that this fight lands in, e.g. damage pctile:15 means that 15% of fights for this encounter dealt less damage than the previous fight.
 
-Columns shown across these surfaces:
-
-- Fights -- how many times you fought this encounter.
-- Dist -- sparkline of damage-taken distribution across fights. See VISUALIZATION below.
+Bestiary (optional) -- a new page in the compendium listing every encounter, grouped by biome / act and encounter category. Columns:
+- Fights -- how many times fought.
+- Dist -- distribution of damage taken. See VISUALIZATION below.
 - Dmg -- median damage taken.
-- Mid 50% -- the range typical fight damage lands in (a quarter of fights below the lower number, half within, a quarter above).
-- Spread -- the Mid 50% range as a fraction of the median. Higher means damage is less consistent fight-to-fight.
+- Mid 50% -- typical range for damage taken. The middle 50% of fights land within this range.
+- Spread -- the Mid 50% range as a fraction of the median. Higher spread means damage is less consistent fight-to-fight.
 - Turns -- average turns.
 - Pots -- average potions used.
-- Deaths -- runs ended by this encounter as a fraction of total fights.
+- Deaths -- runs ended.
 
 ------------------------------------------------------------------------
 EVENT STATS
 ------------------------------------------------------------------------
 
-Hover an event option button in-run to see your historical stats for that specific choice -- how many times you've picked it, your win rate when you did, and a baseline for comparison. Aggregated by character, ascension, act, profile, and version, same as the card and relic stats.
+Hover an event option to see how many times you've picked it, your win rate when you did, and a baseline for comparison.
 
-Multi-step events (The Lantern Key, etc.) bucket per terminal option so each branch of the choice tree gets its own stats. Variable-outcome events like Future of Potions split per offered rarity (Common / Uncommon / Rare / Event) -- the tooltip shows raw Picks counts there since the game doesn't record what wasn't offered, so a Pick% denominator wouldn't be meaningful.
+Multi-step events (Slippery Bridge, etc.) bucket per terminal option so each branch of the choice tree gets its own stats.
 
-Ancient events (Neow, Pael, Vakuu, etc.) are excluded -- their relic-only options are already covered by the relic stats above.
+Not all events give complete data on options seen/offered, so some events don't have offered stats for different options. For example, Future of Potions has choices for Common, Uncommon, and Rare potions, however the run history doesn't show which of these were offered at the time, it only shows which one was picked by the player. For events like this you can't show a pick rate because you don't know the amount of times offered.
 
 ------------------------------------------------------------------------
 VISUALIZATION
 ------------------------------------------------------------------------
 
-Two visualization layers make the numbers readable at a glance.
+Color-blind palette available (teal/orange instead of green/red) is available in settings.
 
-Significance coloration. Pick%, Win%, encounter Dmg, post-fight deltas, and other comparable stats are colored relative to a baseline -- green/teal for above baseline, orange/red for below. Color intensity scales with both sample size and deviation, so a moderate deviation across many runs reads as significant as a strong deviation across few. A color-blind palette (teal/orange instead of green/red) is available in settings.
+Most stats shown may be colored positively or negatively if significantly better or worse than the baseline. Coloration takes into account both deviation and sample size, so a very high winrate over a few runs may be considered less significant than a moderately high winrate over many runs.
 
-Density curves. The Dist column in encounter stats renders each row's fight-by-fight damage distribution as a sparkline -- a smooth distribution curve with a shaded Mid-50% region and a median line. All rows in a table share the same x-axis, so the same horizontal position means the same damage value across rows -- distributions can be read side-by-side to compare consistency between encounters or characters.
+Encounter damage distribution graphs are shown in the bestiary so you can see the shape of the data. The median and middle 50% of fights are also displayed over the graph.
 
 ------------------------------------------------------------------------
 REQUIREMENTS
 ------------------------------------------------------------------------
 
-- BaseLib v3.0.9 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
 - **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "UNINSTALLING GUMM" below.
 
 ------------------------------------------------------------------------
 INSTALLATION
 ------------------------------------------------------------------------
 
-1. Download and extract BaseLib (v3.0.9 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
-2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll and SlayTheStats.json
+1. Download and extract BaseLib (v3.1.0 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
+2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, and SlayTheStats.pck.
 
 ------------------------------------------------------------------------
 COMPENDIUM FILTERS
 ------------------------------------------------------------------------
 
-Open the in-game compendium (Card Library or Relic Collection) and click the SlayTheStats button in the sidebar to open the filter pane. The pane lets you tune which runs feed your stats:
-
-- Ascension range -- show stats only from runs within an ascension band e.g. A5+.
-- Version range -- restrict to specific game versions.
-- Profile -- restrict to a single save profile, or aggregate across all profiles.
-- Class -- "All", "Match class card" (use the card's owning class for class cards, all-chars for colorless/curse), or filter to a specific character.
+All stats can be filtered to exclude certain runs. In each of the compendium pages (Card Library, Relic Collection, Stats Bestiary) has a SlayTheStats button on the bottom left to edit filters.
+- Ascension range -- restrict to certain ascensions e.g. A5-A9.
+- Version range -- restrict to specific game versions e.g. v0.100.0+.
+- Profile -- restrict to a single profile, or aggregate across all profiles.
+- Class -- "Auto" restricts to the character class for the card. You can also force specific characters, for example to show only Silent's stats for colorless cards.
 - Group card upgrades -- merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately. Default on.
 - Include multiplayer runs -- include co-op runs alongside standard runs. Default off (only standard runs are counted, matching prior behavior).
+  - NOTE: Multiplayer stats tracking is untested.
 
-Active filters are highlighted in green so it's obvious which controls are diverging from your defaults. Three action buttons at the bottom:
-
+Filter pane controls:
 - Clear Filters -- remove all filters
 - Reset -- restore to your saved defaults
 - Save Defaults -- persist the current values as your new defaults. Your defaults are always used when in-run.
@@ -104,19 +101,17 @@ Pick% is sourced only from fight rewards. Shop purchases, event cards, and other
 
 Win% counts all runs in which the card or relic was present in your final build, from any source.
 
-Shop purchases (Buys): For colorless cards and relics, the tooltip shows how often you purchased an item relative to how often it appeared in a shop, colored relative to your overall shop buy rate. Note that appearances are counted regardless of whether you could afford the item.
-
-Colorless Cards, Event Cards, Ancient Relics, Curses, etc are all tracked.
-
-Mod settings (color blind mode, in-run stats toggle, master off switch) can be configured in-game from BaseLib's mod configuration page. Filtering by ascension, version, profile, character, or upgrade grouping is done via the filter pane in the compendium -- see COMPENDIUM FILTERS above.
+Shop purchases (Buys): shows how often you purchased an item relative to how often it appeared in a shop. Note that appearances are counted regardless of whether you could afford the item.
 
 ------------------------------------------------------------------------
 SAVE DATA
 ------------------------------------------------------------------------
 
-Stats are stored in slay-the-stats.json:
+Stats are calculated upon opening the game and finishing a run. They are stored in slay-the-stats.json:
 - Windows: %APPDATA%\Slay the Spire 2\
 - Linux: ~/.local/share/Slay the Spire 2/
+
+You can always delete this file without losing data - the run history will be reread on next boot.
 
 ------------------------------------------------------------------------
 FAQ
@@ -124,7 +119,7 @@ FAQ
 
 Q: Why does a card show more "present" runs than "offered" runs (e.g. 5/1)?
 
-A: With "Group card upgrades" off, upgraded and base versions are tracked separately. "Present" counts all runs the card ended up in your deck from any source -- including upgrading the base card at a campfire -- while "offered" only counts fight reward screens. Turn on "Group card upgrades" in the filter pane to merge them. Starter cards and relics (those you begin a run with) will always show 0 for "offered" since they never appear on fight reward screens.
+A: "Present" counts all runs the card ended up in your deck from any source -- including upgrading the base card at a campfire -- while "offered" only counts fight reward screens. Starter cards and relics will always show 0 for "offered" since they never appear on fight reward screens.
 
 
 Q: Why is my Win% 100% but the stat is grey?
@@ -134,7 +129,7 @@ A: Color intensity reflects both sample size and magnitude of deviation from you
 
 Q: Why don't I see stats for a card I've used?
 
-A: Open the SlayTheStats filter pane in the compendium and check your filters. 
+A: Open the SlayTheStats filter pane in the compendium and check your filters.
 
 
 Q: I'm seeing "no data" for everything.
@@ -144,7 +139,7 @@ A: The mod cannot find your run history to populate data. In this case you'll ne
 
 Q: I lost my save data after installing.
 
-A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress. There are ways to transfer save data over to a modded profile -- see TRANSFERRING A VANILLA PROFILE TO A MODDED PROFILE below. You can also use the mod UnifiedSavePath.
+A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress. There are ways to transfer save data over to a modded profile -- see TRANSFERRING A VANILLA PROFILE TO A MODDED PROFILE below.
 
 ------------------------------------------------------------------------
 TRANSFERRING A VANILLA PROFILE TO A MODDED PROFILE
@@ -160,7 +155,7 @@ The game stores modded saves in a separate "modded" subfolder, so installing mod
   - Windows: %APPDATA%\SlayTheSpire2\steam\<STEAM_ID>\
   - macOS:   ~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/
   - Linux:   ~/.local/share/SlayTheSpire2/steam/<STEAM_ID>/
-- Back in-game, switch to the target profile slot. Your vanilla progress should now be loaded under mods.
+- Back in-game, switch to the target profile slot. Your vanilla progress should now be visible.
 
 ------------------------------------------------------------------------
 TROUBLESHOOTING
@@ -187,6 +182,10 @@ TRANSLATIONS
 
 The mod itself is localized into Russian and Simplified Chinese in-game.
 
+Want to help translate the mod into another language? DM me on the Slay the Spire Discord — my handle is .theshoe.
+
 Русский: Отслеживает статистику карт, реликвий и столкновений по всем вашим забегам и показывает её во всплывающих подсказках. Также добавляет страницу бестиария в компендиум.
+Если вы заметите ошибки перевода — пожалуйста, оставьте комментарий или сообщите на Discord. Буду признателен!
 
 简体中文：追踪您所有游戏场次中的卡牌、遗物和遭遇统计数据，并以提示框形式显示。同时在图鉴中添加敌怪图鉴页面。
+如果您发现翻译错误，欢迎在评论区或 Discord 反馈，非常感谢！
