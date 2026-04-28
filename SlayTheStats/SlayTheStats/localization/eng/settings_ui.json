@@ -62,7 +62,6 @@
     "tooltip.no_encounter_data":   "No encounter data",
     "tooltip.baseline.pick":       "(baseline)    Pick% {pick}    Win% {win}",
     "tooltip.baseline.buys":       "(baseline)    Buys {buys}    Win% {win}",
-    "tooltip.baseline.encounter":         "Baseline {category}: dmg {dmg}, spread {spread}%",
     "tooltip.baseline.encounter_nodata":  "Baseline {category} dmg: {dmg}",
 
     "filter.all_characters":       "All characters",

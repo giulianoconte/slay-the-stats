@@ -62,7 +62,6 @@
     "tooltip.no_encounter_data":   "Нет данных о столкновениях",
     "tooltip.baseline.pick":       "(базовое)    Выбор% {pick}    Побед% {win}",
     "tooltip.baseline.buys":       "(базовое)    Покупки {buys}    Побед% {win}",
-    "tooltip.baseline.encounter":         "Базовое {category}: урон {dmg}, разброс {spread}%",
     "tooltip.baseline.encounter_nodata":  "Базовый урон {category}: {dmg}",
 
     "filter.all_characters":       "Все персонажи",

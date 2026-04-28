@@ -1388,7 +1388,14 @@ public static class EncounterTooltipHelper
     /// (asc range, character, version range, profile) is visible even at default
     /// values like A0-20.</param>
     // Column padding for the in-combat encounter [table=5]. expand=1 distributes
-    // leftover width so columns span the full tooltip panel.
+    // leftover width so columns span the full tooltip panel. 4 px L/R per cell
+    // gives an 8-px inter-column gap — comfortable for right-aligned numeric
+    // data. The "Runs" header (kept in this single-row tooltip even though
+    // the bestiary uses "Fights" — see header comment in
+    // <see cref="BuildEncounterStatsTextSingleRow"/>) keeps the original
+    // calibration that worked through v0.3.x. Russian Cyrillic headers fit
+    // because <see cref="TooltipHelper.TableFontSize"/> shrinks to 17 in
+    // substitution locales.
     private const string CombatCellPadding = "expand=1 padding=4,0,4,0";
 
     internal static string BuildEncounterStatsTextSingleRow(
@@ -1401,58 +1408,59 @@ public static class EncounterTooltipHelper
     {
         var sb = new StringBuilder();
 
-        sb.Append("[table=5]");
-        // Header row
+        sb.Append("[table=4]");
+        // Header row. "Fights" matches the bestiary tables for cross-surface
+        // consistency. Spread is intentionally omitted (it's in the bestiary
+        // instead): 5 columns ran tight against the standard tooltip width
+        // and the consistency-ratio is most useful when sorting / comparing
+        // rows, not for a single-encounter mid-combat hover where the
+        // absolute Mid 50% range already conveys the same information.
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.fights")}[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.dmg")}[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.mid50")}[/color][/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.spread")}[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.turns")}[/color][/right][/cell]");
 
-        double spreadBase = 0;
         if (stat.Fought > 0)
         {
-            // Pool baseline provides spread + turns; Dmg uses the explicit
-            // `dmgBaseline` (fight-weighted mean) so the coloration matches what
-            // the footer line displays. Mixing poolBaseline.Median for coloration
-            // and dmgBaseline for display caused a "4 vs 4.8 but colored red" bug
-            // when the two numbers disagreed (encounter-weighted median of medians
-            // is not the same as fight-weighted mean damage).
-            var (_, iqrcBase, _, turnsBase, _) = DeriveBaselines(poolBaseline);
-            AppendCombatDataCells(sb, stat, dmgBaseline, iqrcBase, turnsBase);
-            spreadBase = iqrcBase;
+            // Pool baseline provides turns; Dmg uses the explicit `dmgBaseline`
+            // (fight-weighted mean) so the coloration matches what the footer
+            // line displays. Mixing poolBaseline.Median for coloration and
+            // dmgBaseline for display caused a "4 vs 4.8 but colored red" bug
+            // when the two numbers disagreed (encounter-weighted median of
+            // medians is not the same as fight-weighted mean damage).
+            var (_, _, _, turnsBase, _) = DeriveBaselines(poolBaseline);
+            AppendCombatDataCells(sb, stat, dmgBaseline, turnsBase);
         }
         else
         {
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 4; i++)
                 sb.Append($"[cell {CombatCellPadding}][right][color={TooltipHelper.NeutralShade}]-[/color][/right][/cell]");
         }
         sb.Append("[/table]");
 
-        // Footer — baseline + filter context. Spread baseline is IQRC (ratio);
-        // render as a percentage to match the Spread column.
+        // Footer — baseline + filter context. Single template covers both
+        // the data and no-data cases: the table no longer shows Spread, so
+        // there's no remaining branch-specific baseline content.
         var baselineDmgAbs = $"{dmgBaseline:F1}";
         var charLabel = character != null
             ? CardHoverShowPatch.GetCharacterDisplay(character)
             : L.T("filter.all_characters");
         var filterCtx = CardHoverShowPatch.BuildFilterContext(charLabel, filter);
         var categoryLower = categoryLabel.ToLowerInvariant();
-        var baselineLine = stat.Fought > 0
-            ? L.T("tooltip.baseline.encounter",        ("category", categoryLower), ("dmg", baselineDmgAbs), ("spread", $"{spreadBase * 100:F0}"))
-            : L.T("tooltip.baseline.encounter_nodata", ("category", categoryLower), ("dmg", baselineDmgAbs));
+        var baselineLine = L.T("tooltip.baseline.encounter_nodata",
+            ("category", categoryLower), ("dmg", baselineDmgAbs));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineLine));
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
         return sb.ToString();
     }
 
-    /// <summary>Appends 5 data cells for the in-combat encounter table: Runs | Dmg | Mid 50% | Spread | Turns.
+    /// <summary>Appends 4 data cells for the in-combat encounter table: Runs | Dmg | Mid 50% | Turns.
     /// Coloration: Dmg via ColBadRelative against <paramref name="dmgBaseline"/> (the
     /// same value shown in the footer, so color and display agree); Mid 50% neutral;
-    /// Spread via ColBadLog against <paramref name="iqrcBaseline"/>; Turns via
-    /// ColBadRelative against <paramref name="turnsBaseline"/>.</summary>
+    /// Turns via ColBadRelative against <paramref name="turnsBaseline"/>.</summary>
     private static void AppendCombatDataCells(StringBuilder sb, EncounterEvent stat,
-        double dmgBaseline, double iqrcBaseline, double turnsBaseline)
+        double dmgBaseline, double turnsBaseline)
     {
         int n = stat.Fought;
         double avgTurns  = (double)stat.TurnsTakenSum / n;
@@ -1463,13 +1471,11 @@ public static class EncounterTooltipHelper
         var cN      = TooltipHelper.ColN($"{n}", n);
         var cDmg    = ColBadRelative($"{dmgMedian:F0}", dmgMedian, dmgBaseline, n);
         var cMid50  = $"[color={TooltipHelper.NeutralShade}]{fIqr}[/color]";
-        var cSpread = FormatSpreadCell(StatsAggregator.Iqrc(iqr, dmgMedian), n, iqrcBaseline);
         var cTurns  = ColBadRelative($"{avgTurns:F1}", avgTurns, turnsBaseline, n);
 
         sb.Append($"[cell {CombatCellPadding}][right]{cN}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cDmg}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cMid50}[/right][/cell]");
-        sb.Append($"[cell {CombatCellPadding}][right]{cSpread}[/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right]{cTurns}[/right][/cell]");
     }
 

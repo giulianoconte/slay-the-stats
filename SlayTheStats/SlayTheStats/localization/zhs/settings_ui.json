@@ -62,7 +62,6 @@
     "tooltip.no_encounter_data":   "无遭遇数据",
     "tooltip.baseline.pick":       "(基准)    选取率 {pick}    胜率 {win}",
     "tooltip.baseline.buys":       "(基准)    购买 {buys}    胜率 {win}",
-    "tooltip.baseline.encounter":         "基准 {category}:伤害 {dmg},分布 {spread}%",
     "tooltip.baseline.encounter_nodata":  "基准 {category} 伤害: {dmg}",
 
     "filter.all_characters":       "所有角色",

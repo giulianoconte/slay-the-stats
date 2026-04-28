@@ -400,6 +400,25 @@ internal static class EncounterStatsHover
 
         var encounterName = TruncateEncounterNameIfTooLong(EncounterCategory.FormatName(encounterId));
 
+        // Reapply the locale-aware fonts + size every show. The cached
+        // label otherwise holds whatever it got at panel-build time, so a
+        // mid-session locale switch (e.g. eng → rus) leaves the Latin
+        // Kreon FontVariation in place even though TooltipHelper's
+        // GetKreonFont() has rebuilt against the locale substitute, and
+        // similarly the size stays at 20pt instead of dropping to 17pt.
+        // Mirrors TooltipHelper.ApplyTableStyle / ApplyHeaderLabelStyles
+        // running per-show on the shared card/relic panel.
+        var tableFont = TooltipHelper.GetKreonFont();
+        var tableBold = TooltipHelper.GetKreonBoldFont();
+        if (tableFont != null) handle.TableLabel.AddThemeFontOverride("normal_font", tableFont);
+        if (tableBold != null) handle.TableLabel.AddThemeFontOverride("bold_font", tableBold);
+        int tableFontSize = TooltipHelper.TableFontSize;
+        handle.TableLabel.AddThemeFontSizeOverride("normal_font_size", tableFontSize);
+        handle.TableLabel.AddThemeFontSizeOverride("bold_font_size", tableFontSize);
+        if (tableBold != null) handle.NameLabel.AddThemeFontOverride("bold_font", tableBold);
+        if (tableFont != null) handle.NameLabel.AddThemeFontOverride("normal_font", tableFont);
+        if (tableFont != null) handle.BrandLabel.AddThemeFontOverride("font", tableFont);
+
         handle.NameLabel.Text = $"[b]{encounterName}[/b]";
         handle.TableLabel.Text = statsText;
         handle.NameLabel.ResetSize();
@@ -658,8 +677,11 @@ internal static class EncounterStatsHover
             var tableBold = TooltipHelper.GetKreonBoldFont();
             if (tableBold != null) label.AddThemeFontOverride("bold_font", tableBold);
         }
-        label.AddThemeFontSizeOverride("normal_font_size", 18);
-        label.AddThemeFontSizeOverride("bold_font_size", 18);
+        // Default size at panel-build; PopulatePanelData reapplies per-show
+        // so the cached label tracks locale changes mid-session.
+        int tableFontSize = TooltipHelper.TableFontSize;
+        label.AddThemeFontSizeOverride("normal_font_size", tableFontSize);
+        label.AddThemeFontSizeOverride("bold_font_size", tableFontSize);
         label.AddThemeColorOverride("default_color", ThemeStyle.CreamColor);
         label.AddThemeConstantOverride("line_separation", 0);
         TooltipHelper.ApplyTooltipShadow(label);
