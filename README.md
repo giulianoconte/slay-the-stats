@@ -34,12 +34,12 @@ Stats are shown as a tooltip when you hover over cards and relics during a run, 
 
 ### Requirements
 
-- [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v0.2.5 or later.
+- [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) v3.0.9 or later.
 - **NOTE:** GUMM is NOT required. If you previously installed it for this mod, see [Uninstalling GUMM](#uninstalling-gumm) below.
 
 ### Installation
 
-1. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v0.2.5 or later) into your mods folder if you haven't already
+1. Download and extract [BaseLib](https://www.nexusmods.com/slaythespire2/mods/103) (v3.0.9 or later) into your mods folder if you haven't already
 2. Download `SlayTheStats-vX.X.X.zip` from the releases page and extract it into your STS2 mods folder — the result should be a `SlayTheStats/` folder inside `mods/` containing `SlayTheStats.dll` and `SlayTheStats.json`
 
 ### Uninstalling

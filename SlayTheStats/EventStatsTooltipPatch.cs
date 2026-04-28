@@ -55,37 +55,19 @@ internal static class EventHoverHelper
 
     internal static void Show(NEventOptionButton? holder)
     {
-        if (!SlayTheStatsConfig.ShowInRunStats)        { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: ShowInRunStats=false");        return; }
-        if (SlayTheStatsConfig.DisableTooltipsEntirely) { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: DisableTooltipsEntirely=true"); return; }
-        if (holder == null)                             { MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: holder=null");                 return; }
+        if (!SlayTheStatsConfig.ShowInRunStats) return;
+        if (SlayTheStatsConfig.DisableTooltipsEntirely) return;
+        if (holder == null) return;
 
         try
         {
             var eventModel = holder.Event;
-            if (eventModel == null)
-            {
-                MainFile.Logger.Info("[SlayTheStats] EventHover.Show bail: holder.Event=null");
-                return;
-            }
-            var eventModelType = eventModel.GetType().Name;
-            if (eventModel is AncientEventModel)
-            {
-                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: AncientEventModel ({eventModelType})");
-                return;
-            }
-            if (holder.Option?.IsProceed == true)
-            {
-                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: Option.IsProceed=true ({eventModelType})");
-                return;
-            }
+            if (eventModel == null) return;
+            if (eventModel is AncientEventModel) return;
+            if (holder.Option?.IsProceed == true) return;
 
             var eventId = eventModel.Id.ToString();
-            MainFile.Logger.Info($"[SlayTheStats] EventHover.Show: eventId='{eventId}' type={eventModelType} hasVisits={MainFile.Db.EventVisits.ContainsKey(eventId)}");
-            if (AncientEvents.IsAncient(eventId))
-            {
-                MainFile.Logger.Info($"[SlayTheStats] EventHover.Show bail: AncientEvents.IsAncient('{eventId}')");
-                return;
-            }
+            if (AncientEvents.IsAncient(eventId)) return;
 
             // Build filter upfront so the "no data" path can still render a
             // tooltip with the current filter context in the footer.
@@ -161,45 +143,30 @@ internal static class EventHoverHelper
 
     private static void DeferredShowAndPosition()
     {
-        // Diag: trace why the event tooltip never appears even though Show
-        // succeeds (hasVisits=True logged). Strip once root cause is found.
-        if (_panel == null)        { MainFile.Logger.Info("[SlayTheStats] EventHover.DeferredShow bail: _panel=null"); return; }
-        if (_activeBtn == null)    { MainFile.Logger.Info("[SlayTheStats] EventHover.DeferredShow bail: _activeBtn=null (Hide fired between Show and deferred)"); return; }
-        if (!GodotObject.IsInstanceValid(_activeBtn))
-                                   { MainFile.Logger.Info("[SlayTheStats] EventHover.DeferredShow bail: _activeBtn invalid"); return; }
+        if (_panel == null) return;
+        if (_activeBtn == null) return;
+        if (!GodotObject.IsInstanceValid(_activeBtn)) return;
         _panel.Visible = true;
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = true;
         UpdatePosition();
-        MainFile.Logger.Info($"[SlayTheStats] EventHover.DeferredShow OK: panelPos={_panel.GlobalPosition} panelSize={_panel.Size} visible={_panel.Visible}");
     }
 
     internal static void Hide(NEventOptionButton? holder)
     {
-        if (holder == null || _activeBtn != holder)
-        {
-            MainFile.Logger.Info($"[SlayTheStats] EventHover.Hide noop: holderNull={holder == null} matched={_activeBtn == holder}");
-            return;
-        }
+        if (holder == null || _activeBtn != holder) return;
         // Debounce: NEventOptionButton.OnFocus/OnUnfocus cycles rapidly during
-        // the hover-scale tween (see log pattern Show→Hide→Show→Hide every
-        // frame). Schedule the real hide on a 50ms timer; if Show fires
-        // again before the timer expires, it increments _hideGen and the
-        // timer callback becomes a no-op.
+        // the hover-scale tween. Schedule the real hide on a 50ms timer; if
+        // Show fires again before the timer expires, it increments _hideGen
+        // and the timer callback becomes a no-op.
         var genAtHide = ++_hideGen;
-        MainFile.Logger.Info($"[SlayTheStats] EventHover.Hide: scheduled (gen={genAtHide})");
         var timer = (Engine.GetMainLoop() as SceneTree)?.CreateTimer(0.05f);
-        if (timer == null) { DoHide(genAtHide, "no-timer"); return; }
-        timer.Timeout += () => DoHide(genAtHide, "timer");
+        if (timer == null) { DoHide(genAtHide); return; }
+        timer.Timeout += () => DoHide(genAtHide);
     }
 
-    private static void DoHide(int genAtHide, string source)
+    private static void DoHide(int genAtHide)
     {
-        if (_hideGen != genAtHide)
-        {
-            MainFile.Logger.Info($"[SlayTheStats] EventHover.DoHide skipped ({source}): newer gen (expected={genAtHide}, current={_hideGen})");
-            return;
-        }
-        MainFile.Logger.Info($"[SlayTheStats] EventHover.DoHide firing ({source}, gen={genAtHide})");
+        if (_hideGen != genAtHide) return;
         _activeBtn = null;
         if (_panel != null && GodotObject.IsInstanceValid(_panel)) _panel.Visible = false;
         if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;

@@ -59,6 +59,16 @@
         <NoWarn>$(NoWarn);MSB3270;STS002</NoWarn>
     </PropertyGroup>
 
+    <!-- DEV_BUILD: define on every non-Release configuration so developer-only
+         features (the dev-build banner, table wireframe overlay, sparkline
+         debug panel, and the BaseLib config toggle that gates them) compile
+         in on dev builds and out on Release. Mirrors how BuildInfo.IsRelease
+         drives runtime gating, but for compile-time concerns like attributes
+         that can't be conditionalized at runtime. -->
+    <PropertyGroup Condition="'$(Configuration)' != 'Release'">
+        <DefineConstants>$(DefineConstants);DEV_BUILD</DefineConstants>
+    </PropertyGroup>
+
     <ItemGroup Condition="Exists('$(Sts2DataDir)')" >
         <Reference Include="0Harmony">
             <HintPath>$(Sts2DataDir)/0Harmony.dll</HintPath>

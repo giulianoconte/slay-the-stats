@@ -1,13 +1,13 @@
 Translations: Русский · 中文 — see TRANSLATIONS at the bottom of this page.
 
 ------------------------------------------------------------------------
-NEW IN v0.3.0 -  BESTIARY UPDATE
+NEW IN v1.0.0
 ------------------------------------------------------------------------
-- Track encounter history - typical damage taken, turns, potions, etc for all encounters.
-- Encounter stats tooltip in-run when hovering over a monster.
-- Adds Bestiary Stats compendium page, optional.
-- Polish - font upgrades, tooltip format, much more.
-- Note, most but not all encounters have bestiary previews yet (Skulking Colony, Kaiser Crab, Doormaker).
+- Event tracking - hover an event option in-run to see your historical pick rate, win rate, and floor-deltas for that specific choice. Aggregated across runs by character / ascension / act / profile, same as the existing card and relic stats.
+- Localization - the mod is now translated to Chinese (Simplified) and Russian. The locale follows the game's setting. Native-speaker translation review pending; flag any awkward translations on the Discord and they'll be polished in a follow-up release.
+- Bestiary Dist column - new sparkline column showing each row's fight-by-fight damage distribution. KDE curve + IQR fill + median rule. All rows in a table share an x-axis so distributions are directly comparable across rows. Help popup explains the visualization and how Dist relates to the Dmg / Mid 50% / Spread numeric columns.
+- Spread unification - Spread is now consistently the median-of-encounter-IQRCs across all four display sites (in-run tooltip, bestiary list, all-chars table, focused view). Robust to outlier encounters that would otherwise pull a simple average around.
+- Requires BaseLib v3.0.9 or later (was 0.2.5).
 
 ------------------------------------------------------------------------
 WHAT IT DOES

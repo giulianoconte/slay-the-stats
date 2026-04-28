@@ -591,7 +591,7 @@ public static partial class CompendiumFilterPatch
         var suffix = new Label
         {
             Name = "SlayTheStatsNotDefaultSuffix",
-            Text = "(non-default filters)",
+            Text = L.T("filter.suffix.non_default"),
             Visible = false,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             ClipText = false,

@@ -119,8 +119,15 @@ internal class SlayTheStatsConfig : SimpleModConfig
 
     /// <summary>
     /// When true, tooltips surface internal debug state (context key, raw counters, build version)
-    /// to aid troubleshooting without requiring log inspection.
+    /// to aid troubleshooting without requiring log inspection. The toggle is hidden from
+    /// BaseLib's mod settings UI on release builds — its visible effects (sparkline debug
+    /// panel, RichTextLabel cell wireframe overlay) are gated on <c>!BuildInfo.IsRelease</c>
+    /// at runtime, so leaving the toggle exposed on release would be a UI knob with no
+    /// observable consequence.
     /// </summary>
+#if !DEV_BUILD
+    [ConfigHideInUI]
+#endif
     public static bool DebugMode { get; set; } = false;
 
     // ── Aggregation filter properties (v0.2.0) ──────────────────────────────

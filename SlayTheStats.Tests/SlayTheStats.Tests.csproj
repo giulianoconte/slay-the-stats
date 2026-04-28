@@ -16,7 +16,12 @@
     </PackageReference>
   </ItemGroup>
 
-  <!-- Compile source files directly to avoid pulling in the Godot SDK -->
+  <!-- Compile source files directly to avoid pulling in the Godot SDK.
+       LocStubs.cs in this project provides the minimal MegaCrit.Sts2.Core.Localization
+       types (LocManager / LocTable / LocException) that the loc-aware files below
+       reference; LocManager.Instance returns null in that stub so call sites
+       fall back to their non-loc paths the same way they do in production
+       before LocManager finishes booting. -->
   <ItemGroup>
     <Compile Include="../SlayTheStats/CardStats.cs" />
     <Compile Include="../SlayTheStats/RelicStats.cs" />
@@ -24,5 +29,6 @@
     <Compile Include="../SlayTheStats/EventStats.cs" />
     <Compile Include="../SlayTheStats/RunParser.cs" />
     <Compile Include="../SlayTheStats/StatsAggregator.cs" />
+    <Compile Include="../SlayTheStats/L.cs" />
   </ItemGroup>
 </Project>

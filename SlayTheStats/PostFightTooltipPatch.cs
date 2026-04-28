@@ -216,10 +216,10 @@ public static class PostFightTooltipPatch
         sb.Append(DeltaCell(fight.PotionsUsed - avgPots, highIsBad: true, n));
         sb.Append(PercentileCell(potPct));
 
-        // Runs: total fights fed into this comparison. No delta / pctile —
+        // Fights: total fights fed into this comparison. No delta / pctile —
         // this is context, not a per-fight metric. Dulled + blank trailing
         // cells so the row reads as reference rather than a comparison line.
-        sb.Append(DimLabelCell(L.T("tooltip.col.runs")));
+        sb.Append(DimLabelCell(L.T("tooltip.col.fights")));
         sb.Append(DimValueCell($"{combined.Fought}"));
         sb.Append(EmptyCell());
         sb.Append(EmptyCell());

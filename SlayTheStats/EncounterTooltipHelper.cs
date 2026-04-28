@@ -157,9 +157,9 @@ public static class EncounterTooltipHelper
 
         // Header row
         AppendDescriptorCell(body, " ", isHeader: true, parts: AllCharsDescriptorParts);
-        AppendHeaderCell(body, L.T("tooltip.col.runs"),    P.Fought);
+        AppendHeaderCell(body, L.T("tooltip.col.fights"),    P.Fought);
         AppendHeaderCell(body, L.T("tooltip.col.dist"),    P.Spark);  // density distribution sparkline
-        AppendHeaderCell(body, L.T("tooltip.col.dmg_pct"), P.Dmg);
+        AppendHeaderCell(body, L.T("tooltip.col.dmg"), P.Dmg);
         AppendHeaderCell(body, L.T("tooltip.col.mid50"),   P.Mid50);
         AppendHeaderCell(body, L.T("tooltip.col.spread"),  P.Spread);
         AppendHeaderCell(body, L.T("tooltip.col.turns"),   P.Turns);
@@ -305,11 +305,15 @@ public static class EncounterTooltipHelper
         return result;
     }
 
-    // Pixel size of the sparkline inside a table cell. Spark column =
-    // 2 parts × 27px = 54px cell with zero padding; the image is sized
-    // slightly narrower so if the label gets shrunk below its intended
-    // width the image doesn't anchor the column wider than its peers.
-    private static readonly Vector2I BestiarySparklineSize = new Vector2I(50, 22);
+    // Texture render size for the sparkline. 2× the displayed-cell footprint
+    // (50×22) so each visible pixel averages 4 source pixels — the AA brush
+    // in SparklinePoc gets more room to spread coverage and Godot's bilinear
+    // filter (set on the host RichTextLabel via TextureFilter=Linear)
+    // downsamples to the cell size cleanly. The display size passed to
+    // AddImage stays 50×22 so the column-width math is unchanged.
+    private static readonly Vector2I BestiarySparklineSize = new Vector2I(100, 44);
+    internal const int BestiarySparklineDisplayW = 50;
+    internal const int BestiarySparklineDisplayH = 22;
 
     // Calibration: U+2003 EM SPACE at [font_size=1] does NOT advance at 1
     // device pixel — empirically it advances at ~1.67 px in Kreon (54 em-spaces
@@ -1139,7 +1143,7 @@ public static class EncounterTooltipHelper
         // expand to Godot's default of 1, destabilizing column widths.
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, L.T("tooltip.col.runs"),    FP.Fought);
+        AppendHeaderCell(sb, L.T("tooltip.col.fights"),    FP.Fought);
         AppendHeaderCell(sb, L.T("tooltip.col.dist"),    FP.Spark);
         AppendHeaderCell(sb, L.T("tooltip.col.dmg"),     FP.Dmg);
         AppendHeaderCell(sb, L.T("tooltip.col.mid50"),   FP.Mid50);
@@ -1224,7 +1228,7 @@ public static class EncounterTooltipHelper
         // paddings so expand attributes match the sizing + data rows).
         var FP = FocusedColumns;
         AppendDescriptorCell(sb, " ", isHeader: true);
-        AppendHeaderCell(sb, L.T("tooltip.col.runs"),    FP.Fought);
+        AppendHeaderCell(sb, L.T("tooltip.col.fights"),    FP.Fought);
         AppendHeaderCell(sb, L.T("tooltip.col.dist"),    FP.Spark);
         AppendHeaderCell(sb, L.T("tooltip.col.dmg"),     FP.Dmg);
         AppendHeaderCell(sb, L.T("tooltip.col.mid50"),   FP.Mid50);
@@ -1399,7 +1403,7 @@ public static class EncounterTooltipHelper
 
         sb.Append("[table=5]");
         // Header row
-        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.runs")}[/color][/right][/cell]");
+        sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.fights")}[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.dmg")}[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.mid50")}[/color][/right][/cell]");
         sb.Append($"[cell {CombatCellPadding}][right][color={HeaderColor}]{L.T("tooltip.col.spread")}[/color][/right][/cell]");

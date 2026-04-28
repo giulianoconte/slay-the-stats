@@ -3,30 +3,17 @@ using Godot;
 namespace SlayTheStats;
 
 // ─────────────────────────────────────────────────────────────────────
-// Sparkline rendering proof-of-concept.
+// Sparkline rendering.
 //
 // Texture-based sparkline: a 1px polyline connecting the series values,
-// colored point-by-point on a green→yellow→red gradient along the X
-// axis (left = low/good, right = high/bad). When all sparklines in a
-// table share an explicit XRange, pixel x maps to the same data x in
-// every row, so the color at any column reflects a fixed dmg% — letting
-// the eye compare the position of distributions across rows. A
-// translucent IQR band and a median line sit behind the polyline to
-// give a quick "where does this fight fall in the distribution" read
-// without numerical annotation.
-//
-// Colorblind notes: the green↔red pair isn't ideal for red-green
-// deficiencies, but stepping through yellow at the midpoint gives the
-// ramp a strong luminance gradient (mid-luma yellow, darker at both
-// ends) that survives most monochrome viewers. Swap hues here if/when
-// we pick a more colorblind-safe palette.
-//
-// Unicode block-character rendering is kept alongside purely for
-// comparison inside the same debug panel; the texture path is the
-// chosen direction going forward.
-//
-// Remove this file + the BuildDebugPanel call from BestiaryPatch once
-// the texture styling is locked in and migrated onto real surfaces.
+// drawn flat in CurveColor (NeutralShade #b5b5b5) so the curve sits at
+// the same weight as the surrounding context-row text. A translucent cream
+// IQR fill and
+// a steel-blue median rule sit behind the polyline to give a quick
+// "where does this fight fall in the distribution" read without
+// numerical annotation. When all sparklines in a table share an explicit
+// XRange, pixel x maps to the same data x in every row, so distributions
+// are directly comparable across rows.
 // ─────────────────────────────────────────────────────────────────────
 internal static class SparklinePoc
 {
@@ -69,26 +56,13 @@ internal static class SparklinePoc
         }
     }
 
-    // Gradient: neutral warm gray below the midpoint, fading into red
-    // as the value rises above the midpoint. Low + Mid stops share the
-    // gray value so the bottom half of the curve reads as a quiet
-    // neutral line, with red reserved for the peak region. Swap the
-    // Gray here if the panel chrome ever changes.
-    private static readonly Color GradLow  = new Color(0.70f, 0.68f, 0.62f, 1f); // warm gray
-    private static readonly Color GradMid  = new Color(0.70f, 0.68f, 0.62f, 1f); // warm gray (same — flat low half)
-    private static readonly Color GradHigh = new Color(0.86f, 0.28f, 0.20f, 1f); // red
-
-    // When true, the polyline draws in a single flat color (FlatCurveColor)
-    // and the gradient is bypassed — useful for evaluating whether the
-    // distribution shape alone reads well without color carrying meaning.
-    // Flip to false to restore the warm-grey→red x-axis ramp. Kept as
-    // static readonly (not const) so the gradient branch stays reachable
-    // and the compiler doesn't dead-code it (CS0162).
-    private static readonly bool UseFlatCurveColor = true;
-    // Matches ContextRowDataColor (#686868) used by non-significance row text
-    // so the curve sits at the same visual weight as the surrounding numeric
-    // data on context rows.
-    private static readonly Color FlatCurveColor = new Color(0.408f, 0.408f, 0.408f, 1f);
+    // Curve color. Matches NeutralShade (#b5b5b5) used as the
+    // significance-coloring neutral text color — the shade rendered when a
+    // value's deviation is below threshold or sample size is too small. In
+    // colored rows (per-character rows in all-chars and focused views) this
+    // makes the curve sit at the same weight as the row's neutral elements
+    // instead of competing with the colored numeric stats.
+    private static readonly Color CurveColor = new Color(0.71f, 0.71f, 0.71f, 1f);
 
     // Percentile marker styling. Warm neutral fill with a dark
     // outline — same palette across all three marker variants so
@@ -103,13 +77,13 @@ internal static class SparklinePoc
     // band — important on bumpy curves where the rule's tip would otherwise
     // blend into a peak's color.
     private static readonly Color IqrFillColor        = new Color(0.95f, 0.92f, 0.82f, 0.12f);
-    private static readonly Color MedianRuleColor     = new Color(0.55f, 0.78f, 0.95f, 0.85f);
+    private static readonly Color MedianRuleColor     = new Color(0.30f, 0.60f, 0.96f, 1.0f);
     // Pixel gap between the median rule's top and the curve at median x.
     // Without it, the rule appears to merge into the curve in bimodal
     // distributions where the median sits in the valley between two peaks
     // (the rule terminates exactly on the curve, reading as one shape).
     private const float MedianRuleGapPx               = 2.0f;
-    private const float MedianRuleWidth               = 1.2f;
+    private const float MedianRuleWidth               = 1.5f;
 
     // Stem variant.
     private static readonly Color StemColor           = new Color(0.95f, 0.92f, 0.82f, 0.55f);
@@ -239,11 +213,9 @@ internal static class SparklinePoc
     /// </summary>
     /// <summary>Optional explicit x-domain. When supplied, the curve is plotted
     /// against this range instead of the data's natural <c>min/max ± bandwidth</c>.
-    /// All sparklines in the same table should share a single range so the
-    /// horizontal color gradient (green→red along x) maps to the same data
-    /// values across rows — letting the eye compare e.g. dmg% positions at a
-    /// glance. Pass <c>null</c> for legacy per-row auto-fit (peak-driven y
-    /// gradient still applies but x is unanchored).</summary>
+    /// All sparklines in the same table should share a single range so pixel x
+    /// maps to the same data x across rows — letting the eye compare e.g. dmg%
+    /// positions at a glance. Pass <c>null</c> for legacy per-row auto-fit.</summary>
     internal readonly record struct XRange(double Lo, double Hi);
 
     internal static ImageTexture BuildSparklineTexture(
@@ -339,7 +311,7 @@ internal static class SparklinePoc
             double q2 = Percentile(sorted, 0.50);
             double q3 = Percentile(sorted, 0.75);
 
-            const float LineRadius = 1.4f;
+            const float LineRadius = 1.9f;
 
             if (range <= 0)
             {
@@ -361,7 +333,7 @@ internal static class SparklinePoc
                 }
                 double cy = (h - 1) * 0.5;
                 DrawAaDisc(image, cx, cy, LineRadius + 1f, PercentileDotOutlineColor);
-                DrawAaDisc(image, cx, cy, LineRadius,      ColorAt(cx, 0, w - 1));
+                DrawAaDisc(image, cx, cy, LineRadius,      CurveColor);
             }
             else
             {
@@ -456,20 +428,15 @@ internal static class SparklinePoc
                         DrawAaVerticalLine(image, mxPre, myTopPre, h - 1, MedianRuleWidth, MedianRuleColor);
                 }
 
-                // Polyline through per-pixel density samples. The value
-                // passed to the color ramp is the pixel x position, so
-                // the gradient runs along the X AXIS — left = good
-                // (Low/Mid grey), right = bad (High red). When all
-                // sparklines in the table share an XRange, pixel x maps
-                // to the same data x in every row, so colors align with
-                // dmg% values across rows for at-a-glance comparison.
+                // Polyline through per-pixel density samples. Drawn flat in
+                // CurveColor; cross-row comparability comes from the shared
+                // XRange (same pixel x = same dmg% across all rows of the
+                // table) rather than from per-pixel coloration.
                 for (int px = 0; px < w - 1; px++)
                 {
                     double y1 = YOfDensity(densities[px]);
                     double y2 = YOfDensity(densities[px + 1]);
-                    DrawAaSegment(image, px, y1, px + 1, y2,
-                        px, px + 1,
-                        0, w - 1, LineRadius);
+                    DrawAaSegment(image, px, y1, px + 1, y2, LineRadius);
                 }
 
                 // Post-curve percentile marker rendering. One branch
@@ -588,40 +555,16 @@ internal static class SparklinePoc
         return sorted[lo] * (1 - frac) + sorted[hi] * frac;
     }
 
-    /// <summary>Maps a value's position in [min..min+range] to the green→yellow→red gradient.</summary>
-    private static Color ColorAt(double v, double min, double range)
-    {
-        if (UseFlatCurveColor) return FlatCurveColor;
-        double norm = range <= 0 ? 0.5 : System.Math.Clamp((v - min) / range, 0, 1);
-        return norm < 0.5
-            ? LerpColor(GradLow,  GradMid,  norm * 2.0)
-            : LerpColor(GradMid,  GradHigh, (norm - 0.5) * 2.0);
-    }
-
-    private static Color LerpColor(Color a, Color b, double t)
-    {
-        float ft = (float)System.Math.Clamp(t, 0, 1);
-        return new Color(
-            a.R + (b.R - a.R) * ft,
-            a.G + (b.G - a.G) * ft,
-            a.B + (b.B - a.B) * ft,
-            a.A + (b.A - a.A) * ft);
-    }
-
     /// <summary>
     /// Anti-aliased capsule-shaped segment. For each pixel in the
     /// segment's bbox, computes distance to the capped line segment
     /// and uses (radius − distance) as the coverage alpha. Uniform
     /// visual width across slopes (unlike a vertical-brush) and
-    /// sub-pixel smooth diagonals without supersampling. Color per
-    /// pixel interpolates between the two endpoint values along the
-    /// segment's parameter.
+    /// sub-pixel smooth diagonals without supersampling.
     /// </summary>
     private static void DrawAaSegment(
         Image img,
         double x1, double y1, double x2, double y2,
-        double v1, double v2,
-        double min, double range,
         float radius)
     {
         int w = img.GetWidth();
@@ -659,8 +602,7 @@ internal static class SparklinePoc
                 if (coverage <= 0) continue;
                 if (coverage > 1) coverage = 1;
 
-                double v = v1 + (v2 - v1) * t;
-                var src = ColorAt(v, min, range);
+                var src = CurveColor;
                 src.A *= (float)coverage;
 
                 BlendOver(img, px, py, src);
@@ -704,8 +646,7 @@ internal static class SparklinePoc
 
     /// <summary>
     /// Anti-aliased vertical line segment of a solid color. Uses the
-    /// same distance-based coverage as <see cref="DrawAaSegment"/> but
-    /// with a fixed color (no gradient lookup).
+    /// same distance-based coverage as <see cref="DrawAaSegment"/>.
     /// </summary>
     private static void DrawAaVerticalLine(
         Image img, double xCenter, double y1, double y2, float radius, Color color)

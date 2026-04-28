@@ -83,7 +83,15 @@ public static class L
     /// qualified <c>"CHARACTER.IRONCLAD"</c>) to its localized short display
     /// name via the game's <c>"characters"</c> loc table. Returns
     /// <paramref name="fallback"/> if the key is missing (modded characters
-    /// without a titleObject, or pre-LocManager call).</summary>
+    /// without a titleObject, or pre-LocManager call).
+    ///
+    /// Strips a leading English-style "The " article from the result so the
+    /// game's "The Defect" / "The Necrobinder" / etc. render as bare
+    /// "Defect" / "Necrobinder" — consistent with how the mod's own
+    /// fallbacks are written and how the name reads better in compact
+    /// surfaces (bestiary all-chars row descriptors, filter chips). Other
+    /// locales typically don't prefix character names with an article, so
+    /// the strip is a no-op there.</summary>
     public static string CharacterName(string characterIdOrEntry, string fallback)
     {
         try
@@ -94,7 +102,7 @@ public static class L
             if (entry.Length == 0) return fallback;
             var table = LocManager.Instance?.GetTable("characters");
             if (table != null && table.HasEntry(entry + ".titleObject"))
-                return table.GetRawText(entry + ".titleObject");
+                return StripLeadingArticle(table.GetRawText(entry + ".titleObject"));
         }
         catch (Exception e)
         {
@@ -102,6 +110,13 @@ public static class L
                 MainFile.Logger.Warn($"[L] CharacterName lookup failed for '{characterIdOrEntry}': {e.Message}");
         }
         return fallback;
+    }
+
+    private static string StripLeadingArticle(string s)
+    {
+        if (s.Length > 4 && s.StartsWith("The ", StringComparison.OrdinalIgnoreCase))
+            return s.Substring(4);
+        return s;
     }
 
     /// <summary>Resolves an act/biome id (<c>"ACT.OVERGROWTH"</c> or bare

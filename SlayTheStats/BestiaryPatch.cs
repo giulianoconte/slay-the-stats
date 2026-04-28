@@ -207,7 +207,7 @@ public static class BestiaryButtonPatch
                         {
                             var submenu = stack.PushSubmenuType<NBestiaryStatsSubmenu>();
                             MainFile.Logger.Info($"[SlayTheStats] BestiaryButton: push returned submenu={(submenu != null ? "ok" : "null")}");
-                            submenu.Refresh();
+                            submenu?.Refresh();
                         }
                         catch (Exception e)
                         {
@@ -480,7 +480,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             return;
         }
         _built = true;
-        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: start");
 
         // Outer margin: extra left padding so the back button (in the slightly-below-middle-left
         // position) doesn't overlap the encounter list. The right margin pulls the title
@@ -537,7 +536,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         bestiaryTitleRow.AddChild(_tutorialButton);
 
         outerVbox.AddChild(new HSeparator());
-        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: title added");
 
         // ── Main content: left list | separator | right detail ──
         // contentSplit is created early (right after the title HSep) so the VSeparator
@@ -733,7 +731,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         if (_headerMarginContainer != null)
             _headerMarginContainer.AddThemeConstantOverride("margin_right", (int)(ScrollbarWidth + ScrollbarGap));
 
-        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: left section (encounter list + scrollbar) built");
         contentSplit.AddChild(new VSeparator());
 
         // Right panel: stats (fixed height) + horizontal separator (fixed) + render area (fills rest).
@@ -946,8 +943,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsFooterLabel.Visible = false;
         statsVbox.AddChild(_statsFooterLabel);
 
-        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: right panel (stats table + all-chars scroll) built");
-
         // Sparkline POC — compares Unicode block characters vs a TextureRect
         // bar-chart. Removed once a style is chosen; lives in the bestiary
         // right pane so both renderings sit inside real game chrome and
@@ -988,7 +983,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         renderStyle.SetCornerRadiusAll(4);
         ((PanelContainer)_renderArea).AddThemeStyleboxOverride("panel", renderStyle);
         rightPanel.AddChild(_renderArea);
-        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: render area added");
 
         // ── Filter pane ──
         // Built after the rest of the UI so it sits last in the child list and draws on
@@ -996,7 +990,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // (the bestiary's "Score by:" row covers per-character scoring) and no group-card-
         // upgrades toggle (encounter stats are unaffected by card aggregation).
         BuildAndAttachFilterPane();
-        MainFile.Logger.Info("[SlayTheStats] BuildUI stage: filter pane attached (end of BuildUI)");
     }
 
     private void BuildAndAttachFilterPane()
@@ -1747,6 +1740,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         label.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+        // Bilinear filter the inline sparkline images so the 2× supersampled
+        // textures (BestiarySparklineSize 100×44) downsample smoothly to the
+        // 50×22 displayed cell instead of nearest-neighbor blockying.
+        label.TextureFilter = CanvasItem.TextureFilterEnum.Linear;
         label.AddThemeColorOverride("default_color", new Color(0.95f, 0.93f, 0.88f, 1f));
         label.AddThemeFontSizeOverride("normal_font_size", 18);
         label.AddThemeFontSizeOverride("bold_font_size", 18);
@@ -1918,18 +1915,55 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             return b;
         }
 
+        // Local helper: thin horizontal rule between sections. Force an
+        // explicit minimum height + ShrinkBegin so both rules render in the
+        // same allocated vertical space, and override the separator style
+        // with a 2 px StyleBoxLine so the rules read as a clear divider
+        // rather than a hairline that disappears against the popup chrome.
+        HSeparator MakeSectionRule()
+        {
+            var sep = new HSeparator
+            {
+                CustomMinimumSize = new Vector2(0, 8),
+                SizeFlagsVertical = SizeFlags.ShrinkBegin,
+            };
+            var ruleStyle = new StyleBoxLine
+            {
+                Color = new Color(0.7f, 0.68f, 0.62f, 0.5f), // warm grey, semi-transparent
+                Thickness = 2,
+            };
+            sep.AddThemeStyleboxOverride("separator", ruleStyle);
+            return sep;
+        }
+
         // Section 1: Table type — explains the two Table Type options (all-
         // characters comparison vs. per-character focused view) and the Dmg
-        // encoding each uses. Replaces the standalone footer note from the
-        // prior single-section layout.
+        // encoding each uses.
         vbox.AddChild(MakeSectionTitle(L.T("bestiary.legend.table_type.title")));
         vbox.AddChild(MakeSectionBody(L.T("bestiary.legend.table_type.body",
             ("prismatic_icon", prismaticIcon),
             ("char_icons", charIcons))));
 
-        // Section 2: Stat columns — per-column definitions.
+        // Section 2: Stat columns — per-column definitions. Leads with Fights
+        // + Dist one-liners; the illustrated Distribution section below
+        // expands on Dist visually.
+        vbox.AddChild(MakeSectionRule());
         vbox.AddChild(MakeSectionTitle(L.T("bestiary.legend.stat_columns.title")));
         vbox.AddChild(MakeSectionBody(L.T("bestiary.legend.stat_columns.body")));
+
+        // Section 3: Distribution — short text + the annotated illustration
+        // (curly bracket above the IQR labelled "Mid 50%", arrow below the
+        // curve labelled "Median Dmg", x/y axis labels). The visual replaces
+        // the verbose cross-reference prose that used to live in this body.
+        vbox.AddChild(MakeSectionRule());
+        vbox.AddChild(MakeSectionTitle(L.T("bestiary.legend.dist.title")));
+        vbox.AddChild(MakeSectionBody(L.T("bestiary.legend.dist.body")));
+        vbox.AddChild(new DistLegendIllustration());
+
+        // Footer: dismiss hint at the bottom of the popup. No rule before
+        // it — the visual sits adjacent to the curve and the dismiss hint
+        // is short, so a separator would read as overkill.
+        vbox.AddChild(MakeSectionBody(L.T("bestiary.legend.dismiss_hint")));
 
         // Wrap the popup in a CanvasLayer + full-screen click-catcher so clicking
         // anywhere outside the popup dismisses it.
@@ -3990,7 +4024,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             SparklinePoc.PopulateLabelWithSparklines(
                 _statsCharRowsLabel, parts.CharacterRows,
                 parts.Sparklines ?? new List<ImageTexture?>(),
-                50, 22);
+                EncounterTooltipHelper.BestiarySparklineDisplayW,
+                EncounterTooltipHelper.BestiarySparklineDisplayH);
         }
         if (_statsCharRowsWrapper != null) _statsCharRowsWrapper.Visible = true;
         if (_statsFooterLabel != null)
@@ -4064,7 +4099,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_statsLabel != null)
         {
-            SparklinePoc.PopulateLabelWithSparklines(_statsLabel, parts.Text, parts.Sparklines, 50, 22);
+            SparklinePoc.PopulateLabelWithSparklines(_statsLabel, parts.Text, parts.Sparklines,
+                EncounterTooltipHelper.BestiarySparklineDisplayW,
+                EncounterTooltipHelper.BestiarySparklineDisplayH);
             _statsLabel.Visible = true;
         }
         if (_statsLabelMargin != null) _statsLabelMargin.Visible = true;
@@ -5094,7 +5131,7 @@ internal static class EncounterSorting
     public static string Label(EncounterSortMode mode) => mode switch
     {
         EncounterSortMode.Name         => L.T("bestiary.sort.name"),
-        EncounterSortMode.Seen         => L.T("tooltip.col.runs"),
+        EncounterSortMode.Seen         => L.T("tooltip.col.fights"),
         EncounterSortMode.DeathRate    => L.T("bestiary.sort.death_pct"),
         EncounterSortMode.MedianDamage => L.T("tooltip.col.dmg"),
         EncounterSortMode.Spread       => L.T("tooltip.col.spread"),
