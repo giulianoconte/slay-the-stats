@@ -119,12 +119,13 @@ internal static class RelicHoverHelper
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter)
                     : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
-                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(filter) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter);
+                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(filter) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter, isCompendium);
             }
 
             TooltipHelper.TrySceneTheftOnce();
             _activeHolder = holder;
-            TooltipHelper.ShowPanel(statsText);
+            float? widthOverride = (isCompendium && SlayTheStatsConfig.ShowExperimentalInsights) ? 740f : null;
+            TooltipHelper.ShowPanel(statsText, widthOverride: widthOverride);
         }
         catch (Exception e)
         {
@@ -209,7 +210,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, bool isCompendium = false)
     {
         var sb = new StringBuilder();
 
@@ -263,6 +264,9 @@ internal static class RelicHoverHelper
         sb.Append(TooltipHelper.DataCell(cTotWr, TooltipHelper.ColPadLast));
 
         sb.Append("[/table]");
+
+        if (isCompendium && SlayTheStatsConfig.ShowExperimentalInsights)
+            sb.Append(CardHoverShowPatch.BuildExperimentalRelicSubTable(actStats, wrBaseline));
 
         // Baseline line below the table (plain text — avoids in-table column overflow).
         // NaN baselines (filter matched zero runs/contexts) render as "—".

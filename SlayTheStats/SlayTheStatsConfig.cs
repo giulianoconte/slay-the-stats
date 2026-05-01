@@ -41,6 +41,14 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool DisableTooltipsEntirely { get; set; } = false;
 
     /// <summary>
+    /// Experimental: appends a sub-table to compendium card/relic tooltips with
+    /// the within-offer (#1) and skip-as-control (#2) Win% techniques described in
+    /// sts2-docs/slay-the-stats/insights.md. Leaves the existing tooltip and its
+    /// coloration unchanged. Off by default — flip on to evaluate.
+    /// </summary>
+    public static bool ShowExperimentalInsights { get; set; } = false;
+
+    /// <summary>
     /// True once the user has seen the first-run filter tutorial in the
     /// compendium. Persisted via SimpleModConfig so it only shows on the
     /// first compendium visit after installing the mod.

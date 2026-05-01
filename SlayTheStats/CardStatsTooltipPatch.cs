@@ -60,12 +60,13 @@ public static class CardHoverShowPatch
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db, filter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
-                statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter);
+                statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter, isCompendium);
             }
 
             TooltipHelper.TrySceneTheftOnce();
             _activeHolder = __instance;
-            TooltipHelper.ShowPanel(statsText, __instance as Control);
+            float? widthOverride = (isCompendium && SlayTheStatsConfig.ShowExperimentalInsights) ? 740f : null;
+            TooltipHelper.ShowPanel(statsText, __instance as Control, widthOverride);
         }
         catch (Exception e)
         {
@@ -139,6 +140,12 @@ public static class CardHoverShowPatch
                     Offered        = existing.Offered        + stat.Offered,
                     Picked         = existing.Picked         + stat.Picked,
                     Won            = existing.Won            + stat.Won,
+                    PickedWon         = existing.PickedWon         + stat.PickedWon,
+                    OfferedWon        = existing.OfferedWon        + stat.OfferedWon,
+                    OfferedSkipped    = existing.OfferedSkipped    + stat.OfferedSkipped,
+                    OfferedSkippedWon = existing.OfferedSkippedWon + stat.OfferedSkippedWon,
+                    RunsEverPresent   = existing.RunsEverPresent   + stat.RunsEverPresent,
+                    RunsEverWon       = existing.RunsEverWon       + stat.RunsEverWon,
                     RunsOffered    = existing.RunsOffered    + stat.RunsOffered,
                     RunsPicked     = existing.RunsPicked     + stat.RunsPicked,
                     RunsPresent    = existing.RunsPresent    + stat.RunsPresent,
@@ -673,12 +680,12 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, bool isCompendium = false)
     {
         var sb = new StringBuilder();
 
         if (showBuysLayout)
-            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter);
+            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter, isCompendium);
 
         // Class card columns: Act | Runs (present/offered) | Pick% | Win%
         sb.Append("[table=4]");
@@ -736,6 +743,9 @@ public static class CardHoverShowPatch
 
         sb.Append("[/table]");
 
+        if (isCompendium && SlayTheStatsConfig.ShowExperimentalInsights)
+            sb.Append(BuildExperimentalCardSubTable(actStats, characterWR));
+
         // Baseline line below the table (plain text — avoids in-table column overflow).
         // NaN baselines (filter matched zero runs/contexts) render as "—".
         // Baseline character is already implied by the filter-context footer (which
@@ -758,7 +768,7 @@ public static class CardHoverShowPatch
     /// Buys shows RunsShopBought/RunsShopSeen (purchases / shop appearances).
     /// Win% is placed last, consistent across all stat tables.
     /// </summary>
-    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null)
+    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null, bool isCompendium = false)
     {
         var sb = new StringBuilder();
         // Columns: Act | Runs | Buys (bought/seen) | Win%
@@ -813,6 +823,9 @@ public static class CardHoverShowPatch
 
         sb.Append("[/table]");
 
+        if (isCompendium && SlayTheStatsConfig.ShowExperimentalInsights)
+            sb.Append(BuildExperimentalCardSubTable(actStats, characterWR));
+
         // Baseline line below the table (plain text — avoids in-table column overflow).
         // NaN baselines (filter matched zero runs/contexts) render as "—".
         var wrStr        = double.IsNaN(characterWR)         ? "—" : $"{Math.Round(characterWR):F0}%";
@@ -841,6 +854,228 @@ public static class CardHoverShowPatch
     /// <summary>Legacy wrapper — kept for any external callers during migration.</summary>
     internal static string FormatBuysCell(int bought, int seen, double pct, double baseline)
         => FormatBuysFractionCell(bought, seen, pct, baseline, TooltipHelper.ColPadInner);
+
+    // ─── Experimental insights sub-table (cf. insights.md #1, #2) ───
+    //
+    // Layout: Act | Pick% | vs Alt% | Δ | vs Skip% | Δ
+    //   Pick%   = WinRatePicked          = picked_won / picked
+    //   vs Alt% = WinRateOfferedNotPicked = (offered_won − picked_won) / (offered − picked)
+    //   Δ (alt) = Pick% − vs Alt%   ← within-offer delta (technique #1)
+    //   vs Skip%= WinRateSkipped        = offered_skipped_won / offered_skipped
+    //   Δ (skip)= Pick% − vs Skip%  ← skip-as-control delta (technique #2)
+    //
+    // Existing main table is left untouched — coloration in this sub-table only.
+    // Absolute Win% cells color-code vs the character WR baseline using ColWR.
+    // Δ cells color-code vs a 0 baseline (positive = good = green, negative = bad).
+
+    internal static string BuildExperimentalCardSubTable(Dictionary<int, CardStat> actStats, double characterWR)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"\n[font_size=11][color={TooltipHelper.NeutralShade}]experimental[/color][/font_size]");
+
+        sb.Append("[table=9]");
+        sb.Append(TooltipHelper.HdrCell("Act",   TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell("N",     TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Pick",  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Alt",   TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Δ",     TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Skip",  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Δ",     TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Ever",  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Δ",     TooltipHelper.ColPadLast));
+
+        var total = new CardStat();
+        for (int act = 1; act <= 3; act++)
+        {
+            sb.Append(TooltipHelper.DataCell($"{act}", TooltipHelper.ColPadOuter));
+            if (actStats.TryGetValue(act, out var stat) && stat.Picked > 0)
+            {
+                AccumulateExpStat(total, stat);
+                sb.Append(BuildExpCardRow(stat, characterWR));
+            }
+            else
+            {
+                AppendEmptyExpCells(sb);
+            }
+        }
+
+        sb.Append(TooltipHelper.DataCell(TooltipHelper.TotalLabel(), TooltipHelper.ColPadOuter));
+        if (total.Picked > 0)
+            sb.Append(BuildExpCardRow(total, characterWR));
+        else
+            AppendEmptyExpCells(sb);
+
+        sb.Append("[/table]");
+        return sb.ToString();
+    }
+
+    internal static string BuildExperimentalRelicSubTable(Dictionary<int, RelicStat> actStats, double wrBaseline)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"\n[font_size=11][color={TooltipHelper.NeutralShade}]experimental[/color][/font_size]");
+
+        sb.Append("[table=9]");
+        sb.Append(TooltipHelper.HdrCell("Act",   TooltipHelper.ColPadOuter));
+        sb.Append(TooltipHelper.HdrCell("N",     TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Pick",  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Alt",   TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Δ",     TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Skip",  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Δ",     TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Ever",  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.HdrCell("Δ",     TooltipHelper.ColPadLast));
+
+        var total = new RelicStat();
+        for (int act = 1; act <= 3; act++)
+        {
+            sb.Append(TooltipHelper.DataCell($"{act}", TooltipHelper.ColPadOuter));
+            if (actStats.TryGetValue(act, out var stat) && stat.Picked > 0)
+            {
+                AccumulateExpStat(total, stat);
+                sb.Append(BuildExpRelicRow(stat, wrBaseline));
+            }
+            else
+            {
+                AppendEmptyExpCells(sb);
+            }
+        }
+
+        sb.Append(TooltipHelper.DataCell(TooltipHelper.TotalLabel(), TooltipHelper.ColPadOuter));
+        if (total.Picked > 0)
+            sb.Append(BuildExpRelicRow(total, wrBaseline));
+        else
+            AppendEmptyExpCells(sb);
+
+        sb.Append("[/table]");
+        return sb.ToString();
+    }
+
+    private static void AccumulateExpStat(CardStat dst, CardStat src)
+    {
+        dst.Offered           += src.Offered;
+        dst.Picked            += src.Picked;
+        dst.PickedWon         += src.PickedWon;
+        dst.OfferedWon        += src.OfferedWon;
+        dst.OfferedSkipped    += src.OfferedSkipped;
+        dst.OfferedSkippedWon += src.OfferedSkippedWon;
+        dst.RunsPresent       += src.RunsPresent;
+        dst.RunsWon           += src.RunsWon;
+        dst.RunsEverPresent   += src.RunsEverPresent;
+        dst.RunsEverWon       += src.RunsEverWon;
+    }
+
+    private static void AccumulateExpStat(RelicStat dst, RelicStat src)
+    {
+        dst.Offered           += src.Offered;
+        dst.Picked            += src.Picked;
+        dst.PickedWon         += src.PickedWon;
+        dst.OfferedWon        += src.OfferedWon;
+        dst.OfferedSkipped    += src.OfferedSkipped;
+        dst.OfferedSkippedWon += src.OfferedSkippedWon;
+        dst.RunsPresent       += src.RunsPresent;
+        dst.RunsWon           += src.RunsWon;
+        dst.RunsEverPresent   += src.RunsEverPresent;
+        dst.RunsEverWon       += src.RunsEverWon;
+    }
+
+    private static string BuildExpCardRow(CardStat s, double wrBaseline)
+    {
+        var sb = new StringBuilder();
+        var pickPct    = StatsAggregator.WinRatePicked(s);
+        var notPickPct = StatsAggregator.WinRateOfferedNotPicked(s);
+        var skipPct    = StatsAggregator.WinRateSkipped(s);
+        var dAlt       = StatsAggregator.WithinOfferDelta(s);
+        var dSkip      = StatsAggregator.SkipDelta(s);
+        var finalPct   = s.RunsPresent     > 0 ? 100.0 * s.RunsWon     / s.RunsPresent     : double.NaN;
+        var everPct    = s.RunsEverPresent > 0 ? 100.0 * s.RunsEverWon / s.RunsEverPresent : double.NaN;
+        var dEver      = everPct - finalPct;
+
+        int alts = s.Offered - s.Picked - s.OfferedSkipped;
+        sb.Append(TooltipHelper.DataCell(FormatExpNCell(s.Picked, alts, s.OfferedSkipped, s.Offered), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPctCell(pickPct, s.Picked, wrBaseline),  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPlainPctCell(notPickPct),                TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpDeltaCell(dAlt, s.Picked),               TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPlainPctCell(skipPct),                   TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpDeltaCell(dSkip, s.Picked),              TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPctCell(everPct, s.RunsEverPresent, wrBaseline), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpDeltaCell(dEver, s.RunsEverPresent),     TooltipHelper.ColPadLast));
+        return sb.ToString();
+    }
+
+    private static string BuildExpRelicRow(RelicStat s, double wrBaseline)
+    {
+        var sb = new StringBuilder();
+        var pickPct    = StatsAggregator.WinRatePicked(s);
+        var notPickPct = StatsAggregator.WinRateOfferedNotPicked(s);
+        var skipPct    = StatsAggregator.WinRateSkipped(s);
+        var dAlt       = StatsAggregator.WithinOfferDelta(s);
+        var dSkip      = StatsAggregator.SkipDelta(s);
+        var finalPct   = s.RunsPresent     > 0 ? 100.0 * s.RunsWon     / s.RunsPresent     : double.NaN;
+        var everPct    = s.RunsEverPresent > 0 ? 100.0 * s.RunsEverWon / s.RunsEverPresent : double.NaN;
+        var dEver      = everPct - finalPct;
+
+        int alts = s.Offered - s.Picked - s.OfferedSkipped;
+        sb.Append(TooltipHelper.DataCell(FormatExpNCell(s.Picked, alts, s.OfferedSkipped, s.Offered), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPctCell(pickPct, s.Picked, wrBaseline),  TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPlainPctCell(notPickPct),                TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpDeltaCell(dAlt, s.Picked),               TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPlainPctCell(skipPct),                   TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpDeltaCell(dSkip, s.Picked),              TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpPctCell(everPct, s.RunsEverPresent, wrBaseline), TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.DataCell(FormatExpDeltaCell(dEver, s.RunsEverPresent),     TooltipHelper.ColPadLast));
+        return sb.ToString();
+    }
+
+    // N column for the experimental sub-table — packs the four event-level
+    // counts that drive each adjacent column. The three event buckets are disjoint
+    // so picks + alts + skips = offered:
+    //   picks  — picked X
+    //   alts   — picked a different card from the same offer (Offered − Picked − OfferedSkipped)
+    //   skips  — screen-skipped the entire reward (OfferedSkipped)
+    //   offered — Offered (sum of the three)
+    // Picks colored by sample-size brightness via ColN; remaining counts neutral
+    // so the eye lands on the binding number first.
+    private static string FormatExpNCell(int picks, int alts, int skips, int offered)
+    {
+        var sep = $"[color={TooltipHelper.NeutralShade}]/[/color]";
+        var pickStr = TooltipHelper.ColN($"{picks}", picks);
+        var rest = $"[color={TooltipHelper.NeutralShade}]{alts}[/color]{sep}[color={TooltipHelper.NeutralShade}]{skips}[/color]{sep}[color={TooltipHelper.NeutralShade}]{offered}[/color]";
+        return $"{pickStr}{sep}{rest}";
+    }
+
+    private static void AppendEmptyExpCells(StringBuilder sb)
+    {
+        for (int i = 0; i < 7; i++) sb.Append(TooltipHelper.EmptyCell(TooltipHelper.ColPadInner));
+        sb.Append(TooltipHelper.EmptyCell(TooltipHelper.ColPadLast));
+    }
+
+    private static string FormatExpPctCell(double pct, int n, double baseline)
+    {
+        if (double.IsNaN(pct))
+            return $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        var text = $"{Math.Round(pct):F0}%";
+        return TooltipHelper.ColWR(text, pct, n, baseline);
+    }
+
+    // Uncolored Win% — used for Alt and Skip columns where the underlying runs
+    // didn't have this card in play. Win/loss there says nothing about *this card's*
+    // performance, so significance coloration would mislead. Plain default text.
+    private static string FormatExpPlainPctCell(double pct)
+    {
+        if (double.IsNaN(pct))
+            return $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        return $"{Math.Round(pct):F0}%";
+    }
+
+    private static string FormatExpDeltaCell(double delta, int n)
+    {
+        if (double.IsNaN(delta))
+            return $"[color={TooltipHelper.NeutralShade}]-[/color]";
+        var rounded = Math.Round(delta);
+        var text = rounded >= 0 ? $"+{rounded:F0}" : $"{rounded:F0}";
+        // ColWR on a 0 baseline: positive → green, negative → red, magnitude × n drives intensity.
+        return TooltipHelper.ColWR(text, delta, n, 0.0);
+    }
 }
 
 [HarmonyPatch(typeof(NCardHolder), "ClearHoverTips")]

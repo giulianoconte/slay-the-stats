@@ -213,6 +213,12 @@ public static class StatsAggregator
             agg.Offered      += stat.Offered;
             agg.Picked       += stat.Picked;
             agg.Won          += stat.Won;
+            agg.PickedWon         += stat.PickedWon;
+            agg.OfferedWon        += stat.OfferedWon;
+            agg.OfferedSkipped    += stat.OfferedSkipped;
+            agg.OfferedSkippedWon += stat.OfferedSkippedWon;
+            agg.RunsEverPresent   += stat.RunsEverPresent;
+            agg.RunsEverWon       += stat.RunsEverWon;
             agg.RunsOffered  += stat.RunsOffered;
             agg.RunsPicked   += stat.RunsPicked;
             agg.RunsPresent  += stat.RunsPresent;
@@ -448,6 +454,14 @@ public static class StatsAggregator
             agg.RunsWon        += stat.RunsWon;
             agg.RunsShopSeen   += stat.RunsShopSeen;
             agg.RunsShopBought += stat.RunsShopBought;
+            agg.Offered            += stat.Offered;
+            agg.Picked             += stat.Picked;
+            agg.OfferedWon         += stat.OfferedWon;
+            agg.PickedWon          += stat.PickedWon;
+            agg.OfferedSkipped     += stat.OfferedSkipped;
+            agg.OfferedSkippedWon  += stat.OfferedSkippedWon;
+            agg.RunsEverPresent    += stat.RunsEverPresent;
+            agg.RunsEverWon        += stat.RunsEverWon;
         }
 
         return result;
@@ -1181,6 +1195,64 @@ public static class StatsAggregator
             agg.BucketVariable = null;
         }
     }
+
+    // ─── Experimental insights (cf. sts2-docs/slay-the-stats/insights.md) ───
+    //
+    // Per-event Win% legs for techniques #1 (within-offer) and #2 (skip-as-control).
+    // Each helper returns NaN when the bucket is empty so the renderer can show "—".
+    //
+    // The three buckets are disjoint at the event level — every fight-reward offer
+    // event either had X picked, had a different card picked, or was screen-skipped.
+    //   picks  = Picked            (with wins   = PickedWon)
+    //   alts   = Offered − Picked − OfferedSkipped   (took some other card)
+    //   skips  = OfferedSkipped    (with wins   = OfferedSkippedWon)
+    // and picks + alts + skips = Offered.
+    //
+    //   WinRatePicked            = picks-won / picks
+    //   WinRateOfferedNotPicked  = alts-won  / alts        ← took-another-card bucket
+    //   WinRateSkipped           = skips-won / skips
+    //
+    // Deltas anchor on WinRatePicked:
+    //   WithinOfferDelta = WinRatePicked − WinRateOfferedNotPicked   (#1)
+    //   SkipDelta        = WinRatePicked − WinRateSkipped            (#2)
+
+    public static double WinRatePicked(CardStat s)
+        => s.Picked > 0 ? 100.0 * s.PickedWon / s.Picked : double.NaN;
+
+    public static double WinRateOfferedNotPicked(CardStat s)
+    {
+        int n    = s.Offered    - s.Picked    - s.OfferedSkipped;
+        int wins = s.OfferedWon - s.PickedWon - s.OfferedSkippedWon;
+        return n > 0 ? 100.0 * wins / n : double.NaN;
+    }
+
+    public static double WinRateSkipped(CardStat s)
+        => s.OfferedSkipped > 0 ? 100.0 * s.OfferedSkippedWon / s.OfferedSkipped : double.NaN;
+
+    public static double WithinOfferDelta(CardStat s)
+        => WinRatePicked(s) - WinRateOfferedNotPicked(s);
+
+    public static double SkipDelta(CardStat s)
+        => WinRatePicked(s) - WinRateSkipped(s);
+
+    public static double WinRatePicked(RelicStat s)
+        => s.Picked > 0 ? 100.0 * s.PickedWon / s.Picked : double.NaN;
+
+    public static double WinRateOfferedNotPicked(RelicStat s)
+    {
+        int n    = s.Offered    - s.Picked    - s.OfferedSkipped;
+        int wins = s.OfferedWon - s.PickedWon - s.OfferedSkippedWon;
+        return n > 0 ? 100.0 * wins / n : double.NaN;
+    }
+
+    public static double WinRateSkipped(RelicStat s)
+        => s.OfferedSkipped > 0 ? 100.0 * s.OfferedSkippedWon / s.OfferedSkipped : double.NaN;
+
+    public static double WithinOfferDelta(RelicStat s)
+        => WinRatePicked(s) - WinRateOfferedNotPicked(s);
+
+    public static double SkipDelta(RelicStat s)
+        => WinRatePicked(s) - WinRateSkipped(s);
 
     /// <summary>
     /// Collects all distinct profile names found across all card/relic context keys.

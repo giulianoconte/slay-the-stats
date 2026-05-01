@@ -98,9 +98,20 @@ public static class RunParser
         var killedByEncounter = root["killed_by_encounter"]?.GetValue<string>();
 
         // Walk all map points across all acts and collect card choices and relic acquisitions with context
-        var allChoices = new List<(string cardId, bool wasPicked, bool wasUpgraded, RunContext context)>();
+        var allChoices = new List<(string cardId, bool wasPicked, bool wasUpgraded, bool wasScreenSkipped, RunContext context)>();
         var relicsAcquired = new List<(string relicId, RunContext context)>();
         var relicsSeenInFloors = new HashSet<string>();
+
+        // Experimental insights: per-event relic-offer tracking for within-offer
+        // and skip-as-control techniques. Shop floors excluded (different semantic).
+        var relicOffers = new List<(string relicId, bool wasPicked, bool wasScreenSkipped, RunContext context)>();
+
+        // Experimental: per-run "ever in deck" set. Union of every card acquisition
+        // event during the run (picks on any floor type, shop buys, event gains,
+        // transform targets) ∪ end-of-run deck (catches starter cards). Captures
+        // cards that were picked and later removed/transformed away — invisible to
+        // the final-deck-only RunsPresent counter.
+        var everPresentThisRun = new HashSet<(string cardId, string contextKey)>();
 
         // Per-run shop tracking (deduplicated per item+context)
         var shopSeenThisRun        = new HashSet<(string id, string contextKey)>();
@@ -204,8 +215,12 @@ public static class RunParser
                     {
                         if (isFightReward)
                         {
-                            // Fight reward screen (monster/elite/boss): track for Pick% stats
-                            bool anyPicked = false;
+                            // Fight reward screen (monster/elite/boss): track for Pick% stats.
+                            // Two-pass: collect all choices first to know the screen-level skip
+                            // status, then push each entry to allChoices with that flag set so
+                            // the per-instance update loop below can populate the experimental
+                            // insights counters (OfferedSkipped / OfferedSkippedWon).
+                            var screenChoices = new List<(string cardKey, bool wasPicked, bool wasUpgraded)>();
                             foreach (var choice in cardChoices)
                             {
                                 var cardId = choice?["card"]?["id"]?.GetValue<string>();
@@ -216,9 +231,15 @@ public static class RunParser
                                 bool wasUpgraded = upgradeLevel > 0;
 
                                 bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
-                                allChoices.Add((cardKey, wasPicked, wasUpgraded, context));
-                                if (wasPicked) anyPicked = true;
+                                screenChoices.Add((cardKey, wasPicked, wasUpgraded));
                             }
+
+                            bool anyPicked = false;
+                            foreach (var sc in screenChoices) if (sc.wasPicked) { anyPicked = true; break; }
+                            bool screenSkipped = !anyPicked && screenChoices.Count > 0;
+
+                            foreach (var (cardKey, wasPicked, wasUpgraded) in screenChoices)
+                                allChoices.Add((cardKey, wasPicked, wasUpgraded, screenSkipped, context));
 
                             // Record a skip if a reward screen was shown but nothing was picked
                             if (cardChoices.Count > 0)
@@ -229,7 +250,7 @@ public static class RunParser
                                 {
                                     db.TotalSkips++;
                                     rewardScreensSkippedThisRun++;
-                                    allChoices.Add((SkipId, true, false, context));
+                                    allChoices.Add((SkipId, true, false, true, context));
                                 }
                             }
                         }
@@ -246,6 +267,43 @@ public static class RunParser
                                 if (upgradeLevel > 0)
                                     shopSeenUpgradedThisRun.Add((cardKey, context.ToKey()));
                             }
+                        }
+
+                        // Experimental ever-present: harvest picks from any floor type
+                        // (event picks aren't in the fight-reward branch above).
+                        foreach (var choice in cardChoices)
+                        {
+                            var cId = choice?["card"]?["id"]?.GetValue<string>();
+                            if (cId == null) continue;
+                            bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
+                            if (!wasPicked) continue;
+                            var upgradeLevel = choice?["card"]?["current_upgrade_level"]?.GetValue<int>() ?? 0;
+                            var cardKey = upgradeLevel > 0 ? cId + "+" : cId;
+                            everPresentThisRun.Add((cardKey, context.ToKey()));
+                        }
+                    }
+
+                    // Experimental ever-present: cards_gained on any floor type — covers
+                    // shop purchases, event gifts/clones. Use raw id (no upgrade level).
+                    var cardsGainedAny = playerStats?["cards_gained"]?.AsArray();
+                    if (cardsGainedAny != null)
+                    {
+                        foreach (var c in cardsGainedAny)
+                        {
+                            var id = c?["id"]?.GetValue<string>();
+                            if (id != null) everPresentThisRun.Add((id, context.ToKey()));
+                        }
+                    }
+
+                    // Experimental ever-present: cards_transformed.final_card — the
+                    // post-transform card was added to the deck.
+                    var cardsTransformedAny = playerStats?["cards_transformed"]?.AsArray();
+                    if (cardsTransformedAny != null)
+                    {
+                        foreach (var t in cardsTransformedAny)
+                        {
+                            var to = t?["final_card"]?["id"]?.GetValue<string>();
+                            if (to != null) everPresentThisRun.Add((to, context.ToKey()));
                         }
                     }
 
@@ -309,6 +367,10 @@ public static class RunParser
                     var relicChoices = playerStats?["relic_choices"]?.AsArray();
                     if (relicChoices != null)
                     {
+                        // Two-pass on non-shop floors so we can stamp screenSkipped onto each
+                        // offer entry for the experimental insights counters. Shop floors use
+                        // the existing per-run shop-seen path; "skip" doesn't apply there.
+                        var relicScreen = new List<(string relicId, bool wasPicked)>();
                         foreach (var choice in relicChoices)
                         {
                             var relicId = choice?["choice"]?.GetValue<string>();
@@ -317,12 +379,22 @@ public static class RunParser
                             relicsSeenInFloors.Add(relicId);
 
                             bool wasPicked = choice?["was_picked"]?.GetValue<bool>() ?? false;
+                            relicScreen.Add((relicId, wasPicked));
+
                             if (wasPicked)
                                 relicsAcquired.Add((relicId, context));
 
-                            // Shop floor: relic_choices lists the shop's relic inventory
                             if (isShop)
                                 relicShopSeenThisRun.Add((relicId, context.ToKey()));
+                        }
+
+                        if (!isShop && relicScreen.Count > 0)
+                        {
+                            bool anyPicked = false;
+                            foreach (var rc in relicScreen) if (rc.wasPicked) { anyPicked = true; break; }
+                            bool screenSkipped = !anyPicked;
+                            foreach (var (relicId, wasPicked) in relicScreen)
+                                relicOffers.Add((relicId, wasPicked, screenSkipped, context));
                         }
                     }
                 }
@@ -596,13 +668,22 @@ public static class RunParser
         var offeredUpgradedThisRun = new HashSet<(string cardId, string contextKey)>();
         var pickedUpgradedThisRun = new HashSet<(string cardId, string contextKey)>();
 
-        foreach (var (cardId, wasPicked, wasUpgraded, context) in allChoices)
+        foreach (var (cardId, wasPicked, wasUpgraded, wasScreenSkipped, context) in allChoices)
         {
             var stat = db.GetOrCreate(cardId, context);
 
             // Per-instance
             stat.Offered++;
             if (wasPicked) stat.Picked++;
+
+            // Experimental insights — per-event counters (cf. insights.md #1 and #2).
+            if (won) stat.OfferedWon++;
+            if (wasPicked && won) stat.PickedWon++;
+            if (wasScreenSkipped)
+            {
+                stat.OfferedSkipped++;
+                if (won) stat.OfferedSkippedWon++;
+            }
 
             // Per-run (deduplicated per card+context)
             offeredThisRun.Add((cardId, context.ToKey()));
@@ -613,6 +694,24 @@ public static class RunParser
             {
                 offeredUpgradedThisRun.Add((cardId, context.ToKey()));
                 if (wasPicked) pickedUpgradedThisRun.Add((cardId, context.ToKey()));
+            }
+        }
+
+        // Experimental insights — relic per-event counters from non-shop relic_choices.
+        foreach (var (relicId, wasPicked, wasScreenSkipped, context) in relicOffers)
+        {
+            var stat = db.GetOrCreateRelic(relicId, context);
+            stat.Offered++;
+            if (won) stat.OfferedWon++;
+            if (wasPicked)
+            {
+                stat.Picked++;
+                if (won) stat.PickedWon++;
+            }
+            if (wasScreenSkipped)
+            {
+                stat.OfferedSkipped++;
+                if (won) stat.OfferedSkippedWon++;
             }
         }
 
@@ -656,6 +755,17 @@ public static class RunParser
             var stat = db.GetOrCreate(cardId, RunContext.Parse(contextKey));
             stat.RunsPresent++;
             if (won) stat.RunsWon++;
+        }
+
+        // Experimental ever-present flush — union acquisitions with end-of-run deck
+        // (catches starter cards never seen as a separate acquisition event), then
+        // increment per-run counters with run-level dedup.
+        foreach (var key in presenceThisRun) everPresentThisRun.Add(key);
+        foreach (var (cardId, contextKey) in everPresentThisRun)
+        {
+            var stat = db.GetOrCreate(cardId, RunContext.Parse(contextKey));
+            stat.RunsEverPresent++;
+            if (won) stat.RunsEverWon++;
         }
 
         // Enforce consistency: a purchased item must have been seen.
@@ -704,6 +814,22 @@ public static class RunParser
             var stat = db.GetOrCreateRelic(relicId, context);
             stat.RunsPresent++;
             if (won) stat.RunsWon++;
+        }
+
+        // Experimental ever-present for relics: relicsAcquired (boss/elite picks +
+        // starter) ∪ relicShopBoughtThisRun (shop purchases — the existing schema
+        // misses these for RunsPresent, which "ever-present" surfaces). Per-run
+        // dedup via a set keyed on (relicId, contextKey).
+        var relicEverPresentThisRun = new HashSet<(string, string)>();
+        foreach (var (relicId, ctx) in relicsAcquired)
+            relicEverPresentThisRun.Add((relicId, ctx.ToKey()));
+        foreach (var entry in relicShopBoughtThisRun)
+            relicEverPresentThisRun.Add(entry);
+        foreach (var (relicId, contextKey) in relicEverPresentThisRun)
+        {
+            var stat = db.GetOrCreateRelic(relicId, RunContext.Parse(contextKey));
+            stat.RunsEverPresent++;
+            if (won) stat.RunsEverWon++;
         }
 
         // Character-level run/win counts — used as the WR baseline in tooltips

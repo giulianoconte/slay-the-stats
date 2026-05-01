@@ -39,8 +39,12 @@ public class RunParserRelicTests : IDisposable
     }
 
     [Fact]
-    public void RelicNotPicked_NotRecorded()
+    public void RelicNotPicked_RecordsOfferButNotPresence()
     {
+        // Schema 8+: an offered-but-unpicked relic is recorded for the within-offer
+        // and skip-as-control insights, but RunsPresent stays 0 so existing presence-
+        // based stats (Win%, Pick rate) ignore it. Single-relic offer with no pick
+        // also counts as a screen-skip event.
         var db = new StatsDb();
         var path = TempRun(Build(relicActs:
         [[
@@ -49,7 +53,11 @@ public class RunParserRelicTests : IDisposable
 
         RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.False(db.Relics.ContainsKey("RELIC.BURNING_BLOOD"));
+        var stat = db.Relics["RELIC.BURNING_BLOOD"]["CHARACTER.IRONCLAD|0|1|UNKNOWN|UNKNOWN|default"];
+        Assert.Equal(0, stat.RunsPresent);
+        Assert.Equal(1, stat.Offered);
+        Assert.Equal(0, stat.Picked);
+        Assert.Equal(1, stat.OfferedSkipped);
     }
 
     // --- Win/loss attribution ---

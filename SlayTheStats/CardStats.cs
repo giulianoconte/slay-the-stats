@@ -18,6 +18,23 @@ public class CardStat
     [JsonPropertyName("picked")] public int Picked { get; set; }
     [JsonPropertyName("won")] public int Won { get; set; }
 
+    // Experimental insights — per-event counters for within-offer (#1)
+    // and skip-as-control (#2) techniques. See sts2-docs/slay-the-stats/insights.md.
+    // PickedWon = picks where the run was won; OfferedWon = all offers in won runs.
+    // OfferedSkipped = offers where the entire reward screen was skipped (no card taken);
+    // OfferedSkippedWon = those that occurred in won runs.
+    [JsonPropertyName("picked_won")]          public int PickedWon          { get; set; }
+    [JsonPropertyName("offered_won")]         public int OfferedWon         { get; set; }
+    [JsonPropertyName("offered_skipped")]     public int OfferedSkipped     { get; set; }
+    [JsonPropertyName("offered_skipped_won")] public int OfferedSkippedWon  { get; set; }
+
+    // Per-run counters tracking presence at *any point* during the run, not just
+    // end-of-run final deck. Captures cards picked-then-removed (transforms,
+    // event removals). Sums acquisition events (picks, shop buys, event gains,
+    // transform targets) ∪ end-of-run deck. See insights.md.
+    [JsonPropertyName("runs_ever_present")] public int RunsEverPresent { get; set; }
+    [JsonPropertyName("runs_ever_won")]     public int RunsEverWon     { get; set; }
+
     // Per-run counters (Pick% — fight rewards only)
     [JsonPropertyName("runs_offered")] public int RunsOffered { get; set; }
     [JsonPropertyName("runs_picked")] public int RunsPicked { get; set; }
@@ -104,7 +121,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 7; // bumped from 6: added TurnsValues/PotionsValues per-fight lists
+    public const int CurrentSchemaVersion = 9; // bumped from 8: experimental RunsEverPresent / RunsEverWon (presence at any point during run)
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
