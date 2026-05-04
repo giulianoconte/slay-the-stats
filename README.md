@@ -105,6 +105,8 @@ Filter changes you make while in a run are temporary — they let you slice the 
 
 **Colorless Cards**, **Event Cards**, **Ancient Relics**, **Curses**, etc are all tracked.
 
+**Duplicate runs across profiles** are only counted once. If the same run file appears in multiple profile folders (e.g. after transferring a vanilla profile into a modded slot), the mod dedupes by run id so each run contributes a single entry — regardless of how many profile folders it lives in.
+
 Mod settings can be configured in-game from BaseLib's mod configuration page:
 
 - **Color Blind Mode** — teal/orange palette instead of green/red for stat coloring.
