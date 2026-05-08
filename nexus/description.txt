@@ -1,14 +1,23 @@
 Translations: Русский · 中文 — see "Translations" at the bottom of this page.
 
+My Mods
+- SlayTheStats: https://www.nexusmods.com/slaythespire2/mods/349 - stats tracking
+- ExitToDesktop: https://www.nexusmods.com/slaythespire2/mods/553 - qol
+- RememberCardSort: https://www.nexusmods.com/slaythespire2/mods/801 - qol
+- MoreTino: https://www.nexusmods.com/slaythespire2/mods/753 - memes
+
 New in v1.0.0
 - Event tracking.
 - Localization - Chinese (Simplified) and Russian language support.
 - Bestiary encounter distribution graph - Shows distribution of damage taken from the encounter.
 - Requires BaseLib v3.1.0
 
-Card and relic stats
+Features
 SlayTheStats reads your run history retroactively. Abandoned runs are skipped.
+
 Stats appear as tooltips when hovering over cards and relics in-run and in the compendium.
+
+Card and relic stats
 - Pick% -- how often you pick a card when it's offered as a fight reward.
 - Win% -- how often you win runs that include a given card or relic.
 - Runs -- shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. 12/30). For relics, just the number of runs present.
@@ -16,9 +25,11 @@ Stats appear as tooltips when hovering over cards and relics in-run and in the c
 
 Encounter stats
 Every combat encounter in your run history is parsed and tracked: times fought, damage taken, potions used, etc. Hover over an encounter during a fight to see encounter stats.
+
 Post-fight tooltip -- a tooltip on the reward screen compares this fight's damage, turns, and potions to your historical average. Columns:
 - vs hist. -- the difference between this fight and historical.
 - pctile -- percentile that this fight lands in, e.g. damage pctile:15 means that 15% of fights for this encounter dealt less damage than the previous fight.
+
 Bestiary (optional) -- a new page in the compendium listing every encounter, grouped by biome / act and encounter category. Columns:
 - Fights -- how many times fought.
 - Dist -- distribution of damage taken. See "Visualization" below.
@@ -31,21 +42,17 @@ Bestiary (optional) -- a new page in the compendium listing every encounter, gro
 
 Event stats
 Hover an event option to see how many times you've picked it, your win rate when you did, and a baseline for comparison.
+
 Multi-step events (Slippery Bridge, etc.) bucket per terminal option so each branch of the choice tree gets its own stats.
-Not all events give complete data on options seen/offered, so some events don't have offered stats for different options. For example, Future of Potions has choices for Common, Uncommon, and Rare potions, however the run history doesn't show which of these were offered at the time, it only shows which one was picked by the player. For events like this you can't show a pick rate because you don't know the amount of times offered.
+
+Not all events give complete data on options seen/offered, so some events don't have offered stats for different options. For example, Future of Potions has choices for Common, Uncommon, and Rare potions, however the run history doesn't show which of these were offered at the time, it only shows which one was picked by the player. For events like this you can't show a pick rate because you don't know the amount of times offered (well technically you can by tracking potion acquisition and usage throughout the run but this mod doesn't do that currently).
 
 Visualization
 Color-blind palette available (teal/orange instead of green/red) is available in settings.
+
 Most stats shown may be colored positively or negatively if significantly better or worse than the baseline. Coloration takes into account both deviation and sample size, so a very high winrate over a few runs may be considered less significant than a moderately high winrate over many runs.
+
 Encounter damage distribution graphs are shown in the bestiary so you can see the shape of the data. The median and middle 50% of fights are also displayed over the graph.
-
-Requirements
-- BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
-- **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "Uninstalling GUMM" below.
-
-Installation
-1. Download and extract BaseLib (v3.1.0 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
-2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, and SlayTheStats.pck.
 
 Compendium filters
 All stats can be filtered to exclude certain runs. In each of the compendium pages (Card Library, Relic Collection, Stats Bestiary) has a SlayTheStats button on the bottom left to edit filters.
@@ -55,33 +62,41 @@ All stats can be filtered to exclude certain runs. In each of the compendium pag
 - Class -- "Auto" restricts to the character class for the card. You can also force specific characters, for example to show only Silent's stats for colorless cards.
 - Group card upgrades -- merge upgraded variants (e.g. Strike+ counts toward Strike) or track them separately. Default on.
 - Include multiplayer runs -- include co-op runs alongside standard runs. Default off (only standard runs are counted, matching prior behavior).
-  - NOTE: Multiplayer stats tracking is untested.
+  - NOTE: Multiplayer stats tracking is untested.
 Filter pane controls:
 - Clear Filters -- remove all filters
 - Reset -- restore to your saved defaults
 - Save Defaults -- persist the current values as your new defaults. Your defaults are always used when in-run.
 
 Notes
-Pick% is sourced only from fight rewards. Shop purchases, event cards, and other sources are not counted.
-Win% counts all runs in which the card or relic was present in your final build, from any source.
-Shop purchases (Buys): shows how often you purchased an item relative to how often it appeared in a shop. Note that appearances are counted regardless of whether you could afford the item.
-Duplicate runs across profiles are only counted once. If the same run file appears in multiple profile folders (e.g. after transferring a vanilla profile into a modded slot), the mod dedupes by run id so each run contributes a single entry.
-
-My mods
-- SlayTheStats: https://www.nexusmods.com/slaythespire2/mods/349
-- ExitToDesktop: https://www.nexusmods.com/slaythespire2/mods/553
-- MoreTino: https://www.nexusmods.com/slaythespire2/mods/753
+- Pick% is sourced only from fight rewards. Shop purchases, event cards, and other sources are not counted.
+- Win% counts all runs in which the card or relic was present in your final build, from any source.
+- Shop purchases (Buys): shows how often you purchased an item relative to how often it appeared in a shop. Note that appearances are counted regardless of whether you could afford the item.
 
 Accessibility
 Color-blind coloration setting available (changes significance highlight colors from red/green to orange/teal).
+
+Install
+Requirements
+- BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "Uninstalling GUMM" below.
+
+Installation
+1. Download and extract BaseLib (v3.1.0 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
+2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, and SlayTheStats.pck
 
 Save data
 Stats are calculated upon opening the game and finishing a run. They are stored in slay-the-stats.json:
 - Windows: %APPDATA%\Slay the Spire 2\
 - Linux: ~/.local/share/Slay the Spire 2/
+
 You can always delete this file without losing data - the run history will be reread on next boot.
 
+Miscellaneous
 FAQ
+Q: How do I change stats shown in-run?
+A: Open the SlayTheStats filter pane button on the bottom left in the Card Library, Relic Collection, or Stats Bestiary. Hit "Save Defaults" to apply the filters to in-run stats.
+
 Q: Why does a card show more "present" runs than "offered" runs (e.g. 5/1)?
 A: "Present" counts all runs the card ended up in your deck from any source -- including upgrading the base card at a campfire -- while "offered" only counts fight reward screens. Starter cards and relics will always show 0 for "offered" since they never appear on fight reward screens.
 
@@ -104,12 +119,10 @@ The game stores modded saves in a separate "modded" subfolder, so installing mod
 - BACK UP your vanilla profile folder first. And do NOT later try to copy modded saves back over vanilla -- modded run history can contain data vanilla cannot parse and will corrupt the file. Vanilla -> modded only.
 - Launch with mods loaded and switch in-game to a profile slot OTHER than the one you want to overwrite (e.g. if you want to import vanilla profile 1, first switch to modded profile 2 or 3). The game holds the active slot in memory and would otherwise overwrite your copy on the next save.
 - Assuming you want to copy profile1: Leaving the game running, copy the contents of profile1/ into modded/profile1 (same profile number). Save roots are below; you can also open the in-game console (` or ~) and type `open saves` to jump there.
-  - Windows: %APPDATA%\SlayTheSpire2\steam\<STEAM_ID>\
-  - macOS:  ~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/
-  - Linux:  ~/.local/share/SlayTheSpire2/steam/<STEAM_ID>/
+  - Windows: %APPDATA%\SlayTheSpire2\steam\<STEAM_ID>\
+  - macOS:  ~/Library/Application Support/SlayTheSpire2/steam/<STEAM_ID>/
+  - Linux:  ~/.local/share/SlayTheSpire2/steam/<STEAM_ID>/
 - Back in-game, switch to the target profile slot. Your vanilla progress should now be visible.
-
-NOTE: This will copy runs over to the modded profile, meaning that all runs from the vanilla profile will be present for the stats in the modded profile. This isn't a problem, but just be aware that if you transfer progress this way, you won't be able to look at stats for "only the runs in the modded profile and not the vanilla profile."
 
 Troubleshooting
 Check the Godot log for [SlayTheStats] entries (close the game first):
@@ -121,8 +134,8 @@ I was mistaken - you never needed GUMM to run this mod. Here's how to uninstall 
 - In your sts2 install folder, next to your executable, there is an override.cfg file that GUMM writes to. Delete it -- otherwise the game won't launch (Godot tries to load GUMM's loader scene and exits).
 - Delete the GUMM installation folder.
 - Delete the GUMM file from your game's data folder:
-  - Windows: %APPDATA%\Slay the Spire 2\
-  - Linux: ~/.local/share/Slay the Spire 2/
+  - Windows: %APPDATA%\Slay the Spire 2\
+  - Linux: ~/.local/share/Slay the Spire 2/
 
 Translations
 The mod itself is localized into Russian and Simplified Chinese in-game.
@@ -133,4 +146,4 @@ Want to help translate the mod into another language? DM me on the Slay the Spir
 Если вы заметите ошибки перевода — пожалуйста, оставьте комментарий или сообщите на Discord. Буду признателен!
 
 简体中文：追踪您所有游戏场次中的卡牌、遗物和遭遇统计数据，并以提示框形式显示。同时在图鉴中添加敌怪图鉴页面。
-如果您发现翻译错误，欢迎在评论区或 Discord 反馈，非常感谢！
+如果您发现翻译错误，欢迎在评论区或 Discord 反馈，非常感谢！ 
