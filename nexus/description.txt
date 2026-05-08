@@ -12,7 +12,9 @@ New in v1.0.0
 - Bestiary encounter distribution graph - Shows distribution of damage taken from the encounter.
 - Requires BaseLib v3.1.0
 
+______________________________________________________________________
 Features
+______________________________________________________________________
 SlayTheStats reads your run history retroactively. Abandoned runs are skipped.
 
 Stats appear as tooltips when hovering over cards and relics in-run and in the compendium.
@@ -76,7 +78,9 @@ Notes
 Accessibility
 Color-blind coloration setting available (changes significance highlight colors from red/green to orange/teal).
 
+______________________________________________________________________
 Install
+______________________________________________________________________
 Requirements
 - BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
 - **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "Uninstalling GUMM" below.
@@ -92,7 +96,9 @@ Stats are calculated upon opening the game and finishing a run. They are stored 
 
 You can always delete this file without losing data - the run history will be reread on next boot.
 
+______________________________________________________________________
 Miscellaneous
+______________________________________________________________________
 FAQ
 Q: How do I change stats shown in-run?
 A: Open the SlayTheStats filter pane button on the bottom left in the Card Library, Relic Collection, or Stats Bestiary. Hit "Save Defaults" to apply the filters to in-run stats.
