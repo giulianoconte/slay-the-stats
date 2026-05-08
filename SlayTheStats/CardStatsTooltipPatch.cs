@@ -1086,10 +1086,12 @@ public static class MerchantCardCreateHoverTipPatch
     }
 }
 
-[HarmonyPatch(typeof(NMerchantCard), "ClearHoverTip")]
+// ClearHoverTip lives on NMerchantSlot (the parent); Harmony's attribute
+// lookup is declared-only, so we patch the parent type directly.
+[HarmonyPatch(typeof(NMerchantSlot), "ClearHoverTip")]
 public static class MerchantCardClearHoverTipPatch
 {
-    static void Postfix(NMerchantCard __instance)
+    static void Postfix(NMerchantSlot __instance)
     {
         if (MerchantCardCreateHoverTipPatch.ActiveMerchantCard == __instance)
             MerchantCardCreateHoverTipPatch.ActiveMerchantCard = null;
