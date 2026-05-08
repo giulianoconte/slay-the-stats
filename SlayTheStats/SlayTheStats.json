@@ -3,7 +3,7 @@
   "name": "SlayTheStats",
   "author": "Shoe",
   "description": "Tracks card, relic, and encounter stats across your runs and displays them as tooltips. Also implements a bestiary page in the compendium.",
-  "version": "v1.0.0",
+  "version": "v1.0.1",
   "has_pck": true,
   "has_dll": true,
   "min_game_version": "0.105.0",
