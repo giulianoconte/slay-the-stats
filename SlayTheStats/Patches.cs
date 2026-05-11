@@ -1,7 +1,10 @@
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Runs;
+using System.Linq;
 using System.Reflection;
 
 namespace SlayTheStats;
@@ -29,6 +32,77 @@ internal static class CharacterIdHelper
     }
 }
 
+// In multiplayer, NGame.StartRun(RunState) is called with a player list that's identical on
+// every client, so picking players[0] would tag joiners with the host's character. The lobby
+// knows each instance's local seat, and the multiplayer entry point NGame.StartNewMultiplayerRun
+// receives the StartRunLobby — so we hook it one level up, capture the local LobbyPlayer's
+// character, and stash it for the StartRun patch to consume. Singleplayer leaves this null and
+// falls back to players[0], which is correct because there's only one player.
+internal static class LocalCharacterCapture
+{
+    // For fresh MP: StartNewMultiplayerRun pulls the character string straight off lobby.LocalPlayer.
+    internal static string? PendingCharacterId;
+    // For MP load: LoadRunLobby exposes the local NetService.NetId but not a LobbyPlayer, so we
+    // stash the id and let the LoadRun patch filter runState.Players by it.
+    internal static ulong? PendingLocalNetId;
+
+    internal static string? ConsumeCharacterId()
+    {
+        var id = PendingCharacterId;
+        PendingCharacterId = null;
+        return id;
+    }
+
+    internal static ulong? ConsumeLocalNetId()
+    {
+        var id = PendingLocalNetId;
+        PendingLocalNetId = null;
+        return id;
+    }
+}
+
+[HarmonyPatch(typeof(NGame), "StartNewMultiplayerRun")]
+public static class StartNewMultiplayerRunPatch
+{
+    static void Prefix(StartRunLobby lobby)
+    {
+        try
+        {
+            var character = lobby?.LocalPlayer.character;
+            LocalCharacterCapture.PendingCharacterId = CharacterIdHelper.Extract(character);
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartNewMultiplayerRun: captured local character '{LocalCharacterCapture.PendingCharacterId}'");
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] StartNewMultiplayerRun capture failed: {e.Message}");
+        }
+    }
+}
+
+// HandleLobbyBeginRunMessage is private — attribute-based resolution failed last time
+// (the async TryBeginRun returned null in Harmony's lookup), so we resolve explicitly
+// via AccessTools and target it through TargetMethod. Fires on every instance when the
+// host broadcasts begin-loaded-run.
+[HarmonyPatch]
+public static class LoadRunLobbyBeginRunPatch
+{
+    static MethodBase? TargetMethod() => AccessTools.Method(typeof(LoadRunLobby), "HandleLobbyBeginRunMessage");
+
+    static void Prefix(LoadRunLobby __instance)
+    {
+        try
+        {
+            var netId = __instance.NetService.NetId;
+            LocalCharacterCapture.PendingLocalNetId = netId;
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] LoadRunLobby.HandleLobbyBeginRunMessage: captured local NetId={netId}");
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] LoadRunLobby.HandleLobbyBeginRunMessage capture failed: {e.Message}");
+        }
+    }
+}
+
 /// <summary>
 /// Sets run state as soon as a run starts. Reads character from the RunState parameter
 /// (fully initialized before the method is called) rather than from the NGame instance
@@ -45,7 +119,7 @@ public static class StartRunPatch
         {
             var players = runState?.Players;
             if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: no players in runState"); return; }
-            var id = CharacterIdHelper.Extract(players[0].Character);
+            var id = LocalCharacterCapture.ConsumeCharacterId() ?? CharacterIdHelper.Extract(players[0].Character);
             if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: character id was null"); return; }
             CardHoverShowPatch.RunCharacter = id;
             if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}'");
@@ -73,7 +147,13 @@ public static class LoadRunPatch
         {
             var players = runState?.Players;
             if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: no players in runState"); return; }
-            var id = CharacterIdHelper.Extract(players[0].Character);
+            string? id = LocalCharacterCapture.ConsumeCharacterId();
+            if (id == null)
+            {
+                var localNetId = LocalCharacterCapture.ConsumeLocalNetId();
+                var localPlayer = localNetId.HasValue ? players.FirstOrDefault(p => p.NetId == localNetId.Value) : null;
+                id = CharacterIdHelper.Extract((localPlayer ?? players[0]).Character);
+            }
             if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: character id was null"); return; }
             CardHoverShowPatch.RunCharacter = id;
             if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}'");
