@@ -2,7 +2,6 @@ memory/
 agents.md
 CLAUDE.md
 agents.private.md
-SlayTheStats/libs/
 
 # Drafted commit messages — written into `commit`, `commit1`, `commit2`, …
 # at repo root, never committed themselves. Convention shared with sts2-docs.
