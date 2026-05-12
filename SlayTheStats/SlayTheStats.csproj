@@ -39,7 +39,7 @@
     <!-- Linux -->
     <PropertyGroup Condition="'$(IsLinux)' == 'true'">
         <!-- Shared across sibling mod repos under ~/dev/sts2/. -->
-        <Sts2DataDir>$(MSBuildProjectDirectory)/../../vanilla-libs</Sts2DataDir>
+        <Sts2DataDir>$(MSBuildProjectDirectory)/../../vanilla-libs/active</Sts2DataDir>
         <ModsPath>$(MSBuildProjectDirectory)/dist/</ModsPath>
     </PropertyGroup>
 
