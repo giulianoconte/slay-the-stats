@@ -137,7 +137,7 @@ public static class PostFightTooltipPatch
             ?.GetValue(currentEntry) as System.Collections.IList;
         if (playerStats == null || playerStats.Count == 0) return null;
 
-        var ps = playerStats[0];
+        var ps = SelectLocalPlayerStats(playerStats);
         if (ps == null) return null;
 
         int damageTaken = (int)(ps.GetType()
@@ -161,6 +161,35 @@ public static class PostFightTooltipPatch
             PotionsUsed = potionsUsed,
             MaxHp = maxHp,
         };
+    }
+
+    // PlayerStats holds one entry per player, and on every client index 0 is the
+    // host — so a joiner reading [0] sees the host's damage and potions, not their
+    // own (the reported MP bug). Each entry's PlayerId is that player's NetId; match
+    // it against RunLocalNetId, which the Start/LoadRun patches captured for the local
+    // seat. Falls back to index 0 when the id is unset or unmatched — correct for
+    // singleplayer's single-element list.
+    private static object? SelectLocalPlayerStats(System.Collections.IList playerStats)
+    {
+        var localNetId = CardHoverShowPatch.RunLocalNetId;
+        if (localNetId.HasValue)
+        {
+            foreach (var entry in playerStats)
+            {
+                var pid = entry?.GetType()
+                    .GetProperty("PlayerId", BindingFlags.Public | BindingFlags.Instance)
+                    ?.GetValue(entry) as ulong?;
+                if (pid == localNetId.Value)
+                {
+                    if (SlayTheStatsConfig.DebugMode)
+                        MainFile.Logger.Info($"[SlayTheStats] PostFight: matched local player NetId={localNetId.Value}");
+                    return entry;
+                }
+            }
+            if (SlayTheStatsConfig.DebugMode)
+                MainFile.Logger.Info($"[SlayTheStats] PostFight: no PlayerStats entry matched local NetId={localNetId.Value}; falling back to index 0");
+        }
+        return playerStats.Count > 0 ? playerStats[0] : null;
     }
 
     private static string? BuildComparisonText(FightData fight)

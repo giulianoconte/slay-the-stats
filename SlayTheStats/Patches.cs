@@ -1,9 +1,11 @@
 using HarmonyLib;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Runs;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
@@ -42,8 +44,9 @@ internal static class LocalCharacterCapture
 {
     // For fresh MP: StartNewMultiplayerRun pulls the character string straight off lobby.LocalPlayer.
     internal static string? PendingCharacterId;
-    // For MP load: LoadRunLobby exposes the local NetService.NetId but not a LobbyPlayer, so we
-    // stash the id and let the LoadRun patch filter runState.Players by it.
+    // Local player's NetId, captured at the lobby layer for both MP paths: fresh MP reads
+    // lobby.LocalPlayer.id, MP load reads NetService.NetId (LoadRunLobby has no LobbyPlayer).
+    // The Start/LoadRun patches match it against runState.Players to identify the local seat.
     internal static ulong? PendingLocalNetId;
 
     internal static string? ConsumeCharacterId()
@@ -59,6 +62,19 @@ internal static class LocalCharacterCapture
         PendingLocalNetId = null;
         return id;
     }
+
+    // Resolve which player in this run is the local one, consuming the pending NetId stash.
+    // Both MP paths stash the local NetId at the lobby layer; match it against runState.Players.
+    // Singleplayer stashes nothing and falls back to the sole player (index 0) — correct because
+    // there's only one. Returns null only for an empty player list.
+    internal static Player? ResolveLocalPlayer(IReadOnlyList<Player> players)
+    {
+        var localNetId = ConsumeLocalNetId();
+        var localPlayer = localNetId.HasValue
+            ? players.FirstOrDefault(p => p.NetId == localNetId.Value)
+            : null;
+        return localPlayer ?? (players.Count > 0 ? players[0] : null);
+    }
 }
 
 [HarmonyPatch(typeof(NGame), "StartNewMultiplayerRun")]
@@ -68,9 +84,10 @@ public static class StartNewMultiplayerRunPatch
     {
         try
         {
-            var character = lobby?.LocalPlayer.character;
-            LocalCharacterCapture.PendingCharacterId = CharacterIdHelper.Extract(character);
-            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartNewMultiplayerRun: captured local character '{LocalCharacterCapture.PendingCharacterId}'");
+            var localPlayer = lobby?.LocalPlayer;
+            LocalCharacterCapture.PendingCharacterId = CharacterIdHelper.Extract(localPlayer?.character);
+            LocalCharacterCapture.PendingLocalNetId = localPlayer?.id;
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartNewMultiplayerRun: captured local character '{LocalCharacterCapture.PendingCharacterId}' netId={LocalCharacterCapture.PendingLocalNetId}");
         }
         catch (Exception e)
         {
@@ -119,10 +136,12 @@ public static class StartRunPatch
         {
             var players = runState?.Players;
             if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: no players in runState"); return; }
-            var id = LocalCharacterCapture.ConsumeCharacterId() ?? CharacterIdHelper.Extract(players[0].Character);
+            var localPlayer = LocalCharacterCapture.ResolveLocalPlayer(players);
+            CardHoverShowPatch.RunLocalNetId = localPlayer?.NetId;
+            var id = LocalCharacterCapture.ConsumeCharacterId() ?? CharacterIdHelper.Extract((localPlayer ?? players[0]).Character);
             if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] StartRun: character id was null"); return; }
             CardHoverShowPatch.RunCharacter = id;
-            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}'");
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartRun: character set to '{id}', localNetId={CardHoverShowPatch.RunLocalNetId}");
         }
         catch (Exception e)
         {
@@ -147,16 +166,12 @@ public static class LoadRunPatch
         {
             var players = runState?.Players;
             if (players == null || players.Count == 0) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: no players in runState"); return; }
-            string? id = LocalCharacterCapture.ConsumeCharacterId();
-            if (id == null)
-            {
-                var localNetId = LocalCharacterCapture.ConsumeLocalNetId();
-                var localPlayer = localNetId.HasValue ? players.FirstOrDefault(p => p.NetId == localNetId.Value) : null;
-                id = CharacterIdHelper.Extract((localPlayer ?? players[0]).Character);
-            }
+            var localPlayer = LocalCharacterCapture.ResolveLocalPlayer(players);
+            CardHoverShowPatch.RunLocalNetId = localPlayer?.NetId;
+            var id = LocalCharacterCapture.ConsumeCharacterId() ?? CharacterIdHelper.Extract((localPlayer ?? players[0]).Character);
             if (id == null) { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] LoadRun: character id was null"); return; }
             CardHoverShowPatch.RunCharacter = id;
-            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}'");
+            if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] LoadRun: character set to '{id}', localNetId={CardHoverShowPatch.RunLocalNetId}");
         }
         catch (Exception e)
         {
@@ -185,6 +200,7 @@ public static class MainMenuReadyPatch
         TooltipHelper.InitLocaleSubscription();
 
         CardHoverShowPatch.RunCharacter = null;
+        CardHoverShowPatch.RunLocalNetId = null;
         CardHoverShowPatch.IsInRun = false;
         if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: RunCharacter cleared, IsInRun=false");
         RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info(msg); }, msg => MainFile.Logger.Warn(msg));

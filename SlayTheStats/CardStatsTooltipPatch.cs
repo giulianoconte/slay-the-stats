@@ -23,6 +23,12 @@ public static class CardHoverShowPatch
 
     internal static string? RunCharacter;
     internal static bool    IsInRun;
+    // NetId of the local player in the active run. In multiplayer the same RunState is
+    // shared across clients, so per-player records (PlayerStats, etc.) can't be indexed
+    // by position — index 0 is the host on every client. Captured at run start/load and
+    // cleared at the main menu, exactly like RunCharacter; unambiguous because only one
+    // run is ever active. Read by the post-fight summary to pick the local player's row.
+    internal static ulong?  RunLocalNetId;
 
     static void Postfix(NCardHolder __instance)
     {
