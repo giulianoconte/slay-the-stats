@@ -11,7 +11,7 @@ namespace SlayTheStats.Tests;
 public class RunParserRealRunSmokeTest
 {
     private const string ReferenceRun =
-        "/home/giuliano/dev/sts2/sts2-docs/slay-the-stats/1775364591.run";
+        "/home/giuliano/dev/sts2/docs/slay-the-stats/1775364591.run";
 
     [Fact]
     public void Parses_ExpectedEvents()
