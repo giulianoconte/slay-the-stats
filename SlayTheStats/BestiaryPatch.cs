@@ -4,10 +4,13 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Audio;
 using MegaCrit.Sts2.Core.Bindings.MegaSpine;
+using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens;
@@ -4207,16 +4210,25 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// the visuals, add to the cache, and evict the oldest entry if we're at
     /// capacity.
     /// </summary>
-    /// <summary>Encounters whose live preview pipeline produces a broken render
-    /// (Doormaker's DOOR monster has no MonsterModel; Kaiser Crab bosses render
-    /// through NKaiserCrabBossBackground, not a standalone Spine; SkulkingColony's
-    /// default skin is empty and fallback skins still render oddly). These fall
-    /// back to a static "Preview WIP" placeholder instead of the boss icon so
-    /// users understand the preview is intentionally deferred.</summary>
+    /// <summary>Encounters the live preview can't render on ANY branch, so they
+    /// fall back to a static "Preview WIP" placeholder. Doormaker's DOOR monster
+    /// has no MonsterModel (the boss transforms into it at runtime); Kaiser Crab's
+    /// Crusher/Rocket have no standalone Spine body — they animate through
+    /// NKaiserCrabBossBackground via the game's dedicated NBestiaryLayoutKaiserCrab,
+    /// which we don't replicate.</summary>
     private static readonly HashSet<string> UnpreviewedEncounterIds = new()
     {
         "ENCOUNTER.DOORMAKER_BOSS",
         "ENCOUNTER.KAISER_CRAB_BOSS",
+    };
+
+    /// <summary>Encounters only the beta NCreature recipe renders correctly; the
+    /// legacy hand-rolled path (used on branches without the bestiary API) binds
+    /// their empty "default" skin and renders nothing useful, so we WIP-placeholder
+    /// them there. When <see cref="BestiaryRecipeAvailable"/> these render fine and
+    /// are NOT suppressed.</summary>
+    private static readonly HashSet<string> LegacyOnlyUnpreviewedEncounterIds = new()
+    {
         "ENCOUNTER.SKULKING_COLONY_ELITE",
     };
 
@@ -4230,9 +4242,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // Known-unpreviewed encounters — show a "Preview WIP" placeholder
         // instead of letting the render pipeline produce an empty / broken
-        // image. Maintained manually; add ids here when a new encounter
-        // fails the live pipeline and a proper fix is deferred.
-        if (UnpreviewedEncounterIds.Contains(encounterId))
+        // image. The always-WIP set fails on every branch; the legacy-only set
+        // is suppressed only when the beta recipe isn't available to render it.
+        if (UnpreviewedEncounterIds.Contains(encounterId) ||
+            (!BestiaryRecipeAvailable && LegacyOnlyUnpreviewedEncounterIds.Contains(encounterId)))
         {
             ShowWipPlaceholder();
             return;
@@ -4349,16 +4362,22 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // origin shifted far to one side — they live on the left/right of the
         // combat screen — so without honoring Bounds.Position we'd place them
         // outside the slot).
+        // Per monster we keep the NCreatureVisuals (for measuring/animating) and
+        // the *positionable node* that owns it. On beta that's an NCreature (a
+        // Control built via the game's own bestiary recipe); on main, where that
+        // recipe's types don't exist, it's the bare NCreatureVisuals (a Node2D)
+        // built by the legacy path. We scale/position the owner node, so the
+        // layout math below is identical for both.
         var visualsList = new List<NCreatureVisuals>();
-        var boundsRects = new List<Rect2>();   // bounds rect in viewport coords (scaled)
+        var nodeList = new List<Node>();        // the positionable owner per monster
+        var boundsRects = new List<Rect2>();    // bounds rect in viewport coords (scaled)
         float totalWidth = 0f;
         float maxHeight = 0f;
         int spineCount = 0;
 
         // Per-encounter counter of how many instances of each monster id we've
-        // already processed. Used to alternate skin variants across repeated
-        // monsters in the same encounter (e.g. 4x PhantasmalGardener with
-        // tall/short/tall/short). Keyed on the ModelId string.
+        // already processed (legacy path uses it to alternate skin variants across
+        // repeated monsters, e.g. 4x PhantasmalGardener tall/short/tall/short).
         var monsterInstanceIndex = new Dictionary<string, int>();
 
         foreach (var monster in monsters)
@@ -4366,79 +4385,47 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             string monsterIdStr = monster.Id.ToString();
             if (!monsterInstanceIndex.TryGetValue(monsterIdStr, out int instanceIdx)) instanceIdx = 0;
             monsterInstanceIndex[monsterIdStr] = instanceIdx + 1;
-            NCreatureVisuals visuals;
-            try
-            {
-                visuals = monster.CreateVisuals();
-            }
-            catch (Exception e)
-            {
-                MainFile.Logger.Warn($"[SlayTheStats] RenderMonsterPreview: CreateVisuals failed for {monster.Id}: {e.Message}");
-                continue;
-            }
-            viewport.AddChild(visuals);
 
+            // Build the visuals. Beta has the full bestiary API (NullCombatState +
+            // NCreature.SetupForBestiary) so we mirror the game's own
+            // NBestiaryLayoutDefault.Setup recipe, which wires the animator/skin in
+            // the right order and fixes the previously-empty SkulkingColony/Aeonglass
+            // renders. Main lacks those types, so we fall back to the hand-rolled
+            // path. The beta-only types live ONLY inside BuildPreviewCreatureBeta,
+            // which is never *called* on main — so the JIT never tries to load them.
+            NCreatureVisuals? visuals;
+            Node ownerNode;
+            if (BestiaryRecipeAvailable)
+            {
+                var nc = BuildPreviewCreatureBeta(monster, viewport);
+                if (nc == null) continue;
+                visuals = nc.Visuals;
+                if (visuals == null) { ((Node)nc).QueueFree(); continue; }
+                ownerNode = nc;
+            }
+            else
+            {
+                visuals = BuildPreviewVisualsLegacy(monster, viewport, monsterIdStr, instanceIdx);
+                if (visuals == null) continue;
+                ownerNode = visuals;
+            }
+
+            // Idle loop + Spine accounting (shared by both paths).
             if (visuals.HasSpineAnimation && visuals.SpineBody != null)
             {
-                try
-                {
-                    monster.GenerateAnimator(visuals.SpineBody);
-                }
-                catch (Exception e)
-                {
-                    MainFile.Logger.Warn($"[SlayTheStats] RenderMonsterPreview: GenerateAnimator failed for {monster.Id}: {e.Message}");
-                }
-
-                // Skin: try the monster's own SetUpSkin first (the normal path). Many
-                // monsters override SetupSkins and reference base.Creature.SlotName to
-                // pick a per-slot variant (PhantasmalGardener, Vantom, TwoTailedRat,
-                // etc.) — that throws here because we're not in combat and Creature
-                // is null. Fall back to picking the first non-"default" skin so the
-                // skeleton has *some* art bound and isn't invisible.
-                bool skinSet = false;
-                try
-                {
-                    visuals.SetUpSkin(monster);
-                    skinSet = true;
-                }
-                catch
-                {
-                    // Expected for monsters whose SetupSkins override reads
-                    // base.Creature.SlotName — fall back to a data-driven skin
-                    // pick below.
-                }
-                if (!skinSet)
-                {
-                    TryApplyFallbackSkin(visuals, monsterIdStr, instanceIdx);
-                }
-                else
-                {
-                    // Even when SetUpSkin succeeds, some skeletons (SkulkingColony,
-                    // etc.) end up with their "default" skin bound, which for skin-
-                    // variant skeletons is empty and renders nothing. If the bound
-                    // bounding rect is suspiciously tiny, try picking a non-default
-                    // skin as a safety net.
-                    EnsureNonEmptySkin(visuals, monsterIdStr);
-                }
-
-                // Try the standard idle_loop animation first; fall back to common
-                // alternatives if it doesn't exist on this skeleton.
                 TryPlayIdleAnimation(visuals, monsterIdStr);
                 spineCount++;
             }
-            // else: no Spine animation (e.g. Crusher/Rocket use
-            // NKaiserCrabBossBackground for their body); if every monster in
-            // the encounter is non-Spine, we'll fall back to a static icon
-            // below.
+            // else: no Spine body (e.g. Crusher/Rocket render via
+            // NKaiserCrabBossBackground); if every monster in the encounter is
+            // non-Spine, we fall back to a static icon below.
 
-            // Scale up to match in-combat apparent size. Layout math below uses the
-            // scaled bounds so monsters don't overlap.
-            ((Node2D)visuals).Scale = new Vector2(MonsterPreviewScale, MonsterPreviewScale);
+            // Scale the owner node up to match in-combat apparent size. The layout
+            // math below uses the scaled bounds so monsters don't overlap.
+            SetNodeScale(ownerNode, new Vector2(MonsterPreviewScale, MonsterPreviewScale));
 
             // Measure the sprite's extent in local (origin-relative) coords.
             Rect2 localBounds = MeasureLocalBounds(visuals);
-            // Scale into viewport coords by the preview scale (we also apply this
-            // scale to the Node2D below, so the measured rect has to reflect it).
             Rect2 scaledBounds = new Rect2(
                 localBounds.Position * MonsterPreviewScale,
                 localBounds.Size * MonsterPreviewScale);
@@ -4446,6 +4433,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             totalWidth += scaledBounds.Size.X;
             if (scaledBounds.Size.Y > maxHeight) maxHeight = scaledBounds.Size.Y;
             visualsList.Add(visuals);
+            nodeList.Add(ownerNode);
         }
 
         // If none of the monsters resolved to a Spine-backed visual (e.g. Kaiser Crab
@@ -4501,22 +4489,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         //   target_visible_bottom_y = feetY (so the bottom of the sprite lands at
         //                                    the "ground line")
         //
-        // visuals.Position + scaledBounds.Position is the top-left of the rendered
-        // rect in viewport space, and visuals.Position + scaledBounds.End is the
-        // bottom-right. Solving for visuals.Position:
-        //   visuals.Position.x = slot_center_x - (scaledBounds.Position.x + scaledBounds.Size.x/2)
-        //   visuals.Position.y = feetY         - (scaledBounds.Position.y + scaledBounds.Size.y)
+        // We position the owner node (whose visuals sit at local origin, so moving
+        // it moves the rendered sprite). node.Position + scaledBounds.Position is
+        // the top-left of the rendered rect in viewport space; node.Position +
+        // scaledBounds.End is the bottom-right. Solving:
+        //   node.Position.x = slot_center_x - (scaledBounds.Position.x + scaledBounds.Size.x/2)
+        //   node.Position.y = feetY         - (scaledBounds.Position.y + scaledBounds.Size.y)
         float startX = vpW * 0.5f - contentWidth * 0.5f;
         float cursor = startX;
         float feetY  = vpH - MonsterPreviewFloorMargin;
-        for (int i = 0; i < visualsList.Count; i++)
+        for (int i = 0; i < nodeList.Count; i++)
         {
-            var v = visualsList[i];
+            var node = nodeList[i];
             var sb = boundsRects[i];
             float slotCenterX = cursor + sb.Size.X * 0.5f;
             float posX = slotCenterX - (sb.Position.X + sb.Size.X * 0.5f);
             float posY = feetY       - (sb.Position.Y + sb.Size.Y);
-            ((Node2D)v).Position = new Vector2(posX, posY);
+            SetNodePosition(node, new Vector2(posX, posY));
             cursor += sb.Size.X + MonsterPreviewGap;
         }
 
@@ -4799,12 +4788,256 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     }
 
     /// <summary>
+    /// True when the running game DLL exposes the beta bestiary API that the
+    /// "build a real NCreature" preview recipe depends on — specifically the
+    /// <c>NullCombatState</c> type and <c>NCreature.SetupForBestiary</c>. These
+    /// landed on the beta branch with the vanilla bestiary; the main branch DLL
+    /// doesn't have them yet. Probed once via reflection so the mod ships a single
+    /// build that runs on both branches: beta uses the recipe (which renders
+    /// SkulkingColony/Aeonglass correctly), main falls back to the legacy
+    /// hand-rolled visuals path. CRITICAL: the beta-only types are referenced ONLY
+    /// inside <see cref="BuildPreviewCreatureBeta"/>, which is never *called* when
+    /// this flag is false.
+    ///
+    /// The mod compiles against the MAIN game DLL, which doesn't *have*
+    /// NullCombatState or NCreature.SetupForBestiary — so they can't be named in
+    /// source at all (it wouldn't compile). We therefore invoke both via
+    /// reflection, with the handles cached here. Everything else the recipe uses
+    /// (ToMutable, Rng.Chaotic, SetUpForCombat, the Creature ctor, CombatSide,
+    /// NCreature.Create) exists on both branches and is called directly.
+    /// </summary>
+    private static readonly bool BestiaryRecipeAvailable;
+    private static readonly Type? _nullCombatStateType;
+    private static readonly System.Reflection.PropertyInfo? _combatStateProp;
+    private static readonly System.Reflection.MethodInfo? _setupForBestiaryMethod;
+
+    static NBestiaryStatsSubmenu()
+    {
+        try
+        {
+            _nullCombatStateType = typeof(NCreature).Assembly
+                .GetType("MegaCrit.Sts2.Core.Combat.NullCombatState");
+            _combatStateProp = typeof(Creature).GetProperty("CombatState");
+            _setupForBestiaryMethod = typeof(NCreature).GetMethod(
+                "SetupForBestiary", Type.EmptyTypes);
+            BestiaryRecipeAvailable =
+                _nullCombatStateType != null &&
+                _combatStateProp?.CanWrite == true &&
+                _setupForBestiaryMethod != null;
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] Bestiary recipe probe failed, using legacy preview path: {e.Message}");
+            BestiaryRecipeAvailable = false;
+        }
+    }
+
+    /// <summary>
+    /// Beta path: build the monster exactly the way the game's own bestiary does
+    /// (NBestiaryLayoutDefault.Setup) — a real NCreature, added to the viewport
+    /// (whose _Ready wires the Spine animator from SpineBody, applies the skin in
+    /// the right order, hooks BoundsUpdated→UpdateBounds, and handles phobia /
+    /// empty-skin cases the old manual path got wrong) — then SetupForBestiary to
+    /// hide the combat-only health bar + intents. Returns the NCreature (a Control
+    /// positioned by the caller), or null on failure. Only called when
+    /// <see cref="BestiaryRecipeAvailable"/>; the two branch-only members
+    /// (NullCombatState, SetupForBestiary) are reached by reflection so this
+    /// compiles against the main DLL that lacks them.
+    /// </summary>
+    private static NCreature? BuildPreviewCreatureBeta(MonsterModel monster, SubViewport viewport)
+    {
+        NCreature? nc;
+        try
+        {
+            var model = monster.ToMutable();
+            model.Rng = Rng.Chaotic;
+            model.SetUpForCombat();
+            var entity = new Creature(model, CombatSide.Enemy, null);
+            // entity.CombatState = new NullCombatState();  — via reflection (main lacks the type)
+            _combatStateProp!.SetValue(entity, Activator.CreateInstance(_nullCombatStateType!));
+            nc = NCreature.Create(entity);
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewCreatureBeta: NCreature.Create failed for {monster.Id}: {e.Message}");
+            return null;
+        }
+        if (nc == null) return null;   // TestMode (shouldn't happen at runtime)
+
+        // Adding to the viewport runs _Ready() synchronously, so Visuals /
+        // SpineBody / Bounds are valid immediately after.
+        viewport.AddChild(nc);
+        try
+        {
+            _setupForBestiaryMethod!.Invoke(nc, null);  // nc.SetupForBestiary()
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewCreatureBeta: SetupForBestiary failed for {monster.Id}: {e.Message}");
+        }
+        return nc;
+    }
+
+    /// <summary>
+    /// Main/legacy path: hand-roll the visuals using only APIs present on both
+    /// branches (CreateVisuals → GenerateAnimator → SetUpSkin, with skin
+    /// fallbacks). This is what the preview used before the beta bestiary API
+    /// existed; it renders most monsters fine but gets a few skin-variant
+    /// skeletons (SkulkingColony) subtly wrong — hence the recipe path on beta.
+    /// Returns the NCreatureVisuals (a Node2D positioned by the caller), or null
+    /// on failure.
+    /// </summary>
+    private static NCreatureVisuals? BuildPreviewVisualsLegacy(
+        MonsterModel monster, SubViewport viewport, string monsterIdStr, int instanceIdx)
+    {
+        NCreatureVisuals visuals;
+        try
+        {
+            visuals = monster.CreateVisuals();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewVisualsLegacy: CreateVisuals failed for {monster.Id}: {e.Message}");
+            return null;
+        }
+        viewport.AddChild(visuals);
+
+        if (visuals.HasSpineAnimation && visuals.SpineBody != null)
+        {
+            try
+            {
+                monster.GenerateAnimator(visuals.SpineBody);
+            }
+            catch (Exception e)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewVisualsLegacy: GenerateAnimator failed for {monster.Id}: {e.Message}");
+            }
+
+            // Skin: try the monster's own SetUpSkin first (the normal path). Many
+            // monsters override SetupSkins and reference base.Creature.SlotName to
+            // pick a per-slot variant (PhantasmalGardener, Vantom, TwoTailedRat,
+            // etc.) — that throws here because we're not in combat and Creature
+            // is null. Fall back to picking the first non-"default" skin so the
+            // skeleton has *some* art bound and isn't invisible.
+            bool skinSet = false;
+            try
+            {
+                visuals.SetUpSkin(monster);
+                skinSet = true;
+            }
+            catch
+            {
+                // Expected for monsters whose SetupSkins override reads
+                // base.Creature.SlotName — fall back to a data-driven skin
+                // pick below.
+            }
+            if (!skinSet)
+            {
+                TryApplyFallbackSkin(visuals, monsterIdStr, instanceIdx);
+            }
+            else
+            {
+                // Even when SetUpSkin succeeds, some skeletons (SkulkingColony,
+                // etc.) end up with their "default" skin bound, which for skin-
+                // variant skeletons is empty and renders nothing. If the bound
+                // bounding rect is suspiciously tiny, try picking a non-default
+                // skin as a safety net.
+                EnsureNonEmptySkin(visuals, monsterIdStr);
+            }
+        }
+        return visuals;
+    }
+
+    /// <summary>Set scale on a preview owner node that may be a Control (beta
+    /// NCreature) or a Node2D (legacy NCreatureVisuals).</summary>
+    private static void SetNodeScale(Node node, Vector2 scale)
+    {
+        if (node is Control c) c.Scale = scale;
+        else if (node is Node2D n) n.Scale = scale;
+    }
+
+    /// <summary>Set position on a preview owner node that may be a Control (beta
+    /// NCreature) or a Node2D (legacy NCreatureVisuals).</summary>
+    private static void SetNodePosition(Node node, Vector2 pos)
+    {
+        if (node is Control c) c.Position = pos;
+        else if (node is Node2D n) n.Position = pos;
+    }
+
+    /// <summary>
+    /// Return the sprite's local-space bounding rect (origin-relative), in the
+    /// same coordinate system used for positioning the NCreatureVisuals inside
+    /// the viewport. We prefer <c>visuals.Bounds</c> (the UI %Bounds Control) —
+    /// that's in post-body-scale pixel coords and matches the size used by the
+    /// game's own combat layout (NCombatRoom references visuals.Bounds.Size.X
+    /// throughout its creature placement math). The Spine skeleton's own
+    /// GetBounds() is in pre-body-scale units and would need to be multiplied by
+    /// <c>visuals.GetCurrentBody().Scale</c> to be comparable — too risky as a
+    /// silent default. Skeleton bounds are only used if %Bounds is missing.
+    /// </summary>
+    private static Rect2 MeasureLocalBounds(NCreatureVisuals visuals)
+    {
+        if (visuals.Bounds != null)
+        {
+            var uiSize = visuals.Bounds.Size;
+            if (uiSize.X > 4f && uiSize.Y > 4f)
+                return new Rect2(visuals.Bounds.Position, uiSize);
+        }
+
+        // Fallback: scale the spine bounds by body.Scale so they come out in the
+        // same pixel-space coords that NCreatureVisuals.Bounds uses.
+        try
+        {
+            var skeleton = visuals.SpineBody?.GetSkeleton();
+            if (skeleton != null)
+            {
+                var sb = skeleton.GetBounds();
+                Vector2 bodyScale = new Vector2(1f, 1f);
+                var body = visuals.GetCurrentBody();
+                if (body != null) bodyScale = ((Node2D)body).Scale;
+                return new Rect2(sb.Position * bodyScale, sb.Size * bodyScale);
+            }
+        }
+        catch { }
+
+        return new Rect2(-80f, -160f, 160f, 160f);
+    }
+
+    /// <summary>
+    /// Start playing an idle animation on the visuals. Tries "idle_loop" first
+    /// (the canonical name the game's own NBestiary uses), then a few common
+    /// fallbacks. Some monsters use non-standard idle names or only have a
+    /// default static pose.
+    /// </summary>
+    private static void TryPlayIdleAnimation(NCreatureVisuals visuals, string idForLog)
+    {
+        string[] candidates = { "idle_loop", "idle", "idle_1", "default" };
+        foreach (var name in candidates)
+        {
+            try
+            {
+                var data = visuals.SpineBody?.GetSkeleton()?.GetData();
+                if (data == null) return;
+                if (data.FindAnimation(name) == null) continue;
+                visuals.SpineAnimation.SetAnimation(name);
+                return;
+            }
+            catch (Exception e)
+            {
+                MainFile.Logger.Warn($"[SlayTheStats] TryPlayIdleAnimation: {idForLog} '{name}' failed: {e.Message}");
+            }
+        }
+        // No idle animation found — leave the skeleton in its default pose.
+    }
+
+    /// <summary>
     /// Monster-specific skin patterns for encounters that normally pick a skin
     /// per combat slot (SetupSkins reads <c>base.Creature.SlotName</c>, which is
     /// null when we instantiate outside combat). For these monsters we replicate
     /// the game's per-slot selection using the visual's ordinal index within the
     /// same encounter. PhantasmalGardener: slots first/third → tall, slots
     /// second/fourth → short (matches the logic in PhantasmalGardener.SetupSkins).
+    /// Used by the legacy preview path only.
     /// </summary>
     private static readonly Dictionary<string, string[]> SlotSkinPatterns = new()
     {
@@ -4872,72 +5105,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         {
             MainFile.Logger.Warn($"[SlayTheStats] EnsureNonEmptySkin: {idForLog} failed: {e.Message}");
         }
-    }
-
-    /// <summary>
-    /// Return the sprite's local-space bounding rect (origin-relative), in the
-    /// same coordinate system used for positioning the NCreatureVisuals inside
-    /// the viewport. We prefer <c>visuals.Bounds</c> (the UI %Bounds Control) —
-    /// that's in post-body-scale pixel coords and matches the size used by the
-    /// game's own combat layout (NCombatRoom references visuals.Bounds.Size.X
-    /// throughout its creature placement math). The Spine skeleton's own
-    /// GetBounds() is in pre-body-scale units and would need to be multiplied by
-    /// <c>visuals.GetCurrentBody().Scale</c> to be comparable — too risky as a
-    /// silent default. Skeleton bounds are only used if %Bounds is missing.
-    /// </summary>
-    private static Rect2 MeasureLocalBounds(NCreatureVisuals visuals)
-    {
-        if (visuals.Bounds != null)
-        {
-            var uiSize = visuals.Bounds.Size;
-            if (uiSize.X > 4f && uiSize.Y > 4f)
-                return new Rect2(visuals.Bounds.Position, uiSize);
-        }
-
-        // Fallback: scale the spine bounds by body.Scale so they come out in the
-        // same pixel-space coords that NCreatureVisuals.Bounds uses.
-        try
-        {
-            var skeleton = visuals.SpineBody?.GetSkeleton();
-            if (skeleton != null)
-            {
-                var sb = skeleton.GetBounds();
-                Vector2 bodyScale = new Vector2(1f, 1f);
-                var body = visuals.GetCurrentBody();
-                if (body != null) bodyScale = ((Node2D)body).Scale;
-                return new Rect2(sb.Position * bodyScale, sb.Size * bodyScale);
-            }
-        }
-        catch { }
-
-        return new Rect2(-80f, -160f, 160f, 160f);
-    }
-
-    /// <summary>
-    /// Start playing an idle animation on the visuals. Tries "idle_loop" first
-    /// (the canonical name the game's own NBestiary uses), then a few common
-    /// fallbacks. Some monsters use non-standard idle names or only have a
-    /// default static pose.
-    /// </summary>
-    private static void TryPlayIdleAnimation(NCreatureVisuals visuals, string idForLog)
-    {
-        string[] candidates = { "idle_loop", "idle", "idle_1", "default" };
-        foreach (var name in candidates)
-        {
-            try
-            {
-                var data = visuals.SpineBody?.GetSkeleton()?.GetData();
-                if (data == null) return;
-                if (data.FindAnimation(name) == null) continue;
-                visuals.SpineAnimation.SetAnimation(name);
-                return;
-            }
-            catch (Exception e)
-            {
-                MainFile.Logger.Warn($"[SlayTheStats] TryPlayIdleAnimation: {idForLog} '{name}' failed: {e.Message}");
-            }
-        }
-        // No idle animation found — leave the skeleton in its default pose.
     }
 
     /// <summary>
