@@ -4212,14 +4212,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// </summary>
     /// <summary>Encounters the live preview can't render on ANY branch, so they
     /// fall back to a static "Preview WIP" placeholder. Doormaker's DOOR monster
-    /// has no MonsterModel (the boss transforms into it at runtime); Kaiser Crab's
-    /// Crusher/Rocket have no standalone Spine body — they animate through
-    /// NKaiserCrabBossBackground via the game's dedicated NBestiaryLayoutKaiserCrab,
-    /// which we don't replicate.</summary>
+    /// has no MonsterModel (the boss transforms into it at runtime).</summary>
     private static readonly HashSet<string> UnpreviewedEncounterIds = new()
     {
         "ENCOUNTER.DOORMAKER_BOSS",
-        "ENCOUNTER.KAISER_CRAB_BOSS",
     };
 
     /// <summary>Encounters only the beta NCreature recipe renders correctly; the
@@ -4232,6 +4228,21 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         "ENCOUNTER.SKULKING_COLONY_ELITE",
     };
 
+    private const string KaiserCrabEncounterId = "ENCOUNTER.KAISER_CRAB_BOSS";
+
+    /// <summary>Self-contained scene for the Kaiser Crab body (an
+    /// NKaiserCrabBossBackground Node2D that plays its own idle loops). Only
+    /// present on the branch that has the bestiary; null elsewhere, in which case
+    /// Kaiser Crab stays WIP. Resolved once so a re-hover doesn't re-probe.</summary>
+    private static readonly string? KaiserCrabSetupScenePath = ProbeKaiserCrabScene();
+
+    private static string? ProbeKaiserCrabScene()
+    {
+        const string path = "res://scenes/creature_visuals/kaiser_crab_boss_setup.tscn";
+        try { return ResourceLoader.Exists(path) ? path : null; }
+        catch { return null; }
+    }
+
     private void RenderMonsterPreview(string encounterId)
     {
         ClearMonsterPreview();
@@ -4243,9 +4254,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // Known-unpreviewed encounters — show a "Preview WIP" placeholder
         // instead of letting the render pipeline produce an empty / broken
         // image. The always-WIP set fails on every branch; the legacy-only set
-        // is suppressed only when the beta recipe isn't available to render it.
+        // is suppressed only when the beta recipe isn't available to render it;
+        // Kaiser Crab is WIP only when its body scene isn't bundled (i.e. on a
+        // branch without the bestiary) — otherwise it renders below.
         if (UnpreviewedEncounterIds.Contains(encounterId) ||
-            (!BestiaryRecipeAvailable && LegacyOnlyUnpreviewedEncounterIds.Contains(encounterId)))
+            (!BestiaryRecipeAvailable && LegacyOnlyUnpreviewedEncounterIds.Contains(encounterId)) ||
+            (encounterId == KaiserCrabEncounterId && KaiserCrabSetupScenePath == null))
         {
             ShowWipPlaceholder();
             return;
@@ -4269,6 +4283,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             TouchLru(encounterId);
             ActivateViewport(cachedViewport);
             AttachViewportTextureRect(cachedViewport);
+            return;
+        }
+
+        // Kaiser Crab is special: its Crusher/Rocket bosses have no standalone
+        // Spine body — the visible crab is NKaiserCrabBossBackground, a Node2D
+        // bundled as a self-contained scene that plays its own idle loops. Render
+        // it directly from that scene (no MonsterModel / NCreature involved). The
+        // scene only exists on the branch that has the bestiary, so a missing
+        // scene falls through to the WIP placeholder.
+        if (encounterId == KaiserCrabEncounterId && KaiserCrabSetupScenePath != null)
+        {
+            RenderKaiserCrabPreview(encounterId);
             return;
         }
 
@@ -4533,6 +4559,152 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             ActivateViewport(viewport);
             AttachViewportTextureRect(viewport);
         }
+    }
+
+    /// <summary>
+    /// Render the Kaiser Crab boss preview. Unlike normal monsters, the visible
+    /// crab is not an NCreatureVisuals/Spine creature — it's
+    /// <c>NKaiserCrabBossBackground</c>, a Node2D bundled as the self-contained
+    /// scene <see cref="KaiserCrabSetupScenePath"/> that wires up its own skeleton
+    /// and starts body/left/right idle loops in _Ready (then hides itself, so we
+    /// flip it visible). We instantiate that scene straight into a SubViewport,
+    /// measure its %Visuals spine bounds, and feed it through the same
+    /// cache/capture machinery as the normal path.
+    /// </summary>
+    private void RenderKaiserCrabPreview(string encounterId)
+    {
+        if (_renderArea == null || KaiserCrabSetupScenePath == null) return;
+
+        Node2D? crab = null;
+        try
+        {
+            var scene = ResourceLoader.Load<PackedScene>(KaiserCrabSetupScenePath);
+            crab = scene?.Instantiate<Node2D>();
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] RenderKaiserCrabPreview: load failed: {e.Message}");
+        }
+        if (crab == null) { ShowWipPlaceholder(); return; }
+
+        // Aspect-matched viewport, same setup as RenderMonsterPreview.
+        float renderAspect = MonsterPreviewFallbackAspect;
+        var raSize = ((Control)_renderArea).Size;
+        if (raSize.X > 1f && raSize.Y > 1f) renderAspect = raSize.X / raSize.Y;
+        int baselineH = MonsterPreviewBaseHeight;
+        int baselineW = Mathf.CeilToInt(baselineH * renderAspect);
+
+        var viewport = new SubViewport
+        {
+            Name = "MonsterPreviewViewport",
+            TransparentBg = false,
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
+            Size = new Vector2I(baselineW, baselineH),
+        };
+        ((Node)this).AddChild(viewport);
+        _previewViewport = viewport;
+
+        var bgFill = new ColorRect
+        {
+            Name = "PreviewBgFill",
+            Color = new Color(0.08f, 0.09f, 0.12f, 1f),
+            Size = new Vector2(viewport.Size.X, viewport.Size.Y),
+            Position = Vector2.Zero,
+        };
+        viewport.AddChild(bgFill);
+
+        // Adding to the tree runs the crab's _Ready (starts idle loops, then
+        // SetVisible(false)) — re-show it. The scene's own internal scale (0.75 in
+        // the bestiary layout) is baked into the node; we apply the preview scale
+        // on top to match the apparent size of other monsters.
+        float crabScale = MonsterPreviewScale;
+        viewport.AddChild(crab);
+        crab.Visible = true;
+        crab.Scale = new Vector2(crabScale, crabScale);
+
+        // Measure the crab's spine bounds via its %Visuals child (a SpineSprite),
+        // then INFLATE them. The skeleton's GetBounds() under-reports the arm
+        // bones' horizontal reach, so a viewport sized to the raw rect lets the
+        // arms spill past the edges. Pad the measured size (mostly width) and
+        // re-centre the rect around the same midpoint so the extra room is split
+        // evenly left/right — scaling alone doesn't help because it shrinks the
+        // viewport by the same factor, leaving the arm-vs-edge ratio unchanged.
+        // X drives apparent size (the preview pane is landscape, so width binds the
+        // aspect-fit). 1.16 = the old 1.45 tightened by ~1.25x to render the crab
+        // larger, while still leaving the arms a little room past GetBounds().
+        const float crabBoundsInflateX = 1.16f;
+        const float crabBoundsInflateY = 1.12f;
+        Rect2 measured = MeasureKaiserCrabBounds(crab);
+        Vector2 mid = measured.Position + measured.Size * 0.5f;
+        Vector2 inflatedSize = new Vector2(
+            measured.Size.X * crabBoundsInflateX,
+            measured.Size.Y * crabBoundsInflateY);
+        Rect2 localBounds = new Rect2(mid - inflatedSize * 0.5f, inflatedSize);
+        Rect2 scaledBounds = new Rect2(
+            localBounds.Position * crabScale,
+            localBounds.Size * crabScale);
+
+        float neededW = scaledBounds.Size.X + MonsterPreviewPad * 2f;
+        float neededH = scaledBounds.Size.Y + MonsterPreviewPad + MonsterPreviewFloorMargin;
+        int vpW = Math.Max(baselineW, Mathf.CeilToInt(neededW));
+        int vpH = Math.Max(baselineH, Mathf.CeilToInt(neededH));
+        if (vpW != baselineW || vpH != baselineH)
+        {
+            viewport.Size = new Vector2I(vpW, vpH);
+            bgFill.Size = new Vector2(vpW, vpH);
+        }
+
+        // Centre horizontally, feet on the floor line (same math as the normal path).
+        float feetY = vpH - MonsterPreviewFloorMargin;
+        float posX = vpW * 0.5f - (scaledBounds.Position.X + scaledBounds.Size.X * 0.5f);
+        float posY = feetY      - (scaledBounds.Position.Y + scaledBounds.Size.Y);
+        crab.Position = new Vector2(posX, posY);
+
+        if (SlayTheStatsConfig.BestiaryPreviewStatic)
+        {
+            ActivateViewport(viewport);
+            AttachViewportTextureRect(viewport);
+            _ = CaptureStaticSpriteAsync(viewport, encounterId);
+        }
+        else
+        {
+            AddToLruCache(encounterId, viewport);
+            ActivateViewport(viewport);
+            AttachViewportTextureRect(viewport);
+        }
+    }
+
+    /// <summary>Measure the Kaiser Crab body's local bounds (in the crab Node2D's
+    /// own coordinate space) from its %Visuals SpineSprite. The skeleton bounds are
+    /// in the SpineSprite's local space, so we map them through the SpineSprite's
+    /// own transform — its position (≈ 979,450 in the scene) and scale (≈ 0.55) —
+    /// which is what the off-centre origin was missing. Falls back to a generous
+    /// box if the spine isn't reachable.</summary>
+    private static Rect2 MeasureKaiserCrabBounds(Node2D crab)
+    {
+        try
+        {
+            var visualsNode = ((Node)crab).GetNodeOrNull<Node2D>("%Visuals");
+            if (visualsNode != null)
+            {
+                var spine = new MegaSprite(visualsNode);
+                var skeleton = spine.GetSkeleton();
+                if (skeleton != null)
+                {
+                    var sb = skeleton.GetBounds();
+                    var vScale = visualsNode.Scale;
+                    var vPos = visualsNode.Position;
+                    if (sb.Size.X > 4f && sb.Size.Y > 4f)
+                        return new Rect2(vPos + sb.Position * vScale, sb.Size * vScale);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"[SlayTheStats] MeasureKaiserCrabBounds failed: {e.Message}");
+        }
+        // Fallback: the crab is wide and short; a generous centred box.
+        return new Rect2(-500f, -400f, 1000f, 500f);
     }
 
     /// <summary>
