@@ -4225,7 +4225,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// are NOT suppressed.</summary>
     private static readonly HashSet<string> LegacyOnlyUnpreviewedEncounterIds = new()
     {
-        "ENCOUNTER.SKULKING_COLONY_ELITE",
+        // (empty) SkulkingColony was here, suppressed on the legacy path; we now
+        // let it render — the legacy skin-fallback (TryApplyFallbackSkin /
+        // EnsureNonEmptySkin) gives it bound art, which is better than a WIP card.
     };
 
     private const string KaiserCrabEncounterId = "ENCOUNTER.KAISER_CRAB_BOSS";
@@ -4575,11 +4577,16 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_renderArea == null || KaiserCrabSetupScenePath == null) return;
 
-        Node2D? crab = null;
+        // The crab body scene's root is NKaiserCrabBossBackground, whose base type
+        // differs by branch (Node2D on the bestiary branch, plain Node on the
+        // other), so we can't cast it to a fixed type. Instantiate it as a Node,
+        // and wrap it in our own Node2D container that we scale/position — the
+        // container is what the layout math drives, the crab just rides inside it.
+        Node? crab = null;
         try
         {
             var scene = ResourceLoader.Load<PackedScene>(KaiserCrabSetupScenePath);
-            crab = scene?.Instantiate<Node2D>();
+            crab = scene?.Instantiate();
         }
         catch (Exception e)
         {
@@ -4613,14 +4620,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         };
         viewport.AddChild(bgFill);
 
-        // Adding to the tree runs the crab's _Ready (starts idle loops, then
-        // SetVisible(false)) — re-show it. The scene's own internal scale (0.75 in
-        // the bestiary layout) is baked into the node; we apply the preview scale
-        // on top to match the apparent size of other monsters.
+        // Wrap the crab in a Node2D we control, and scale that. (We can't touch
+        // the crab root's own Position/Scale/Visible: on the non-bestiary branch
+        // it's a plain Node with none of those.) Adding to the tree runs the crab's
+        // _Ready, which starts its idle loops; on the bestiary branch _Ready also
+        // hides itself via SetVisible(false), so re-show it by reflection if that
+        // method exists (no-op on the branch where it doesn't).
         float crabScale = MonsterPreviewScale;
-        viewport.AddChild(crab);
-        crab.Visible = true;
-        crab.Scale = new Vector2(crabScale, crabScale);
+        var crabHolder = new Node2D { Name = "KaiserCrabHolder" };
+        viewport.AddChild(crabHolder);
+        crabHolder.AddChild(crab);
+        crabHolder.Scale = new Vector2(crabScale, crabScale);
+        try
+        {
+            var setVisible = crab.GetType().GetMethod("SetVisible", new[] { typeof(bool) });
+            setVisible?.Invoke(crab, new object[] { true });
+        }
+        catch { /* branch without SetVisible(bool) — already visible */ }
 
         // Measure the crab's spine bounds via its %Visuals child (a SpineSprite),
         // then INFLATE them. The skeleton's GetBounds() under-reports the arm
@@ -4658,7 +4674,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         float feetY = vpH - MonsterPreviewFloorMargin;
         float posX = vpW * 0.5f - (scaledBounds.Position.X + scaledBounds.Size.X * 0.5f);
         float posY = feetY      - (scaledBounds.Position.Y + scaledBounds.Size.Y);
-        crab.Position = new Vector2(posX, posY);
+        crabHolder.Position = new Vector2(posX, posY);
 
         if (SlayTheStatsConfig.BestiaryPreviewStatic)
         {
@@ -4680,7 +4696,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// own transform — its position (≈ 979,450 in the scene) and scale (≈ 0.55) —
     /// which is what the off-centre origin was missing. Falls back to a generous
     /// box if the spine isn't reachable.</summary>
-    private static Rect2 MeasureKaiserCrabBounds(Node2D crab)
+    private static Rect2 MeasureKaiserCrabBounds(Node crab)
     {
         try
         {
