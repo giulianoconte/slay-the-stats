@@ -4373,7 +4373,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         var boundsRects = new List<Rect2>();    // bounds rect in viewport coords (scaled)
         float totalWidth = 0f;
         float maxHeight = 0f;
-        int spineCount = 0;
+        // Monsters that produced something drawable (a Spine body or a real
+        // %Bounds extent). If none do, we fall back to the static boss icon.
+        int renderableCount = 0;
 
         // Per-encounter counter of how many instances of each monster id we've
         // already processed (legacy path uses it to alternate skin variants across
@@ -4410,15 +4412,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 ownerNode = visuals;
             }
 
-            // Idle loop + Spine accounting (shared by both paths).
-            if (visuals.HasSpineAnimation && visuals.SpineBody != null)
-            {
+            // Spine monsters animate via the idle loop; non-Spine monsters
+            // (Aeonglass renders through a custom non-SpineSprite body) still draw
+            // a static pose, which beats the scaled-up boss icon. We count a
+            // monster as renderable if it produced a Spine body OR a real %Bounds
+            // extent. Truly non-renderable encounters (Kaiser Crab arms render via
+            // NKaiserCrabBossBackground; Doormaker has no model) never reach here —
+            // they're caught earlier by UnpreviewedEncounterIds.
+            bool hasSpine = visuals.HasSpineAnimation && visuals.SpineBody != null;
+            if (hasSpine)
                 TryPlayIdleAnimation(visuals, monsterIdStr);
-                spineCount++;
-            }
-            // else: no Spine body (e.g. Crusher/Rocket render via
-            // NKaiserCrabBossBackground); if every monster in the encounter is
-            // non-Spine, we fall back to a static icon below.
+            if (hasSpine || HasRenderableBounds(visuals))
+                renderableCount++;
 
             // Scale the owner node up to match in-combat apparent size. The layout
             // math below uses the scaled bounds so monsters don't overlap.
@@ -4436,12 +4441,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             nodeList.Add(ownerNode);
         }
 
-        // If none of the monsters resolved to a Spine-backed visual (e.g. Kaiser Crab
-        // bosses Crusher/Rocket use NKaiserCrabBossBackground for their body; Doormaker
-        // uses static placeholder images), free the useless viewport and fall back to
-        // showing the boss icon as a static TextureRect — same art used in the row
-        // list for boss encounters.
-        if (spineCount == 0)
+        // If none of the monsters produced anything drawable (e.g. Kaiser Crab
+        // bosses Crusher/Rocket use NKaiserCrabBossBackground for their body;
+        // Doormaker uses static placeholder images), free the useless viewport and
+        // fall back to showing the boss icon as a static TextureRect — same art
+        // used in the row list for boss encounters.
+        if (renderableCount == 0)
         {
             ((Node)viewport).QueueFree();
             _previewViewport = null;
@@ -4962,6 +4967,17 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (node is Control c) c.Position = pos;
         else if (node is Node2D n) n.Position = pos;
+    }
+
+    /// <summary>True when the visuals have a non-trivial %Bounds extent, i.e. there
+    /// is something to show even without a Spine animation (e.g. Aeonglass, which
+    /// uses a custom non-SpineSprite body). Lets the preview render a static pose
+    /// instead of falling back to the scaled-up boss icon.</summary>
+    private static bool HasRenderableBounds(NCreatureVisuals visuals)
+    {
+        return visuals.Bounds != null
+            && visuals.Bounds.Size.X > 4f
+            && visuals.Bounds.Size.Y > 4f;
     }
 
     /// <summary>
