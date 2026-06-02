@@ -203,7 +203,10 @@ public static class MainMenuReadyPatch
         CardHoverShowPatch.RunLocalNetId = null;
         CardHoverShowPatch.IsInRun = false;
         if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info("[SlayTheStats] MainMenuReady: RunCharacter cleared, IsInRun=false");
-        RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => { if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info(msg); }, msg => MainFile.Logger.Warn(msg));
+        // Processing log is always-on (not DebugMode-gated): it's once-per-launch,
+        // not per-run, and a silent rebuild (schema bump, stats-file delete, or
+        // history shrinkage) should be visible in normal logs. Ref #4, cf. #3.
+        RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => MainFile.Logger.Info(msg), msg => MainFile.Logger.Warn(msg));
 
         if (!BuildInfo.IsRelease && !_devBannerShown)
         {

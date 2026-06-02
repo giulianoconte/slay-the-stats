@@ -26,35 +26,63 @@ public static class RunParser
             return;
         }
 
-        int newCount = 0;
-
+        // Pre-pass: enumerate every .run currently on disk, across all profiles.
+        // We need the complete current set before deciding anything, both to
+        // process new runs and to detect history shrinkage (below). Gathering
+        // across all profiles first is essential — ProcessedRuns is a flat set
+        // spanning every profile, so a single profile's runs can't be judged
+        // "missing" in isolation.
+        var current = new List<(string runId, string path, string profile)>();
         foreach (var (historyDir, profile) in historyDirs)
         {
             log?.Invoke($"Scanning history directory: {historyDir} (profile: {profile})");
-            var runFiles = Directory.GetFiles(historyDir, "*.run");
+            foreach (var path in Directory.GetFiles(historyDir, "*.run"))
+                current.Add((Path.GetFileNameWithoutExtension(path), path, profile));
+        }
 
-            foreach (var path in runFiles)
+        // Shrinkage detection. If a run we previously processed is no longer on
+        // disk, the history was pruned — the user deleted runs, transferred a
+        // profile, or the game capped history size. Stats are summed, not
+        // attributable back to individual runs, so we can't subtract one run's
+        // contribution; instead we rebuild from scratch (same as the
+        // stats-file-deleted path above). This keeps totals in sync with the
+        // live run history. The full reparse only happens on the launch where
+        // shrinkage is first observed, so the cost is negligible.
+        var currentIds = new HashSet<string>(current.Select(c => c.runId));
+        int missing = db.ProcessedRuns.Count(id => !currentIds.Contains(id));
+        bool rebuilt = false;
+        if (missing > 0)
+        {
+            log?.Invoke($"History shrank: {missing} processed run(s) no longer on disk. Rebuilding stats from current history.");
+            db.Reset();
+            rebuilt = true;
+        }
+
+        int newCount = 0;
+        foreach (var (runId, path, profile) in current)
+        {
+            if (db.ProcessedRuns.Contains(runId))
+                continue;
+
+            try
             {
-                var runId = Path.GetFileNameWithoutExtension(path);
-                if (db.ProcessedRuns.Contains(runId))
-                    continue;
-
-                try
-                {
-                    ProcessRun(path, runId, profile, db, warn);
-                    db.ProcessedRuns.Add(runId);
-                    newCount++;
-                }
-                catch (Exception e)
-                {
-                    warn?.Invoke($"Failed to parse run {runId}: {e.Message}");
-                }
+                ProcessRun(path, runId, profile, db, warn);
+                db.ProcessedRuns.Add(runId);
+                newCount++;
+            }
+            catch (Exception e)
+            {
+                warn?.Invoke($"Failed to parse run {runId}: {e.Message}");
             }
         }
 
         log?.Invoke($"Processed {newCount} new run(s). Total runs: {db.ProcessedRuns.Count}.");
 
-        if (newCount > 0)
+        // Persist when anything changed. `rebuilt` covers the case where a
+        // shrink leaves zero current runs (newCount == 0 but the in-memory db
+        // was reset) — without it the cleared stats would never reach disk and
+        // the stale json would re-trigger the rebuild every launch.
+        if (newCount > 0 || rebuilt)
             db.Save(savePath, warn);
     }
 
