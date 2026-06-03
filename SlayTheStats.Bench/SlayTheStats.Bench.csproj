@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>true</ImplicitUsings>
+    <DefaultItemExcludes>packages/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Same per-file compile approach as SlayTheStats.Tests: pull the Godot-free
+       core logic in directly (no Godot SDK), plus the test project's config /
+       loc stubs so SlayTheStatsConfig.DataDirectory and L.* resolve. This lets
+       us run RunParser.ProcessNewRuns standalone against a real data folder and
+       time it — a baseline to compare future logic changes (e.g. the #6 run-id
+       refactor) against. -->
+  <ItemGroup>
+    <Compile Include="../SlayTheStats/CardStats.cs" />
+    <Compile Include="../SlayTheStats/RelicStats.cs" />
+    <Compile Include="../SlayTheStats/EncounterStats.cs" />
+    <Compile Include="../SlayTheStats/EventStats.cs" />
+    <Compile Include="../SlayTheStats/RunParser.cs" />
+    <Compile Include="../SlayTheStats/StatsAggregator.cs" />
+    <Compile Include="../SlayTheStats/L.cs" />
+    <Compile Include="../SlayTheStats.Tests/LocStubs.cs" />
+    <Compile Include="../SlayTheStats.Tests/TestStubs.cs" />
+  </ItemGroup>
+</Project>
