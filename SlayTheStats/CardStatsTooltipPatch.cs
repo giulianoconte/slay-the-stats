@@ -124,10 +124,9 @@ public static class CardHoverShowPatch
 
     /// <summary>
     /// Returns the context map for a card. When groupUpgrades is true, merges the base
-    /// and upgraded versions (e.g. CARD.STRIKE_R and CARD.STRIKE_R+) into a single map.
-    /// Run-level counters merge via inclusion-exclusion (grouped = base + plus − overlap,
-    /// see <see cref="StatsAggregator.MergeGroupedContextMaps"/> and #5) so a single run
-    /// holding both upgrade states of a card is counted once, not twice.
+    /// and upgraded versions (e.g. CARD.STRIKE_R and CARD.STRIKE_R+) into a single map by
+    /// unioning their run-id sets (see <see cref="StatsAggregator.MergeGroupedContextMaps"/>
+    /// and #6), so a single run holding both upgrade states of a card is counted once.
     /// </summary>
     internal static Dictionary<string, CardStat> GetContextMap(string lookupId, bool groupUpgrades)
     {
