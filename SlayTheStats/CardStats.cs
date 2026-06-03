@@ -44,6 +44,26 @@ public class CardStat
 }
 
 /// <summary>
+/// Inclusion-exclusion overlap term for upgrade-grouping, keyed by *base* card
+/// id (no "+") then context. Each field counts the runs whose contribution
+/// landed on BOTH the non-upgraded and the "+" variant in that context — i.e.
+/// the A∩B term. The grouped view computes <c>grouped = A + B − overlap</c> per
+/// field instead of naive <c>A + B</c>, so a single run holding both variants
+/// of a card is counted once, not twice. Only the run-level fields can
+/// double-count under grouping (per-instance Offered/Picked/Won are occurrence
+/// counts and sum correctly), so only those are tracked here. See #5.
+/// </summary>
+public class CardGroupOverlap
+{
+    [JsonPropertyName("runs_offered")]     public int RunsOffered     { get; set; }
+    [JsonPropertyName("runs_picked")]      public int RunsPicked      { get; set; }
+    [JsonPropertyName("runs_present")]     public int RunsPresent     { get; set; }
+    [JsonPropertyName("runs_won")]         public int RunsWon         { get; set; }
+    [JsonPropertyName("runs_shop_seen")]   public int RunsShopSeen    { get; set; }
+    [JsonPropertyName("runs_shop_bought")] public int RunsShopBought  { get; set; }
+}
+
+/// <summary>
 /// Context key for a card stat entry: character|ascension|act|gameMode|buildVersion
 /// e.g. "CHARACTER.IRONCLAD|0|1|standard|v0.98.0".
 /// Acts are 1-indexed. Use RunContext.ToKey() to build and RunContext.Parse() to read.
@@ -104,7 +124,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 7; // bumped from 6: added TurnsValues/PotionsValues per-fight lists
+    public const int CurrentSchemaVersion = 8; // bumped from 7: added CardsGroupOverlap (upgrade-grouping inclusion-exclusion term, #5)
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
@@ -116,6 +136,12 @@ public class StatsDb
     /// </summary>
     [JsonPropertyName("schema_version")] public int SchemaVersion { get; set; } = 0;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();
+    /// <summary>
+    /// Upgrade-grouping inclusion-exclusion overlap, keyed by base card id (no
+    /// "+") then context. See <see cref="CardGroupOverlap"/> and #5. Only
+    /// populated for cards that appeared in both upgrade states within one run.
+    /// </summary>
+    [JsonPropertyName("cards_group_overlap")] public Dictionary<string, Dictionary<string, CardGroupOverlap>> CardsGroupOverlap { get; set; } = new();
     [JsonPropertyName("relics")]     public Dictionary<string, Dictionary<string, RelicStat>> Relics     { get; set; } = new();
     [JsonPropertyName("characters")] public Dictionary<string, CharacterStat>                 Characters { get; set; } = new();
     [JsonPropertyName("processed_runs")] public HashSet<string> ProcessedRuns { get; set; } = new();
@@ -203,6 +229,7 @@ public class StatsDb
     public void Reset()
     {
         Cards.Clear();
+        CardsGroupOverlap.Clear();
         Relics.Clear();
         Characters.Clear();
         ProcessedRuns.Clear();
@@ -294,6 +321,27 @@ public class StatsDb
         if (!contextMap.TryGetValue(key, out var stat))
         {
             stat = new CardStat();
+            contextMap[key] = stat;
+        }
+        return stat;
+    }
+
+    /// <summary>
+    /// Gets or creates the upgrade-grouping overlap entry for a base card id
+    /// (pass the id WITHOUT the "+" suffix) and context. See #5.
+    /// </summary>
+    public CardGroupOverlap GetOrCreateCardOverlap(string baseCardId, RunContext context)
+    {
+        if (!CardsGroupOverlap.TryGetValue(baseCardId, out var contextMap))
+        {
+            contextMap = new Dictionary<string, CardGroupOverlap>();
+            CardsGroupOverlap[baseCardId] = contextMap;
+        }
+
+        var key = context.ToKey();
+        if (!contextMap.TryGetValue(key, out var stat))
+        {
+            stat = new CardGroupOverlap();
             contextMap[key] = stat;
         }
         return stat;

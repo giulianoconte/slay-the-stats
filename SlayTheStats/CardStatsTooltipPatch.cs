@@ -124,8 +124,10 @@ public static class CardHoverShowPatch
 
     /// <summary>
     /// Returns the context map for a card. When groupUpgrades is true, merges the base
-    /// and upgraded versions (e.g. CARD.STRIKE_R and CARD.STRIKE_R+) into a single map by
-    /// summing their per-context counters.
+    /// and upgraded versions (e.g. CARD.STRIKE_R and CARD.STRIKE_R+) into a single map.
+    /// Run-level counters merge via inclusion-exclusion (grouped = base + plus − overlap,
+    /// see <see cref="StatsAggregator.MergeGroupedContextMaps"/> and #5) so a single run
+    /// holding both upgrade states of a card is counted once, not twice.
     /// </summary>
     internal static Dictionary<string, CardStat> GetContextMap(string lookupId, bool groupUpgrades)
     {
@@ -133,29 +135,14 @@ public static class CardHoverShowPatch
             return MainFile.Db.Cards[lookupId];
 
         var pairedId = lookupId.EndsWith("+") ? lookupId[..^1] : lookupId + "+";
-        if (!MainFile.Db.Cards.TryGetValue(pairedId, out var pairedMap))
+        if (!MainFile.Db.Cards.TryGetValue(pairedId, out _))
             return MainFile.Db.Cards[lookupId];
 
-        var merged = new Dictionary<string, CardStat>(MainFile.Db.Cards[lookupId]);
-        foreach (var (key, stat) in pairedMap)
-        {
-            if (merged.TryGetValue(key, out var existing))
-                merged[key] = new CardStat
-                {
-                    Offered        = existing.Offered        + stat.Offered,
-                    Picked         = existing.Picked         + stat.Picked,
-                    Won            = existing.Won            + stat.Won,
-                    RunsOffered    = existing.RunsOffered    + stat.RunsOffered,
-                    RunsPicked     = existing.RunsPicked     + stat.RunsPicked,
-                    RunsPresent    = existing.RunsPresent    + stat.RunsPresent,
-                    RunsWon        = existing.RunsWon        + stat.RunsWon,
-                    RunsShopSeen   = existing.RunsShopSeen   + stat.RunsShopSeen,
-                    RunsShopBought = existing.RunsShopBought + stat.RunsShopBought,
-                };
-            else
-                merged[key] = stat;
-        }
-        return merged;
+        // Both variants exist (lookupId by the caller, pairedId by the check above).
+        var baseId = lookupId.EndsWith("+") ? lookupId[..^1] : lookupId;
+        MainFile.Db.CardsGroupOverlap.TryGetValue(baseId, out var overlapMap);
+        return StatsAggregator.MergeGroupedContextMaps(
+            MainFile.Db.Cards[baseId], MainFile.Db.Cards[baseId + "+"], overlapMap);
     }
 
     /// <summary>

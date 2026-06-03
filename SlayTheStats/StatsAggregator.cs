@@ -231,6 +231,64 @@ public static class StatsAggregator
     }
 
     /// <summary>
+    /// Merges a card's non-upgraded and "+" context maps into one grouped map
+    /// using inclusion-exclusion (#5): per-instance counters (Offered/Picked/Won)
+    /// and the verbose breakdowns sum normally, but the run-level counters use
+    /// <c>grouped = A + B − overlap</c> so a single run that held both upgrade
+    /// states of a card is counted once. <paramref name="overlapMap"/> is the
+    /// base-keyed <see cref="CardGroupOverlap"/> context map (may be null when no
+    /// run ever held both variants). Pure — no DB/Godot dependencies, so unit-testable.
+    /// </summary>
+    public static Dictionary<string, CardStat> MergeGroupedContextMaps(
+        Dictionary<string, CardStat> baseMap,
+        Dictionary<string, CardStat> plusMap,
+        Dictionary<string, CardGroupOverlap>? overlapMap)
+    {
+        var result = new Dictionary<string, CardStat>();
+        var contexts = new HashSet<string>(baseMap.Keys);
+        contexts.UnionWith(plusMap.Keys);
+
+        foreach (var ctx in contexts)
+        {
+            baseMap.TryGetValue(ctx, out var a);
+            plusMap.TryGetValue(ctx, out var b);
+            CardGroupOverlap? ov = null;
+            overlapMap?.TryGetValue(ctx, out ov);
+
+            int Base(Func<CardStat, int> f) => (a != null ? f(a) : 0) + (b != null ? f(b) : 0);
+            int Grouped(Func<CardStat, int> f, int overlap) => Base(f) - overlap;
+
+            result[ctx] = new CardStat
+            {
+                // Per-instance occurrence counts — sum directly.
+                Offered = Base(s => s.Offered),
+                Picked  = Base(s => s.Picked),
+                Won     = Base(s => s.Won),
+
+                // Run-level counts — inclusion-exclusion against the overlap term.
+                RunsOffered    = Grouped(s => s.RunsOffered,    ov?.RunsOffered    ?? 0),
+                RunsPicked     = Grouped(s => s.RunsPicked,     ov?.RunsPicked     ?? 0),
+                RunsPresent    = Grouped(s => s.RunsPresent,    ov?.RunsPresent    ?? 0),
+                RunsWon        = Grouped(s => s.RunsWon,        ov?.RunsWon        ?? 0),
+                RunsShopSeen   = Grouped(s => s.RunsShopSeen,   ov?.RunsShopSeen   ?? 0),
+                RunsShopBought = Grouped(s => s.RunsShopBought, ov?.RunsShopBought ?? 0),
+
+                // Verbose breakdowns — variant-specific, no cross-variant overlap; sum.
+                // (The previous merge dropped these for shared contexts; summing
+                // preserves them so the grouped verbose view stays populated.)
+                RunsOfferedUpgraded    = Base(s => s.RunsOfferedUpgraded),
+                RunsPickedUpgraded     = Base(s => s.RunsPickedUpgraded),
+                RunsShopSeenUpgraded   = Base(s => s.RunsShopSeenUpgraded),
+                RunsShopBoughtUpgraded = Base(s => s.RunsShopBoughtUpgraded),
+                CampfireUpgrades       = Base(s => s.CampfireUpgrades),
+                EventRelicUpgrades     = Base(s => s.EventRelicUpgrades),
+            };
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Returns the overall win-rate percentage for a character in a given game mode,
     /// or 50.0 as a neutral fallback if no data exists yet. Decision tree:
     /// <list type="bullet">
