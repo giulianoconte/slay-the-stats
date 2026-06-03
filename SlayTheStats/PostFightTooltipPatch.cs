@@ -54,18 +54,18 @@ public static class PostFightTooltipPatch
             if (fightData == null)
             {
                 if (SlayTheStatsConfig.DebugMode)
-                    MainFile.Logger.Info("[SlayTheStats] PostFight: no fight data extracted from reward screen");
+                    MainFile.DebugLog("PostFight: no fight data extracted from reward screen");
                 return;
             }
 
             if (SlayTheStatsConfig.DebugMode)
-                MainFile.Logger.Info($"[SlayTheStats] PostFight: {fightData.EncounterId} dmg={fightData.DamageTaken} turns={fightData.TurnsTaken} pots={fightData.PotionsUsed}");
+                MainFile.DebugLog($"PostFight: {fightData.EncounterId} dmg={fightData.DamageTaken} turns={fightData.TurnsTaken} pots={fightData.PotionsUsed}");
 
             var statsText = BuildComparisonText(fightData);
             if (statsText == null)
             {
                 if (SlayTheStatsConfig.DebugMode)
-                    MainFile.Logger.Info("[SlayTheStats] PostFight: no historical data to compare against");
+                    MainFile.DebugLog("PostFight: no historical data to compare against");
                 return;
             }
 
@@ -182,12 +182,12 @@ public static class PostFightTooltipPatch
                 if (pid == localNetId.Value)
                 {
                     if (SlayTheStatsConfig.DebugMode)
-                        MainFile.Logger.Info($"[SlayTheStats] PostFight: matched local player NetId={localNetId.Value}");
+                        MainFile.DebugLog($"PostFight: matched local player NetId={localNetId.Value}");
                     return entry;
                 }
             }
             if (SlayTheStatsConfig.DebugMode)
-                MainFile.Logger.Info($"[SlayTheStats] PostFight: no PlayerStats entry matched local NetId={localNetId.Value}; falling back to index 0");
+                MainFile.DebugLog($"PostFight: no PlayerStats entry matched local NetId={localNetId.Value}; falling back to index 0");
         }
         return playerStats.Count > 0 ? playerStats[0] : null;
     }
@@ -581,7 +581,7 @@ public static class PostFightOverlayHidePatch
         if (!PostFightTooltipPatch._dismissed)
             PostFightTooltipPatch.SetVisible(false);
         if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info($"[SlayTheStats] PostFight overlay Hide: depth={PostFightTooltipPatch._overlayDepth}");
+            MainFile.DebugLog($"PostFight overlay Hide: depth={PostFightTooltipPatch._overlayDepth}");
     }
 }
 
@@ -599,6 +599,6 @@ public static class PostFightOverlayShowPatch
         if (!PostFightTooltipPatch._dismissed && PostFightTooltipPatch._overlayDepth == 0)
             PostFightTooltipPatch.SetVisible(true);
         if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info($"[SlayTheStats] PostFight overlay Show: depth={PostFightTooltipPatch._overlayDepth}");
+            MainFile.DebugLog($"PostFight overlay Show: depth={PostFightTooltipPatch._overlayDepth}");
     }
 }

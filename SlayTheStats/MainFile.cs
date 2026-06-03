@@ -12,6 +12,17 @@ public partial class MainFile : Node
 
     public static MegaCrit.Sts2.Core.Logging.Logger Logger { get; } = new(ModId, MegaCrit.Sts2.Core.Logging.LogType.Generic);
 
+    /// <summary>
+    /// Verbose internal diagnostics (tooltip layout, patch injection, bestiary
+    /// compositing). Only emitted when <see cref="SlayTheStatsConfig.DebugMode"/>
+    /// is on, so release logs stay clean. The Logger already prefixes
+    /// "[SlayTheStats]" — pass the bare message (no manual prefix).
+    /// </summary>
+    public static void DebugLog(string msg)
+    {
+        if (SlayTheStatsConfig.DebugMode) Logger.Info(msg);
+    }
+
     public static string SavePath => System.IO.Path.Combine(OS.GetUserDataDir(), "slay-the-stats.json");
 
     public static StatsDb Db { get; private set; } = new();

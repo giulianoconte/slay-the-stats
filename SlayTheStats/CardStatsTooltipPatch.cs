@@ -844,7 +844,7 @@ public static class GridCardHolderFreedToPoolPatch
         try
         {
             // HideTooltip is a no-op if __instance is not the active holder.
-            MainFile.Logger.Info($"[SlayTheStats] GridCardHolderFreedToPool: clearing hover for holder (hasActiveHover={TooltipHelper.HasActiveHover})");
+            MainFile.DebugLog($"GridCardHolderFreedToPool: clearing hover for holder (hasActiveHover={TooltipHelper.HasActiveHover})");
             CardHoverShowPatch.HideTooltip(__instance);
         }
         catch (Exception e)
@@ -874,7 +874,7 @@ public static class CardFreedToPoolPatch
             var holder = CardHoverShowPatch.ActiveHolder;
             if (holder != null && GodotObject.IsInstanceValid(holder)) return;
             // Holder is null or Godot-freed — orphaned hover state, force-clear.
-            MainFile.Logger.Info($"[SlayTheStats] CardFreedToPool: holder invalid, clearing stuck hover (hasActiveHover={TooltipHelper.HasActiveHover})");
+            MainFile.DebugLog($"CardFreedToPool: holder invalid, clearing stuck hover (hasActiveHover={TooltipHelper.HasActiveHover})");
             CardHoverShowPatch.HideTooltip();
         }
         catch (Exception e)

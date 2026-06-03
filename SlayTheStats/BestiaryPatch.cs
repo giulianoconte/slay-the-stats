@@ -31,7 +31,7 @@ public static class InjectBestiarySubmenuPatch
 
     private static NBestiaryStatsSubmenu CreateSubmenu(NMainMenuSubmenuStack stack)
     {
-        MainFile.Logger.Info("[SlayTheStats] CreateSubmenu: NMainMenuSubmenuStack first-request, instantiating NBestiaryStatsSubmenu");
+        MainFile.DebugLog("CreateSubmenu: NMainMenuSubmenuStack first-request, instantiating NBestiaryStatsSubmenu");
         var menu = new NBestiaryStatsSubmenu();
         menu.Visible = false;
         ((Node)stack).AddChild(menu);
@@ -55,7 +55,7 @@ public static class InjectBestiarySubmenuRunPatch
 
     private static NBestiaryStatsSubmenu CreateSubmenu(NRunSubmenuStack stack)
     {
-        MainFile.Logger.Info("[SlayTheStats] CreateSubmenu: NRunSubmenuStack first-request, instantiating NBestiaryStatsSubmenu");
+        MainFile.DebugLog("CreateSubmenu: NRunSubmenuStack first-request, instantiating NBestiaryStatsSubmenu");
         var menu = new NBestiaryStatsSubmenu();
         menu.Visible = false;
         ((Node)stack).AddChild(menu);
@@ -81,13 +81,13 @@ public static class BestiaryButtonPatch
 
     static void Postfix(NCompendiumSubmenu __instance)
     {
-        MainFile.Logger.Info($"[SlayTheStats] NCompendiumSubmenu._Ready fired (BestiaryEnabled={SlayTheStatsConfig.BestiaryEnabled}, mode={SlayTheStatsConfig.EncounterStatsRestartRequired})");
+        MainFile.DebugLog($"NCompendiumSubmenu._Ready fired (BestiaryEnabled={SlayTheStatsConfig.BestiaryEnabled}, mode={SlayTheStatsConfig.EncounterStatsRestartRequired})");
         try
         {
             // User opted out via the mod config — skip injection entirely.
             if (!SlayTheStatsConfig.BestiaryEnabled)
             {
-                MainFile.Logger.Info("[SlayTheStats] BestiaryButtonPatch: skipping button injection (BestiaryEnabled=false)");
+                MainFile.DebugLog("BestiaryButtonPatch: skipping button injection (BestiaryEnabled=false)");
                 return;
             }
 
@@ -197,7 +197,7 @@ public static class BestiaryButtonPatch
                 NClickableControl.SignalName.Released,
                 Callable.From<NButton>(_ =>
                 {
-                    MainFile.Logger.Info("[SlayTheStats] BestiaryButton clicked");
+                    MainFile.DebugLog("BestiaryButton clicked");
                     // _stack is an NSubmenuStack base reference — could be either
                     // NMainMenuSubmenuStack (out-of-run compendium) or NRunSubmenuStack
                     // (in-combat compendium). Both override PushSubmenuType<T>() and we have
@@ -205,11 +205,11 @@ public static class BestiaryButtonPatch
                     var stackField = AccessTools.Field(typeof(NSubmenu), "_stack");
                     if (stackField?.GetValue(__instance) is NSubmenuStack stack)
                     {
-                        MainFile.Logger.Info($"[SlayTheStats] BestiaryButton: pushing submenu on {stack.GetType().Name}");
+                        MainFile.DebugLog($"BestiaryButton: pushing submenu on {stack.GetType().Name}");
                         try
                         {
                             var submenu = stack.PushSubmenuType<NBestiaryStatsSubmenu>();
-                            MainFile.Logger.Info($"[SlayTheStats] BestiaryButton: push returned submenu={(submenu != null ? "ok" : "null")}");
+                            MainFile.DebugLog($"BestiaryButton: push returned submenu={(submenu != null ? "ok" : "null")}");
                             submenu?.Refresh();
                         }
                         catch (Exception e)
@@ -223,7 +223,7 @@ public static class BestiaryButtonPatch
                     }
                 }),
                 0u);
-            MainFile.Logger.Info("[SlayTheStats] BestiaryButtonPatch: button injected into compendium");
+            MainFile.DebugLog("BestiaryButtonPatch: button injected into compendium");
         }
         catch (Exception e)
         {
@@ -426,7 +426,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public override void _Ready()
     {
-        MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu._Ready entered");
+        MainFile.DebugLog("NBestiaryStatsSubmenu._Ready entered");
         // Each step is isolated: if BuildUI throws, we still want the back
         // button added so the user isn't stranded on a broken page. The back
         // button must go AFTER BuildUI so it's drawn on top of the full-rect
@@ -435,7 +435,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         try
         {
             BuildUI();
-            MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu.BuildUI completed");
+            MainFile.DebugLog("NBestiaryStatsSubmenu.BuildUI completed");
         }
         catch (Exception e)
         {
@@ -447,7 +447,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             var backButton = PreloadManager.Cache.GetScene(SceneHelper.GetScenePath("ui/back_button")).Instantiate<NBackButton>();
             backButton.Name = "BackButton";
             AddChild(backButton);
-            MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu: back button added");
+            MainFile.DebugLog("NBestiaryStatsSubmenu: back button added");
         }
         catch (Exception e)
         {
@@ -457,7 +457,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         try
         {
             ConnectSignals();
-            MainFile.Logger.Info("[SlayTheStats] NBestiaryStatsSubmenu.ConnectSignals completed");
+            MainFile.DebugLog("NBestiaryStatsSubmenu.ConnectSignals completed");
         }
         catch (Exception e)
         {
@@ -467,7 +467,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
     public override void OnSubmenuOpened()
     {
-        MainFile.Logger.Info($"[SlayTheStats] NBestiaryStatsSubmenu.OnSubmenuOpened (built={_built}, encList={(_encounterList != null)})");
+        MainFile.DebugLog($"NBestiaryStatsSubmenu.OnSubmenuOpened (built={_built}, encList={(_encounterList != null)})");
         base.OnSubmenuOpened();
         // First-time visitors get a one-shot explainer overlay covering the controls and
         // stat columns. Persisted via SlayTheStatsConfig.BestiaryTutorialSeen.
@@ -479,7 +479,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_built)
         {
-            MainFile.Logger.Info("[SlayTheStats] BuildUI: already built, skipping");
+            MainFile.DebugLog("BuildUI: already built, skipping");
             return;
         }
         _built = true;
@@ -1076,7 +1076,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info($"[SlayTheStats] Bestiary filter pane attached (styled={(_filterButton is NCardViewSortButton)}, active={CompendiumFilterPatch.HasActiveFilters()})");
+            MainFile.DebugLog($"Bestiary filter pane attached (styled={(_filterButton is NCardViewSortButton)}, active={CompendiumFilterPatch.HasActiveFilters()})");
     }
 
     /// <summary>
@@ -1189,7 +1189,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _bestiarySettingsPane.Size = spSize;
             _bestiarySettingsPane.GlobalPosition = new Vector2(fpGlobal.X, fpGlobal.Y - spSize.Y - gap);
             _bestiarySettingsPane.Visible = true;
-            MainFile.Logger.Info($"[SlayTheStats] BestiarySettingsPane reposition: fpGlobal={fpGlobal} fpSize={fpSize} spSize={spSize} → spGlobal={_bestiarySettingsPane.GlobalPosition} spPosition={_bestiarySettingsPane.Position}");
+            MainFile.DebugLog($"BestiarySettingsPane reposition: fpGlobal={fpGlobal} fpSize={fpSize} spSize={spSize} → spGlobal={_bestiarySettingsPane.GlobalPosition} spPosition={_bestiarySettingsPane.Position}");
         }).CallDeferred();
     }
 
@@ -1346,7 +1346,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
 
         if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info($"[SlayTheStats] Tutorial phase: {phase}");
+            MainFile.DebugLog($"Tutorial phase: {phase}");
     }
 
     private readonly struct TutorialPhaseSpec
@@ -2045,7 +2045,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // reached the submenu. If we reach here but the page still looks empty
         // it indicates BuildUI failed earlier; otherwise RestoreBestiaryState /
         // RefreshEncounterList is the culprit.
-        MainFile.Logger.Info($"[SlayTheStats] NBestiaryStatsSubmenu.Refresh called (built={_built}, encList={(_encounterList != null)})");
+        MainFile.DebugLog($"NBestiaryStatsSubmenu.Refresh called (built={_built}, encList={(_encounterList != null)})");
         try
         {
             RestoreBestiaryState();
@@ -2969,7 +2969,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             };
             _sortCharRow.AddChild(slot);
         }
-        MainFile.Logger.Info($"[SlayTheStats] RebuildSortCharRow: {options.Count} options, selected={_sortCharacter ?? "<overview>"}");
+        MainFile.DebugLog($"RebuildSortCharRow: {options.Count} options, selected={_sortCharacter ?? "<overview>"}");
     }
 
     private static Texture2D? _prismaticGemTexture;
@@ -5564,7 +5564,7 @@ internal static class EncounterSorting
                 EncounterSortMode.Turns        => agg.AvgTurns,
                 _ => double.NaN,
             };
-            MainFile.Logger.Info($"[SlayTheStats] Score(all-chars) enc={encounterId} mode={mode} raw={raw:F3} fought={fought} chars={perChar.Count}");
+            MainFile.DebugLog($"Score(all-chars) enc={encounterId} mode={mode} raw={raw:F3} fought={fought} chars={perChar.Count}");
         }
         if (double.IsNaN(raw)) return null;
 
@@ -6240,7 +6240,7 @@ internal static class EncounterIcons
 
         if (allBossIds.Count == 0)
         {
-            MainFile.Logger.Info("[SlayTheStats] Boss composite: no bosses available from ModelDb or EncounterMeta");
+            MainFile.DebugLog("Boss composite: no bosses available from ModelDb or EncounterMeta");
             return null;
         }
 
@@ -6301,7 +6301,7 @@ internal static class EncounterIcons
             loaded++;
         }
 
-        MainFile.Logger.Info($"[SlayTheStats] Boss composite: bosses={allBossIds.Count} loaded={loaded} missing={missing} silhouettes={silhouettes} grid={cols}x{rows}");
+        MainFile.DebugLog($"Boss composite: bosses={allBossIds.Count} loaded={loaded} missing={missing} silhouettes={silhouettes} grid={cols}x{rows}");
 
         if (loaded == 0) return null;
 

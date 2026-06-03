@@ -165,7 +165,7 @@ internal static class SparklinePoc
         if (_lastLoggedSparklineSize == key) return;
         _lastLoggedSparklineSize = key;
         var tag = (texW == displayW && texH == displayH) ? "ok" : "MISMATCH (will scale)";
-        MainFile.Logger.Info($"[SlayTheStats] Sparkline size: texture={texW}x{texH} display={displayW}x{displayH} [{tag}]");
+        MainFile.DebugLog($"Sparkline size: texture={texW}x{texH} display={displayW}x{displayH} [{tag}]");
     }
 
     // Eight discrete bar heights from Unicode's block elements range

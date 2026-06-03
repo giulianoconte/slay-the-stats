@@ -445,7 +445,7 @@ internal static class TooltipHelper
         timer.Timeout += () =>
         {
             var hiding = ShowGen == genAtHide && !HasActiveHover && !InspectActive;
-            MainFile.Logger.Info($"[SlayTheStats] HideTimer gen={ShowGen} expected={genAtHide} activeHover={HasActiveHover} hiding={hiding}");
+            MainFile.DebugLog($"HideTimer gen={ShowGen} expected={genAtHide} activeHover={HasActiveHover} hiding={hiding}");
             if (!hiding) return;
             LastShowHolder = null;
             var node = GetPanelPublic();
@@ -964,7 +964,7 @@ public partial class SlayTheStatsPositionFollower : Node
         if (textContainer == null)
         {
             if (logOnce)
-                MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: textContainer null (tipSet={(tipSet == null ? "null" : "found")}) activeHover={TooltipHelper.HasActiveHover}");
+                MainFile.DebugLog($"_Process gen={TooltipHelper.ShowGen}: textContainer null (tipSet={(tipSet == null ? "null" : "found")}) activeHover={TooltipHelper.HasActiveHover}");
 
             // NHoverTipSet absent during an active hover — position relative to the active
             // holder directly (e.g. QueueFree hasn't flushed yet, or no native tip set).
@@ -1006,7 +1006,7 @@ public partial class SlayTheStatsPositionFollower : Node
         }
 
         if (logOnce)
-            MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: textContainer at {textContainer.GlobalPosition} children={textContainer.GetChildCount()}");
+            MainFile.DebugLog($"_Process gen={TooltipHelper.ShowGen}: textContainer at {textContainer.GlobalPosition} children={textContainer.GetChildCount()}");
 
         if (textContainer.GetChildCount() > 0)
         {
@@ -1083,7 +1083,7 @@ public partial class SlayTheStatsPositionFollower : Node
                 x = Math.Clamp(x, 0f, viewportSize.X - TooltipHelper.ActiveWidth);
                 p.Position = new Vector2(x, tcY + sep);
                 if (logOnce)
-                    MainFile.Logger.Info($"[SlayTheStats] _Process no-tip card: holder.GlobalPos={cardHolder.GlobalPosition} tcX={tcX} gameFlippedLeft={gameFlippedLeft} x={x}");
+                    MainFile.DebugLog($"_Process no-tip card: holder.GlobalPos={cardHolder.GlobalPosition} tcX={tcX} gameFlippedLeft={gameFlippedLeft} x={x}");
             }
             else
             {
@@ -1113,7 +1113,7 @@ public partial class SlayTheStatsPositionFollower : Node
             if (overflow > 0)
             {
                 if (logOnce)
-                    MainFile.Logger.Info($"[SlayTheStats] _Process gen={TooltipHelper.ShowGen}: overflow={overflow:F0} shifting NHoverTipSet up");
+                    MainFile.DebugLog($"_Process gen={TooltipHelper.ShowGen}: overflow={overflow:F0} shifting NHoverTipSet up");
                 tipSetCtrl.GlobalPosition = new Vector2(tipSetCtrl.GlobalPosition.X, tipSetCtrl.GlobalPosition.Y - overflow);
                 p.Position = new Vector2(p.Position.X, p.Position.Y - overflow);
             }

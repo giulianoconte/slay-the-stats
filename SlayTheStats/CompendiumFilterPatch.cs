@@ -107,7 +107,7 @@ public static partial class CompendiumFilterPatch
         }
 
         if (SlayTheStatsConfig.DebugMode)
-            MainFile.Logger.Info("[SlayTheStats] CompendiumFilterPatch: button injected into card library sidebar");
+            MainFile.DebugLog("CompendiumFilterPatch: button injected into card library sidebar");
     }
 
     // ── Card Library OnSubmenuOpened — hide pane each time the page is shown ─
@@ -181,14 +181,14 @@ public static partial class CompendiumFilterPatch
             CreateAndAttachStyledFilterButton(collection, pane, template);
             // Unconditional (not gated on DebugMode) so we can verify the relic
             // patch fired even when the user enables debug mode mid-session.
-            MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: styled button injected on _Ready");
+            MainFile.DebugLog("RelicCollectionFilterPatch: styled button injected on _Ready");
         }
         else
         {
             var button = CreateFloatingButton();
             collection.AddChild(button);
             WireButtonToPane(button, pane);
-            MainFile.Logger.Info("[SlayTheStats] RelicCollectionFilterPatch: fallback button injected on _Ready (no template available yet — will retry on OnSubmenuOpened)");
+            MainFile.DebugLog("RelicCollectionFilterPatch: fallback button injected on _Ready (no template available yet — will retry on OnSubmenuOpened)");
         }
     }
 
@@ -292,7 +292,7 @@ public static partial class CompendiumFilterPatch
         }
 
         CreateAndAttachStyledFilterButton(collection, pane, template);
-        MainFile.Logger.Info("[SlayTheStats] TryUpgradeRelicButton: replaced fallback button with styled clone");
+        MainFile.DebugLog("TryUpgradeRelicButton: replaced fallback button with styled clone");
     }
 
     /// <summary>
@@ -323,14 +323,14 @@ public static partial class CompendiumFilterPatch
             {
                 if (root.FindChild("CardTypeSorter", true, false) is NCardViewSortButton named)
                 {
-                    MainFile.Logger.Info("[SlayTheStats] FindSortButtonTemplateInTree: found CardTypeSorter in live tree");
+                    MainFile.DebugLog("FindSortButtonTemplateInTree: found CardTypeSorter in live tree");
                     return named;
                 }
 
                 var walked = FindFirstDescendantOfType<NCardViewSortButton>(root);
                 if (walked != null)
                 {
-                    MainFile.Logger.Info("[SlayTheStats] FindSortButtonTemplateInTree: found NCardViewSortButton via type walk");
+                    MainFile.DebugLog("FindSortButtonTemplateInTree: found NCardViewSortButton via type walk");
                     return walked;
                 }
             }
@@ -381,7 +381,7 @@ public static partial class CompendiumFilterPatch
                         (int)(Node.DuplicateFlags.Groups
                             | Node.DuplicateFlags.Scripts
                             | Node.DuplicateFlags.UseInstantiation));
-                    MainFile.Logger.Info("[SlayTheStats] WarmTemplatesFromColdCardLibrary: extracted sort-button template");
+                    MainFile.DebugLog("WarmTemplatesFromColdCardLibrary: extracted sort-button template");
                 }
                 else
                 {
@@ -397,7 +397,7 @@ public static partial class CompendiumFilterPatch
                         (int)(Node.DuplicateFlags.Groups
                             | Node.DuplicateFlags.Scripts
                             | Node.DuplicateFlags.UseInstantiation));
-                    MainFile.Logger.Info("[SlayTheStats] WarmTemplatesFromColdCardLibrary: extracted tickbox template");
+                    MainFile.DebugLog("WarmTemplatesFromColdCardLibrary: extracted tickbox template");
                 }
                 else
                 {
@@ -1138,7 +1138,7 @@ public static partial class CompendiumFilterPatch
             }
 
             if (SlayTheStatsConfig.DebugMode)
-                MainFile.Logger.Info("[SlayTheStats] Standalone filter pane opened");
+                MainFile.DebugLog("Standalone filter pane opened");
         }
         catch (Exception e)
         {

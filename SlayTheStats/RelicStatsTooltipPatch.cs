@@ -38,7 +38,7 @@ internal static class RelicHoverHelper
     {
         if (!SlayTheStatsConfig.ShowInRunStats) return;
 
-        MainFile.Logger.Info($"[SlayTheStats] RelicHover.Show: type={holder.GetType().Name} activeHolder={((object?)_activeHolder == null ? "null" : _activeHolder.GetType().Name)} hasActiveHover={TooltipHelper.HasActiveHover}");
+        MainFile.DebugLog($"RelicHover.Show: type={holder.GetType().Name} activeHolder={((object?)_activeHolder == null ? "null" : _activeHolder.GetType().Name)} hasActiveHover={TooltipHelper.HasActiveHover}");
         ShowCore(holder, GetRelicId(holder), isCompendium: false);
         ShouldPushCardContainer = _activeHolder == holder;
         HideIfNotActive(holder);
@@ -139,7 +139,7 @@ internal static class RelicHoverHelper
     internal static void Hide(object source)
     {
         var matched = source == _activeHolder;
-        MainFile.Logger.Info($"[SlayTheStats] RelicHover.Hide: type={source.GetType().Name} matched={matched} hasActiveHover={TooltipHelper.HasActiveHover}");
+        MainFile.DebugLog($"RelicHover.Hide: type={source.GetType().Name} matched={matched} hasActiveHover={TooltipHelper.HasActiveHover}");
         if (!matched) return;
 
         _activeHolder = null;
