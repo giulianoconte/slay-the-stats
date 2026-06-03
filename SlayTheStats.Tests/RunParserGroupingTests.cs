@@ -5,10 +5,10 @@ using static SlayTheStats.Tests.RunFixture;
 namespace SlayTheStats.Tests;
 
 /// <summary>
-/// Upgrade-grouping inclusion-exclusion (#5): a single run holding both the
-/// non-upgraded and "+" form of a card must be counted once in the grouped
-/// view, not twice. Covers both the parse-time overlap accumulation and the
-/// pure merge math in StatsAggregator.MergeGroupedContextMaps.
+/// Upgrade-grouping under the run-id model (#6, superseding #5's overlap term):
+/// the grouped view unions the base and "+" run-id sets, so a single run holding
+/// both upgrade states of a card is counted once. Per-variant entries are
+/// untouched (ungrouped stays accurate).
 /// </summary>
 public class RunParserGroupingTests : IDisposable
 {
@@ -28,20 +28,14 @@ public class RunParserGroupingTests : IDisposable
             if (File.Exists(f)) File.Delete(f);
     }
 
-    /// <summary>Grouped view for the base card id, via the production merge path.</summary>
-    private static Dictionary<string, CardStat> Grouped(StatsDb db, string baseId)
-    {
-        db.CardsGroupOverlap.TryGetValue(baseId, out var overlap);
-        return StatsAggregator.MergeGroupedContextMaps(
+    /// <summary>Grouped view for a base card id, via the production union path.</summary>
+    private static Dictionary<string, CardStat> Grouped(StatsDb db, string baseId) =>
+        StatsAggregator.MergeGroupedContextMaps(
             db.Cards.GetValueOrDefault(baseId, new()),
-            db.Cards.GetValueOrDefault(baseId + "+", new()),
-            overlap);
-    }
-
-    // --- Parse-time overlap accumulation ---
+            db.Cards.GetValueOrDefault(baseId + "+", new()));
 
     [Fact]
-    public void BothVariantsInWonDeck_RecordsPresenceOverlap()
+    public void BothVariantsInWonDeck_GroupsToOneRun()
     {
         var db = new StatsDb();
         var path = TempRun(Build(won: true, deck:
@@ -54,16 +48,16 @@ public class RunParserGroupingTests : IDisposable
         // Each variant records the run independently...
         Assert.Equal(1, db.Cards["STRIKE_IRONCLAD"][Ctx].RunsPresent);
         Assert.Equal(1, db.Cards["STRIKE_IRONCLAD+"][Ctx].RunsPresent);
-        // ...and the overlap captures that they came from the same run.
-        Assert.Equal(1, db.CardsGroupOverlap["STRIKE_IRONCLAD"][Ctx].RunsPresent);
-        Assert.Equal(1, db.CardsGroupOverlap["STRIKE_IRONCLAD"][Ctx].RunsWon);
+        // ...but the grouped union counts the single run once, not twice.
+        Assert.Equal(1, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsPresent);
+        Assert.Equal(1, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsWon);
     }
 
     [Fact]
-    public void UniformUpgradeDeck_NoOverlap()
+    public void UniformUpgradeDeck_GroupsToOneRun()
     {
         var db = new StatsDb();
-        // Two copies, both upgraded — only the "+" variant present, no overlap.
+        // Two copies, both upgraded — only the "+" variant present.
         var path = TempRun(Build(won: true, deck:
         [
             new("DEFEND_IRONCLAD", FloorAdded: 1, UpgradeLevel: 1),
@@ -71,11 +65,11 @@ public class RunParserGroupingTests : IDisposable
         ]));
         RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.False(db.CardsGroupOverlap.ContainsKey("DEFEND_IRONCLAD"));
+        Assert.Equal(1, Grouped(db, "DEFEND_IRONCLAD")[Ctx].RunsPresent);
     }
 
     [Fact]
-    public void LostRunBothVariants_OverlapPresentButNotWon()
+    public void LostRunBothVariants_GroupedPresentNotWon()
     {
         var db = new StatsDb();
         var path = TempRun(Build(won: false, deck:
@@ -85,12 +79,12 @@ public class RunParserGroupingTests : IDisposable
         ]));
         RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.Equal(1, db.CardsGroupOverlap["STRIKE_IRONCLAD"][Ctx].RunsPresent);
-        Assert.Equal(0, db.CardsGroupOverlap["STRIKE_IRONCLAD"][Ctx].RunsWon);
+        Assert.Equal(1, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsPresent);
+        Assert.Equal(0, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsWon);
     }
 
     [Fact]
-    public void BothVariantsOfferedSameAct_RecordsOfferedAndPickedOverlap()
+    public void BothVariantsOfferedSameAct_GroupsToOneRun()
     {
         var db = new StatsDb();
         // Two reward screens in act 1: one offers STRIKE, one offers STRIKE+, both picked.
@@ -101,43 +95,8 @@ public class RunParserGroupingTests : IDisposable
         ]]));
         RunParser.ProcessRun(path, "run1", "default", db);
 
-        Assert.Equal(1, db.CardsGroupOverlap["STRIKE_IRONCLAD"][Ctx].RunsOffered);
-        Assert.Equal(1, db.CardsGroupOverlap["STRIKE_IRONCLAD"][Ctx].RunsPicked);
-    }
-
-    // --- Grouped merge (inclusion-exclusion) ---
-
-    [Fact]
-    public void GroupedPresence_CountsOneRunOnce()
-    {
-        var db = new StatsDb();
-        var path = TempRun(Build(won: true, deck:
-        [
-            new("STRIKE_IRONCLAD", FloorAdded: 1, UpgradeLevel: 0),
-            new("STRIKE_IRONCLAD", FloorAdded: 1, UpgradeLevel: 1),
-        ]));
-        RunParser.ProcessRun(path, "run1", "default", db);
-
-        var grouped = Grouped(db, "STRIKE_IRONCLAD");
-        // Naive A + B would be 2/2; inclusion-exclusion yields the true 1/1.
-        Assert.Equal(1, grouped[Ctx].RunsPresent);
-        Assert.Equal(1, grouped[Ctx].RunsWon);
-    }
-
-    [Fact]
-    public void GroupedOffered_CountsOneRunOnce()
-    {
-        var db = new StatsDb();
-        var path = TempRun(Build(acts:
-        [[
-            [new("STRIKE_IRONCLAD", Picked: true, UpgradeLevel: 0)],
-            [new("STRIKE_IRONCLAD", Picked: true, UpgradeLevel: 1)],
-        ]]));
-        RunParser.ProcessRun(path, "run1", "default", db);
-
-        var grouped = Grouped(db, "STRIKE_IRONCLAD");
-        Assert.Equal(1, grouped[Ctx].RunsOffered);
-        Assert.Equal(1, grouped[Ctx].RunsPicked);
+        Assert.Equal(1, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsOffered);
+        Assert.Equal(1, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsPicked);
     }
 
     [Fact]
@@ -149,8 +108,7 @@ public class RunParserGroupingTests : IDisposable
         RunParser.ProcessRun(p1, "run1", "default", db);
         RunParser.ProcessRun(p2, "run2", "default", db);
 
-        // No single run held both, so there's no overlap to subtract: two real runs.
-        Assert.False(db.CardsGroupOverlap.ContainsKey("STRIKE_IRONCLAD"));
+        // Two distinct runs → two distinct run indices → union counts both.
         Assert.Equal(2, Grouped(db, "STRIKE_IRONCLAD")[Ctx].RunsPresent);
     }
 

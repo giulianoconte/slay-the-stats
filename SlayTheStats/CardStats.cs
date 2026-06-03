@@ -5,30 +5,46 @@ using System.Text.Json.Serialization;
 namespace SlayTheStats;
 
 /// <summary>
-/// Stats for a single card, tracked both per-instance and per-run.
-/// Per-instance: counts every occurrence (e.g. 2 copies of a card in a winning deck = 2 wins).
-/// Per-run: counts at most once per run regardless of copies.
-/// RunsPresent/RunsWon use end-of-run deck presence (all acquisition sources).
-/// RunsOffered/RunsPicked use fight-reward floor walk only (for Pick% stats).
+/// Per-run membership flags for a single card in a single context. OR'd into a
+/// run's entry so a run that, e.g., was offered the card, picked it, and ended
+/// with it in the deck is one entry with three bits. <c>Won</c> is set only when
+/// the card was present AND the run was won, so it needs no separate won-set.
+/// </summary>
+[Flags]
+public enum CardRunFlag : byte
+{
+    None       = 0,
+    Present    = 1,
+    Offered    = 2,
+    Picked     = 4,
+    ShopSeen   = 8,
+    ShopBought = 16,
+    Won        = 32,
+}
+
+/// <summary>
+/// Stats for a single card in a single context. Per-instance counters
+/// (Offered/Picked/Won) count every occurrence and sum across contexts. The
+/// run-level counts (RunsPresent/RunsWon/RunsOffered/RunsPicked/RunsShopSeen/
+/// RunsShopBought) are NOT stored as ints — they derive from <see cref="RunFlags"/>,
+/// a set of contributing run indices with per-run flags. Deriving from a run-id
+/// set is what makes unions across acts (the Total row) and across upgrade
+/// variants (grouping) count each run once, regardless of act count. See #6;
+/// supersedes the #5 overlap term.
 /// </summary>
 public class CardStat
 {
-    // Per-instance counters
+    // Per-instance counters (occurrence counts — every copy; sum across contexts).
     [JsonPropertyName("offered")] public int Offered { get; set; }
     [JsonPropertyName("picked")] public int Picked { get; set; }
     [JsonPropertyName("won")] public int Won { get; set; }
 
-    // Per-run counters (Pick% — fight rewards only)
-    [JsonPropertyName("runs_offered")] public int RunsOffered { get; set; }
-    [JsonPropertyName("runs_picked")] public int RunsPicked { get; set; }
-
-    // Per-run counters (Win% — end-of-run deck presence, all acquisition sources)
-    [JsonPropertyName("runs_present")] public int RunsPresent { get; set; }
-    [JsonPropertyName("runs_won")]     public int RunsWon     { get; set; }
-
-    // Per-run counters (Shop% — shop appearances and purchases)
-    [JsonPropertyName("runs_shop_seen")]   public int RunsShopSeen   { get; set; }
-    [JsonPropertyName("runs_shop_bought")] public int RunsShopBought { get; set; }
+    /// <summary>
+    /// Contributing run index (see <see cref="StatsDb.RunIndex"/>) → OR'd
+    /// <see cref="CardRunFlag"/> bits. The single source of truth for every
+    /// Runs* count below.
+    /// </summary>
+    [JsonPropertyName("runs")] public Dictionary<int, byte> RunFlags { get; set; } = new();
 
     // Verbose acquisition breakdown — fight rewards (pre-upgraded cards only)
     [JsonPropertyName("runs_offered_upgraded")] public int RunsOfferedUpgraded { get; set; }
@@ -41,26 +57,52 @@ public class CardStat
     // Verbose acquisition breakdown — upgrades from non-reward sources
     [JsonPropertyName("campfire_upgrades")]    public int CampfireUpgrades    { get; set; }
     [JsonPropertyName("event_relic_upgrades")] public int EventRelicUpgrades  { get; set; }
-}
 
-/// <summary>
-/// Inclusion-exclusion overlap term for upgrade-grouping, keyed by *base* card
-/// id (no "+") then context. Each field counts the runs whose contribution
-/// landed on BOTH the non-upgraded and the "+" variant in that context — i.e.
-/// the A∩B term. The grouped view computes <c>grouped = A + B − overlap</c> per
-/// field instead of naive <c>A + B</c>, so a single run holding both variants
-/// of a card is counted once, not twice. Only the run-level fields can
-/// double-count under grouping (per-instance Offered/Picked/Won are occurrence
-/// counts and sum correctly), so only those are tracked here. See #5.
-/// </summary>
-public class CardGroupOverlap
-{
-    [JsonPropertyName("runs_offered")]     public int RunsOffered     { get; set; }
-    [JsonPropertyName("runs_picked")]      public int RunsPicked      { get; set; }
-    [JsonPropertyName("runs_present")]     public int RunsPresent     { get; set; }
-    [JsonPropertyName("runs_won")]         public int RunsWon         { get; set; }
-    [JsonPropertyName("runs_shop_seen")]   public int RunsShopSeen    { get; set; }
-    [JsonPropertyName("runs_shop_bought")] public int RunsShopBought  { get; set; }
+    // --- Derived run-level counts (not serialized; counted from RunFlags) ---
+    [JsonIgnore] public int RunsPresent    => CountFlag(CardRunFlag.Present);
+    [JsonIgnore] public int RunsOffered    => CountFlag(CardRunFlag.Offered);
+    [JsonIgnore] public int RunsPicked     => CountFlag(CardRunFlag.Picked);
+    [JsonIgnore] public int RunsShopSeen   => CountFlag(CardRunFlag.ShopSeen);
+    [JsonIgnore] public int RunsShopBought => CountFlag(CardRunFlag.ShopBought);
+    [JsonIgnore] public int RunsWon        => CountFlag(CardRunFlag.Won);
+
+    private int CountFlag(CardRunFlag flag)
+    {
+        byte bit = (byte)flag;
+        int n = 0;
+        foreach (var v in RunFlags.Values)
+            if ((v & bit) != 0) n++;
+        return n;
+    }
+
+    /// <summary>Records that run <paramref name="runIndex"/> had these flags for this card+context.</summary>
+    public void SetRun(int runIndex, CardRunFlag flags)
+    {
+        RunFlags.TryGetValue(runIndex, out var cur);
+        RunFlags[runIndex] = (byte)(cur | (byte)flags);
+    }
+
+    /// <summary>
+    /// Merges another stat into this one: per-instance and verbose ints sum;
+    /// run flags UNION (OR per run index). Used to aggregate across contexts
+    /// (acts → per-act / Total) and across upgrade variants (grouping). Because
+    /// run flags union by index, a run appearing in both operands is counted
+    /// once — this is the #6 fix and the replacement for #5's overlap term.
+    /// </summary>
+    public void MergeFrom(CardStat other)
+    {
+        Offered += other.Offered;
+        Picked  += other.Picked;
+        Won     += other.Won;
+        RunsOfferedUpgraded    += other.RunsOfferedUpgraded;
+        RunsPickedUpgraded     += other.RunsPickedUpgraded;
+        RunsShopSeenUpgraded   += other.RunsShopSeenUpgraded;
+        RunsShopBoughtUpgraded += other.RunsShopBoughtUpgraded;
+        CampfireUpgrades       += other.CampfireUpgrades;
+        EventRelicUpgrades     += other.EventRelicUpgrades;
+        foreach (var (runIndex, flags) in other.RunFlags)
+            SetRun(runIndex, (CardRunFlag)flags);
+    }
 }
 
 /// <summary>
@@ -124,7 +166,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 8; // bumped from 7: added CardsGroupOverlap (upgrade-grouping inclusion-exclusion term, #5)
+    public const int CurrentSchemaVersion = 9; // bumped from 8: run-id model — CardStat.RunFlags + RunIndex; removed CardsGroupOverlap (#6)
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
@@ -137,11 +179,12 @@ public class StatsDb
     [JsonPropertyName("schema_version")] public int SchemaVersion { get; set; } = 0;
     [JsonPropertyName("cards")]      public Dictionary<string, Dictionary<string, CardStat>>  Cards      { get; set; } = new();
     /// <summary>
-    /// Upgrade-grouping inclusion-exclusion overlap, keyed by base card id (no
-    /// "+") then context. See <see cref="CardGroupOverlap"/> and #5. Only
-    /// populated for cards that appeared in both upgrade states within one run.
+    /// Interned run identities: ordered list of processed run ids. Card RunFlags
+    /// (and, after the relic pass, relic run-sets) reference a run by its index
+    /// here instead of repeating the id string. Rebuilt-consistent on every full
+    /// reprocess. See #6.
     /// </summary>
-    [JsonPropertyName("cards_group_overlap")] public Dictionary<string, Dictionary<string, CardGroupOverlap>> CardsGroupOverlap { get; set; } = new();
+    [JsonPropertyName("run_index")] public List<string> RunIndex { get; set; } = new();
     [JsonPropertyName("relics")]     public Dictionary<string, Dictionary<string, RelicStat>> Relics     { get; set; } = new();
     [JsonPropertyName("characters")] public Dictionary<string, CharacterStat>                 Characters { get; set; } = new();
     [JsonPropertyName("processed_runs")] public HashSet<string> ProcessedRuns { get; set; } = new();
@@ -229,7 +272,8 @@ public class StatsDb
     public void Reset()
     {
         Cards.Clear();
-        CardsGroupOverlap.Clear();
+        RunIndex.Clear();
+        _runLookup = null;
         Relics.Clear();
         Characters.Clear();
         ProcessedRuns.Clear();
@@ -327,23 +371,27 @@ public class StatsDb
     }
 
     /// <summary>
-    /// Gets or creates the upgrade-grouping overlap entry for a base card id
-    /// (pass the id WITHOUT the "+" suffix) and context. See #5.
+    /// Interns a run id to its index in <see cref="RunIndex"/>, appending it if
+    /// new. The reverse lookup is rebuilt lazily (e.g. after a load) from the
+    /// persisted list. See #6.
     /// </summary>
-    public CardGroupOverlap GetOrCreateCardOverlap(string baseCardId, RunContext context)
+    public int GetOrAddRunIndex(string runId)
     {
-        if (!CardsGroupOverlap.TryGetValue(baseCardId, out var contextMap))
+        if (_runLookup == null)
         {
-            contextMap = new Dictionary<string, CardGroupOverlap>();
-            CardsGroupOverlap[baseCardId] = contextMap;
+            _runLookup = new Dictionary<string, int>(RunIndex.Count);
+            for (int i = 0; i < RunIndex.Count; i++)
+                _runLookup[RunIndex[i]] = i;
         }
 
-        var key = context.ToKey();
-        if (!contextMap.TryGetValue(key, out var stat))
-        {
-            stat = new CardGroupOverlap();
-            contextMap[key] = stat;
-        }
-        return stat;
+        if (_runLookup.TryGetValue(runId, out var idx))
+            return idx;
+
+        idx = RunIndex.Count;
+        RunIndex.Add(runId);
+        _runLookup[runId] = idx;
+        return idx;
     }
+
+    [JsonIgnore] private Dictionary<string, int>? _runLookup;
 }

@@ -93,8 +93,8 @@ public class StatsAggregatorTests
     {
         var db = new StatsDb();
         // Fast path is empty — fallback scans card context maps
-        db.GetOrCreate("CARD.STRIKE", new RunContext("CHARACTER.IRONCLAD", 5, 1, "standard", "v0.1")).RunsWon = 1;
-        db.GetOrCreate("CARD.DEFEND", new RunContext("CHARACTER.IRONCLAD", 3, 1, "standard", "v0.1")).RunsWon = 1;
+        db.GetOrCreate("CARD.STRIKE", new RunContext("CHARACTER.IRONCLAD", 5, 1, "standard", "v0.1")).SetRun(StatFixture.NextRun(), CardRunFlag.Won);
+        db.GetOrCreate("CARD.DEFEND", new RunContext("CHARACTER.IRONCLAD", 3, 1, "standard", "v0.1")).SetRun(StatFixture.NextRun(), CardRunFlag.Won);
         Assert.Equal(5, StatsAggregator.GetHighestWonAscension(db, "CHARACTER.IRONCLAD"));
     }
 
@@ -133,8 +133,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, CardStat>
         {
-            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 3, RunsPicked = 2, RunsWon = 1 },
-            ["CHARACTER.IRONCLAD|5|1|standard|v0.98.0"] = new CardStat { RunsOffered = 2, RunsPicked = 1, RunsWon = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = StatFixture.Card(offered: 3, picked: 2, won: 1),
+            ["CHARACTER.IRONCLAD|5|1|standard|v0.98.0"] = StatFixture.Card(offered: 2, picked: 1, won: 1),
         };
 
         var result = StatsAggregator.AggregateByAct(contextMap);
@@ -150,8 +150,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, CardStat>
         {
-            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 5, RunsPicked = 3 },
-            ["CHARACTER.SILENT|0|1|standard|v0.98.0"]   = new CardStat { RunsOffered = 2, RunsPicked = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = StatFixture.Card(offered: 5, picked: 3),
+            ["CHARACTER.SILENT|0|1|standard|v0.98.0"]   = StatFixture.Card(offered: 2, picked: 1),
         };
 
         var result = StatsAggregator.AggregateByAct(contextMap, character: "CHARACTER.IRONCLAD");
@@ -165,8 +165,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, CardStat>
         {
-            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 4, RunsPicked = 2 },
-            ["CHARACTER.IRONCLAD|0|1|co_op|v0.98.0"]    = new CardStat { RunsOffered = 3, RunsPicked = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = StatFixture.Card(offered: 4, picked: 2),
+            ["CHARACTER.IRONCLAD|0|1|co_op|v0.98.0"]    = StatFixture.Card(offered: 3, picked: 1),
         };
 
         var result = StatsAggregator.AggregateByAct(contextMap, character: null, gameMode: "standard");
@@ -180,8 +180,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, CardStat>
         {
-            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = new CardStat { RunsOffered = 4, RunsPicked = 2 },
-            ["CHARACTER.IRONCLAD|0|2|standard|v0.98.0"] = new CardStat { RunsOffered = 2, RunsPicked = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.98.0"] = StatFixture.Card(offered: 4, picked: 2),
+            ["CHARACTER.IRONCLAD|0|2|standard|v0.98.0"] = StatFixture.Card(offered: 2, picked: 1),
         };
 
         var result = StatsAggregator.AggregateByAct(contextMap);

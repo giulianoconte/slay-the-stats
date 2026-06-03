@@ -140,9 +140,8 @@ public static class CardHoverShowPatch
 
         // Both variants exist (lookupId by the caller, pairedId by the check above).
         var baseId = lookupId.EndsWith("+") ? lookupId[..^1] : lookupId;
-        MainFile.Db.CardsGroupOverlap.TryGetValue(baseId, out var overlapMap);
         return StatsAggregator.MergeGroupedContextMaps(
-            MainFile.Db.Cards[baseId], MainFile.Db.Cards[baseId + "+"], overlapMap);
+            MainFile.Db.Cards[baseId], MainFile.Db.Cards[baseId + "+"]);
     }
 
     /// <summary>
@@ -680,7 +679,10 @@ public static class CardHoverShowPatch
         sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.pick_pct"), TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
-        int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
+        // Total is a UNION across acts (not a sum), so a run that added this card
+        // in two acts is counted once. See #6. Per-act rows still read each act's
+        // own stat.
+        var total = new CardStat();
 
         // Iterate up to the highest act actually present, not a hardcoded 3, so a
         // 4th+ act (vanilla act 4, or modded acts) shows up in both the rows and
@@ -691,10 +693,7 @@ public static class CardHoverShowPatch
         {
             if (actStats.TryGetValue(act, out var stat))
             {
-                totOffered += stat.RunsOffered;
-                totPicked  += stat.RunsPicked;
-                totPresent += stat.RunsPresent;
-                totWon     += stat.RunsWon;
+                total.MergeFrom(stat);
 
                 var prPct = stat.RunsOffered > 0 ? 100.0 * stat.RunsPicked / stat.RunsOffered : -1;
                 var wrPct = stat.RunsPresent > 0 ? 100.0 * stat.RunsWon    / stat.RunsPresent : -1;
@@ -719,7 +718,8 @@ public static class CardHoverShowPatch
             }
         }
 
-        // Total row — aggregated across all acts
+        // Total row — union across all acts (distinct runs)
+        int totOffered = total.RunsOffered, totPicked = total.RunsPicked, totPresent = total.RunsPresent, totWon = total.RunsWon;
         var totPrPct  = totOffered > 0 ? 100.0 * totPicked  / totOffered : -1;
         var totWrPct  = totPresent > 0 ? 100.0 * totWon     / totPresent : -1;
         var totPr     = totPrPct >= 0 ? $"{Math.Round(totPrPct):F0}%" : "-";
@@ -766,7 +766,8 @@ public static class CardHoverShowPatch
         sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.buys"), TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
-        int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
+        // Total via union across acts (distinct runs), not a sum. See #6.
+        var total = new CardStat();
 
         // Up to the highest present act, not a hardcoded 3 — scales to act 4+. See #7.
         int maxAct = actStats.Count > 0 ? actStats.Keys.Max() : 0;
@@ -774,10 +775,7 @@ public static class CardHoverShowPatch
         {
             if (actStats.TryGetValue(act, out var stat) && (stat.RunsPresent > 0 || stat.RunsShopSeen > 0))
             {
-                totPresent    += stat.RunsPresent;
-                totWon        += stat.RunsWon;
-                totShopSeen   += stat.RunsShopSeen;
-                totShopBought += stat.RunsShopBought;
+                total.MergeFrom(stat);
 
                 var wrPct   = stat.RunsPresent  > 0 ? 100.0 * stat.RunsWon          / stat.RunsPresent  : -1;
                 var buysPct = stat.RunsShopSeen > 0 ? 100.0 * stat.RunsShopBought   / stat.RunsShopSeen : -1;
@@ -800,6 +798,7 @@ public static class CardHoverShowPatch
             }
         }
 
+        int totPresent = total.RunsPresent, totWon = total.RunsWon, totShopSeen = total.RunsShopSeen, totShopBought = total.RunsShopBought;
         var totWrPct   = totPresent  > 0 ? 100.0 * totWon        / totPresent  : -1;
         var totBuysPct = totShopSeen > 0 ? 100.0 * totShopBought / totShopSeen : -1;
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";

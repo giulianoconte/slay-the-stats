@@ -210,81 +210,45 @@ public static class StatsAggregator
                 result[ctx.Act] = agg;
             }
 
-            agg.Offered      += stat.Offered;
-            agg.Picked       += stat.Picked;
-            agg.Won          += stat.Won;
-            agg.RunsOffered  += stat.RunsOffered;
-            agg.RunsPicked   += stat.RunsPicked;
-            agg.RunsPresent  += stat.RunsPresent;
-            agg.RunsWon      += stat.RunsWon;
-            agg.RunsShopSeen   += stat.RunsShopSeen;
-            agg.RunsShopBought += stat.RunsShopBought;
-            agg.RunsOfferedUpgraded  += stat.RunsOfferedUpgraded;
-            agg.RunsPickedUpgraded   += stat.RunsPickedUpgraded;
-            agg.RunsShopSeenUpgraded   += stat.RunsShopSeenUpgraded;
-            agg.RunsShopBoughtUpgraded += stat.RunsShopBoughtUpgraded;
-            agg.CampfireUpgrades     += stat.CampfireUpgrades;
-            agg.EventRelicUpgrades   += stat.EventRelicUpgrades;
+            // Union run flags + sum occurrence/verbose ints. Different contexts
+            // that map to the same act (e.g. different ascensions/versions) are
+            // different runs, so their run-index sets are disjoint and the union
+            // matches the old sum — but a run that spanned multiple contexts in
+            // the same act is now counted once. See #6.
+            agg.MergeFrom(stat);
         }
 
         return result;
     }
 
     /// <summary>
-    /// Merges a card's non-upgraded and "+" context maps into one grouped map
-    /// using inclusion-exclusion (#5): per-instance counters (Offered/Picked/Won)
-    /// and the verbose breakdowns sum normally, but the run-level counters use
-    /// <c>grouped = A + B − overlap</c> so a single run that held both upgrade
-    /// states of a card is counted once. <paramref name="overlapMap"/> is the
-    /// base-keyed <see cref="CardGroupOverlap"/> context map (may be null when no
-    /// run ever held both variants). Pure — no DB/Godot dependencies, so unit-testable.
+    /// Merges a card's non-upgraded and "+" context maps into one grouped map by
+    /// union (#6, replacing #5's inclusion-exclusion overlap term). Per-instance
+    /// and verbose ints sum; run flags union by run index — so a single run that
+    /// held both upgrade states of a card shares one run index across the two
+    /// maps and is counted once. Pure — no DB/Godot dependencies, so unit-testable.
     /// </summary>
     public static Dictionary<string, CardStat> MergeGroupedContextMaps(
         Dictionary<string, CardStat> baseMap,
-        Dictionary<string, CardStat> plusMap,
-        Dictionary<string, CardGroupOverlap>? overlapMap)
+        Dictionary<string, CardStat> plusMap)
     {
         var result = new Dictionary<string, CardStat>();
-        var contexts = new HashSet<string>(baseMap.Keys);
-        contexts.UnionWith(plusMap.Keys);
 
-        foreach (var ctx in contexts)
+        void Fold(Dictionary<string, CardStat> map)
         {
-            baseMap.TryGetValue(ctx, out var a);
-            plusMap.TryGetValue(ctx, out var b);
-            CardGroupOverlap? ov = null;
-            overlapMap?.TryGetValue(ctx, out ov);
-
-            int Base(Func<CardStat, int> f) => (a != null ? f(a) : 0) + (b != null ? f(b) : 0);
-            int Grouped(Func<CardStat, int> f, int overlap) => Base(f) - overlap;
-
-            result[ctx] = new CardStat
+            foreach (var (ctx, stat) in map)
             {
-                // Per-instance occurrence counts — sum directly.
-                Offered = Base(s => s.Offered),
-                Picked  = Base(s => s.Picked),
-                Won     = Base(s => s.Won),
-
-                // Run-level counts — inclusion-exclusion against the overlap term.
-                RunsOffered    = Grouped(s => s.RunsOffered,    ov?.RunsOffered    ?? 0),
-                RunsPicked     = Grouped(s => s.RunsPicked,     ov?.RunsPicked     ?? 0),
-                RunsPresent    = Grouped(s => s.RunsPresent,    ov?.RunsPresent    ?? 0),
-                RunsWon        = Grouped(s => s.RunsWon,        ov?.RunsWon        ?? 0),
-                RunsShopSeen   = Grouped(s => s.RunsShopSeen,   ov?.RunsShopSeen   ?? 0),
-                RunsShopBought = Grouped(s => s.RunsShopBought, ov?.RunsShopBought ?? 0),
-
-                // Verbose breakdowns — variant-specific, no cross-variant overlap; sum.
-                // (The previous merge dropped these for shared contexts; summing
-                // preserves them so the grouped verbose view stays populated.)
-                RunsOfferedUpgraded    = Base(s => s.RunsOfferedUpgraded),
-                RunsPickedUpgraded     = Base(s => s.RunsPickedUpgraded),
-                RunsShopSeenUpgraded   = Base(s => s.RunsShopSeenUpgraded),
-                RunsShopBoughtUpgraded = Base(s => s.RunsShopBoughtUpgraded),
-                CampfireUpgrades       = Base(s => s.CampfireUpgrades),
-                EventRelicUpgrades     = Base(s => s.EventRelicUpgrades),
-            };
+                if (!result.TryGetValue(ctx, out var agg))
+                {
+                    agg = new CardStat();
+                    result[ctx] = agg;
+                }
+                agg.MergeFrom(stat);
+            }
         }
 
+        Fold(baseMap);
+        Fold(plusMap);
         return result;
     }
 

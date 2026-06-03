@@ -97,6 +97,10 @@ public static class RunParser
 
         bool won = root["win"]?.GetValue<bool>() ?? false;
 
+        // Intern this run so its card contributions can be recorded by index.
+        // Run-level counts derive from these per-run flag sets (#6).
+        int runIndex = db.GetOrAddRunIndex(runId);
+
         var character = root["players"]?[0]?["character"]?.GetValue<string>();
         if (character == null)
             warn?.Invoke($"Run {runId}: missing players[0].character — game format may have changed.");
@@ -646,10 +650,10 @@ public static class RunParser
 
         // Apply per-run fight-reward counters (Pick% stats)
         foreach (var (cardId, contextKey) in offeredThisRun)
-            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsOffered++;
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.Offered);
 
         foreach (var (cardId, contextKey) in pickedThisRun)
-            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).RunsPicked++;
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.Picked);
 
         // Apply per-run verbose upgraded fight-reward counters
         foreach (var (cardId, contextKey) in offeredUpgradedThisRun)
@@ -679,12 +683,9 @@ public static class RunParser
             }
         }
 
+        var presenceFlags = CardRunFlag.Present | (won ? CardRunFlag.Won : CardRunFlag.None);
         foreach (var (cardId, contextKey) in presenceThisRun)
-        {
-            var stat = db.GetOrCreate(cardId, RunContext.Parse(contextKey));
-            stat.RunsPresent++;
-            if (won) stat.RunsWon++;
-        }
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, presenceFlags);
 
         // Enforce consistency: a purchased item must have been seen.
         // Colorless cards sold from a special shop section appear in cards_gained but not in
@@ -694,10 +695,10 @@ public static class RunParser
 
         // Per-run shop counters
         foreach (var (id, contextKey) in shopSeenThisRun)
-            db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopSeen++;
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.ShopSeen);
 
         foreach (var (id, contextKey) in shopBoughtThisRun)
-            db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopBought++;
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.ShopBought);
 
         // Verbose: upgraded shop counters
         foreach (var (id, contextKey) in shopSeenUpgradedThisRun)
@@ -711,27 +712,6 @@ public static class RunParser
 
         foreach (var (id, contextKey) in relicShopBoughtThisRun)
             db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopBought++;
-
-        // --- Upgrade-grouping overlap (inclusion-exclusion term, #5) ---
-        // For each per-run dedup set, a card that contributed in BOTH its
-        // non-upgraded and "+" form within the same context is the A∩B overlap
-        // the grouped view subtracts to avoid double-counting that single run.
-        // Keyed by base id (strip the "+"). RunsWon overlap is conditional on
-        // the run being won, mirroring how RunsPresent/RunsWon are applied.
-        foreach (var (baseId, context) in GroupingOverlaps(presenceThisRun))
-        {
-            var ov = db.GetOrCreateCardOverlap(baseId, context);
-            ov.RunsPresent++;
-            if (won) ov.RunsWon++;
-        }
-        foreach (var (baseId, context) in GroupingOverlaps(offeredThisRun))
-            db.GetOrCreateCardOverlap(baseId, context).RunsOffered++;
-        foreach (var (baseId, context) in GroupingOverlaps(pickedThisRun))
-            db.GetOrCreateCardOverlap(baseId, context).RunsPicked++;
-        foreach (var (baseId, context) in GroupingOverlaps(shopSeenThisRun))
-            db.GetOrCreateCardOverlap(baseId, context).RunsShopSeen++;
-        foreach (var (baseId, context) in GroupingOverlaps(shopBoughtThisRun))
-            db.GetOrCreateCardOverlap(baseId, context).RunsShopBought++;
 
         // Verbose: campfire and event/relic upgrade counters
         foreach (var (cardId, context) in campfireUpgradesThisRun)
@@ -780,25 +760,6 @@ public static class RunParser
             RewardScreensOffered = rewardScreensOfferedThisRun,
             RewardScreensSkipped = rewardScreensSkippedThisRun,
         });
-    }
-
-    /// <summary>
-    /// Given a per-run dedup set of (cardKey, contextKey) — where cardKey carries
-    /// the "+" suffix for upgraded variants — yields (baseId, context) for every
-    /// context in which BOTH the "+" and non-"+" form are present. This is the
-    /// A∩B overlap the upgrade-grouping view subtracts (inclusion-exclusion, #5).
-    /// Upgrade level collapses to a single "+", so the pair is always binary.
-    /// </summary>
-    private static IEnumerable<(string baseId, RunContext context)> GroupingOverlaps(
-        HashSet<(string cardKey, string contextKey)> set)
-    {
-        foreach (var (cardKey, contextKey) in set)
-        {
-            if (!cardKey.EndsWith("+")) continue;
-            var baseId = cardKey[..^1];
-            if (set.Contains((baseId, contextKey)))
-                yield return (baseId, RunContext.Parse(contextKey));
-        }
     }
 
     /// <summary>

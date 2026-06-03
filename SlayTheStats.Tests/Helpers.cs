@@ -1,6 +1,35 @@
 namespace SlayTheStats.Tests;
 
 /// <summary>
+/// Builds synthetic <see cref="CardStat"/>s with given run-level counts (#6).
+/// Run-level counts derive from a per-run flag set, so each unit of each count
+/// is assigned a globally-unique synthetic run index. That keeps every stat's
+/// run-ids disjoint, so unions across contexts behave like the old sums — which
+/// is what the AggregateByAct/filter tests assume.
+/// </summary>
+public static class StatFixture
+{
+    private static int _seed = 1_000_000;
+
+    /// <summary>A fresh, never-reused synthetic run index.</summary>
+    public static int NextRun() => _seed++;
+
+    public static CardStat Card(int offered = 0, int picked = 0, int present = 0,
+                                int won = 0, int shopSeen = 0, int shopBought = 0)
+    {
+        var s = new CardStat();
+        void Add(int n, CardRunFlag flag) { for (int i = 0; i < n; i++) s.SetRun(_seed++, flag); }
+        Add(offered, CardRunFlag.Offered);
+        Add(picked, CardRunFlag.Picked);
+        Add(present, CardRunFlag.Present);
+        Add(won, CardRunFlag.Won);
+        Add(shopSeen, CardRunFlag.ShopSeen);
+        Add(shopBought, CardRunFlag.ShopBought);
+        return s;
+    }
+}
+
+/// <summary>
 /// Builds minimal .run JSON for use in tests.
 /// </summary>
 public static class RunFixture
