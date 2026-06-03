@@ -207,24 +207,17 @@ public static class CardHoverShowPatch
     /// (derived from the card's pool) is used to filter by owning class.
     /// For non-class cards (colorless, curse, etc.) cardOwnerCharacter is null → all chars.
     /// </summary>
-    /// <summary>True iff the given version config value should map to a null lower bound on the filter.</summary>
-    private static bool IsVersionLowerBound(string v) =>
-        string.IsNullOrEmpty(v) || v == SlayTheStatsConfig.VersionLowest;
-
-    /// <summary>True iff the given version config value should map to a null upper bound on the filter.</summary>
-    private static bool IsVersionUpperBound(string v) =>
-        string.IsNullOrEmpty(v) || v == SlayTheStatsConfig.VersionHighest;
-
     internal static AggregationFilter BuildCompendiumFilter(string? runCharacter, string? cardOwnerCharacter = null)
     {
         var (ascMin, ascMax) = SlayTheStatsConfig.ResolveAscensionBounds(SlayTheStatsConfig.AscensionMin, SlayTheStatsConfig.AscensionMax);
+        var (verMin, verMax) = SlayTheStatsConfig.ResolveVersionBounds(SlayTheStatsConfig.VersionMin, SlayTheStatsConfig.VersionMax);
         var filter = new AggregationFilter
         {
             GameMode = SlayTheStatsConfig.IncludeMultiplayer ? null! : "standard",
             AscensionMin = ascMin,
             AscensionMax = ascMax,
-            VersionMin = IsVersionLowerBound(SlayTheStatsConfig.VersionMin) ? null : SlayTheStatsConfig.VersionMin,
-            VersionMax = IsVersionUpperBound(SlayTheStatsConfig.VersionMax) ? null : SlayTheStatsConfig.VersionMax,
+            VersionMin = verMin,
+            VersionMax = verMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.FilterProfile) ? null : SlayTheStatsConfig.FilterProfile,
             Display = new FilterDisplayRaw
             {
@@ -262,14 +255,15 @@ public static class CardHoverShowPatch
     {
         // In-run tooltips always use the user's saved defaults, not the live pane values.
         var (ascMin, ascMax) = SlayTheStatsConfig.ResolveAscensionBounds(SlayTheStatsConfig.DefaultAscensionMin, SlayTheStatsConfig.DefaultAscensionMax);
+        var (verMin, verMax) = SlayTheStatsConfig.ResolveVersionBounds(SlayTheStatsConfig.DefaultVersionMin, SlayTheStatsConfig.DefaultVersionMax);
         var filter = new AggregationFilter
         {
             GameMode = SlayTheStatsConfig.DefaultIncludeMultiplayer ? null! : "standard",
             Character = runCharacter,
             AscensionMin = ascMin,
             AscensionMax = ascMax,
-            VersionMin = IsVersionLowerBound(SlayTheStatsConfig.DefaultVersionMin) ? null : SlayTheStatsConfig.DefaultVersionMin,
-            VersionMax = IsVersionUpperBound(SlayTheStatsConfig.DefaultVersionMax) ? null : SlayTheStatsConfig.DefaultVersionMax,
+            VersionMin = verMin,
+            VersionMax = verMax,
             Profile = string.IsNullOrEmpty(SlayTheStatsConfig.DefaultFilterProfile) ? null : SlayTheStatsConfig.DefaultFilterProfile,
             Display = new FilterDisplayRaw
             {

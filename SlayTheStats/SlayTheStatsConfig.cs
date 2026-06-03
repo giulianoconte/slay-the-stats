@@ -333,6 +333,47 @@ internal class SlayTheStatsConfig : SimpleModConfig
     }
 
     /// <summary>
+    /// Version analogue of <see cref="ResolveAscensionBounds"/>: resolves the raw
+    /// version sentinels into concrete filter bounds, symmetrically — a "Highest"
+    /// or "Lowest" sentinel is handled whether it sits on the min or the max side.
+    ///   (Lowest,  Lowest)  → (dataLow,  dataLow)   pin to the oldest build in data
+    ///   (Highest, Highest) → (dataHigh, dataHigh)  pin to the newest build in data
+    ///   otherwise each side independently: a sentinel/garbage bound → null
+    ///   (unbounded), a real version → itself.
+    /// Mirrors the footer's <c>FormatVersionContextV2</c> so the displayed range
+    /// and the applied filter agree. Without this, a "Highest" used as the LOWER
+    /// bound leaked through as the literal "__highest__", which
+    /// <see cref="AggregationFilter.CompareVersions"/> read as version 0 — silently
+    /// dropping the lower bound (#8).
+    /// </summary>
+    public static (string? min, string? max) ResolveVersionBounds(string? rawMin, string? rawMax)
+    {
+        bool minIsLowest  = string.IsNullOrEmpty(rawMin) || rawMin == VersionLowest;
+        bool minIsHighest = rawMin == VersionHighest;
+        bool maxIsLowest  = rawMax == VersionLowest;
+        bool maxIsHighest = string.IsNullOrEmpty(rawMax) || rawMax == VersionHighest;
+
+        if (minIsLowest && maxIsLowest)
+        {
+            var data = StatsAggregator.GetDistinctVersions(MainFile.Db);
+            return data.Count > 0 ? (data[0], data[0]) : (null, null);
+        }
+
+        if (minIsHighest && maxIsHighest)
+        {
+            var data = StatsAggregator.GetDistinctVersions(MainFile.Db);
+            return data.Count > 0 ? (data[^1], data[^1]) : (null, null);
+        }
+
+        // IsUnboundedFilterVersion already encodes "empty / sentinel / not a real
+        // version → unbounded", so each side maps a sentinel or garbage value to
+        // null and keeps a genuine version verbatim.
+        string? min = IsUnboundedFilterVersion(rawMin) ? null : rawMin;
+        string? max = IsUnboundedFilterVersion(rawMax) ? null : rawMax;
+        return (min, max);
+    }
+
+    /// <summary>
     /// Builds an AggregationFilter from the current LIVE static properties,
     /// defensively clamping out-of-range values and ignoring sentinel strings
     /// so callers always get a sane filter. Used by surfaces that should
@@ -375,10 +416,9 @@ internal class SlayTheStatsConfig : SimpleModConfig
         filter.AscensionMin = resolvedMin;
         filter.AscensionMax = resolvedMax;
 
-        if (!IsUnboundedFilterVersion(versionMin))
-            filter.VersionMin = versionMin;
-        if (!IsUnboundedFilterVersion(versionMax))
-            filter.VersionMax = versionMax;
+        var (resolvedVerMin, resolvedVerMax) = ResolveVersionBounds(versionMin, versionMax);
+        filter.VersionMin = resolvedVerMin;
+        filter.VersionMax = resolvedVerMax;
         if (!string.IsNullOrEmpty(profile))
             filter.Profile = profile;
 

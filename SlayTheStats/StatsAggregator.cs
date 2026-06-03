@@ -127,9 +127,31 @@ public class AggregationFilter
         int maxLen = Math.Max(partsA.Length, partsB.Length);
         for (int i = 0; i < maxLen; i++)
         {
-            int numA = i < partsA.Length && int.TryParse(partsA[i], out var na) ? na : 0;
-            int numB = i < partsB.Length && int.TryParse(partsB[i], out var nb) ? nb : 0;
+            int numA = ParseVersionPart(i < partsA.Length ? partsA[i] : "0", a, b);
+            int numB = ParseVersionPart(i < partsB.Length ? partsB[i] : "0", a, b);
             if (numA != numB) return numA.CompareTo(numB);
+        }
+        return 0;
+    }
+
+    private static bool _warnedNonVersionToken;
+
+    // Belt-and-suspenders for the version-sentinel leak (#8). Once
+    // ResolveVersionBounds runs, only real versions reach CompareVersions; a
+    // non-version token (e.g. a "__highest__" sentinel that bypassed resolution)
+    // has no digits and would otherwise be silently read as 0 — which is exactly
+    // how the old lower-bound leak matched every version. Surface it once rather
+    // than failing silently. A genuine version part (incl. odd forms like
+    // "0-rc1") contains a digit and is treated as 0 without warning, as before.
+    private static int ParseVersionPart(string part, string a, string b)
+    {
+        if (int.TryParse(part, out var n)) return n;
+        if (!_warnedNonVersionToken && !part.Any(char.IsDigit))
+        {
+            _warnedNonVersionToken = true;
+            MainFile.Logger.Warn(
+                $"CompareVersions: non-version token '{part}' in '{a}'/'{b}' treated as 0 — " +
+                "a sentinel likely bypassed version-bound resolution.");
         }
         return 0;
     }
