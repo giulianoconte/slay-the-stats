@@ -682,7 +682,12 @@ public static class CardHoverShowPatch
 
         int totOffered = 0, totPicked = 0, totPresent = 0, totWon = 0;
 
-        for (int act = 1; act <= 3; act++)
+        // Iterate up to the highest act actually present, not a hardcoded 3, so a
+        // 4th+ act (vanilla act 4, or modded acts) shows up in both the rows and
+        // the Total. Gaps render as empty rows. The parse side (FloorToAct) is
+        // already act-count-agnostic. See #7.
+        int maxAct = actStats.Count > 0 ? actStats.Keys.Max() : 0;
+        for (int act = 1; act <= maxAct; act++)
         {
             if (actStats.TryGetValue(act, out var stat))
             {
@@ -763,7 +768,9 @@ public static class CardHoverShowPatch
 
         int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
 
-        for (int act = 1; act <= 3; act++)
+        // Up to the highest present act, not a hardcoded 3 — scales to act 4+. See #7.
+        int maxAct = actStats.Count > 0 ? actStats.Keys.Max() : 0;
+        for (int act = 1; act <= maxAct; act++)
         {
             if (actStats.TryGetValue(act, out var stat) && (stat.RunsPresent > 0 || stat.RunsShopSeen > 0))
             {

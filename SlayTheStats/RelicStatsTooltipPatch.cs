@@ -222,7 +222,9 @@ internal static class RelicHoverHelper
 
         int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
 
-        for (int act = 1; act <= 3; act++)
+        // Up to the highest present act, not a hardcoded 3 — scales to act 4+. See #7.
+        int maxAct = actStats.Count > 0 ? actStats.Keys.Max() : 0;
+        for (int act = 1; act <= maxAct; act++)
         {
             if (actStats.TryGetValue(act, out var stat) && (stat.RunsPresent > 0 || stat.RunsShopSeen > 0))
             {
