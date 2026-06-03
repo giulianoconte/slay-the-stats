@@ -192,7 +192,8 @@ public class StatsDb
     [JsonPropertyName("total_skips")]          public int TotalSkips          { get; set; }
     /// <summary>
     /// Highest ascension won per character (e.g. "CHARACTER.IRONCLAD" → 9).
-    /// Used by the OnlyHighestWonAscension config option to filter stats.
+    /// Populated by RunParser; currently unread since the OnlyHighestWonAscension
+    /// option was removed. Retained in the schema for now (see GetHighestWonAscension).
     /// </summary>
     [JsonPropertyName("highest_won_ascensions")] public Dictionary<string, int> HighestWonAscensions { get; set; } = new();
     [JsonPropertyName("encounters")]      public Dictionary<string, Dictionary<string, EncounterEvent>> Encounters     { get; set; } = new();

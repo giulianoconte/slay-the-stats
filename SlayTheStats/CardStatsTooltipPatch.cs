@@ -252,24 +252,12 @@ public static class CardHoverShowPatch
             filter.Character = classFilter;
         }
 
-        var effectiveChar = GetEffectiveCharacter(filter);
-        if (SlayTheStatsConfig.OnlyHighestWonAscension)
-        {
-            var highest = StatsAggregator.GetHighestWonAscension(MainFile.Db, effectiveChar);
-            if (highest != null)
-            {
-                filter.AscensionMin = highest;
-                filter.AscensionMax = highest;
-            }
-        }
-
         return filter;
     }
 
     /// <summary>
     /// Builds a minimal AggregationFilter for in-run tooltips (rewards, shop, relic bar).
-    /// Only applies the current run's character and the OnlyHighestWonAscension setting.
-    /// Ignores all compendium pane filter settings.
+    /// Only applies the current run's character; ignores all compendium pane filter settings.
     /// </summary>
     internal static AggregationFilter BuildInRunFilter(string? runCharacter)
     {
@@ -293,16 +281,6 @@ public static class CardHoverShowPatch
                 RawProfile = SlayTheStatsConfig.DefaultFilterProfile ?? "",
             },
         };
-
-        if (SlayTheStatsConfig.OnlyHighestWonAscension)
-        {
-            var highest = StatsAggregator.GetHighestWonAscension(MainFile.Db, runCharacter);
-            if (highest != null)
-            {
-                filter.AscensionMin = highest;
-                filter.AscensionMax = highest;
-            }
-        }
 
         return filter;
     }
