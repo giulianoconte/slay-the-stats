@@ -11,7 +11,7 @@ namespace SlayTheStats;
 /// the card was present AND the run was won, so it needs no separate won-set.
 /// </summary>
 [Flags]
-public enum CardRunFlag : byte
+public enum RunFlag : byte
 {
     None       = 0,
     Present    = 1,
@@ -41,7 +41,7 @@ public class CardStat
 
     /// <summary>
     /// Contributing run index (see <see cref="StatsDb.RunIndex"/>) → OR'd
-    /// <see cref="CardRunFlag"/> bits. The single source of truth for every
+    /// <see cref="RunFlag"/> bits. The single source of truth for every
     /// Runs* count below.
     /// </summary>
     [JsonPropertyName("runs")] public Dictionary<int, byte> RunFlags { get; set; } = new();
@@ -59,14 +59,14 @@ public class CardStat
     [JsonPropertyName("event_relic_upgrades")] public int EventRelicUpgrades  { get; set; }
 
     // --- Derived run-level counts (not serialized; counted from RunFlags) ---
-    [JsonIgnore] public int RunsPresent    => CountFlag(CardRunFlag.Present);
-    [JsonIgnore] public int RunsOffered    => CountFlag(CardRunFlag.Offered);
-    [JsonIgnore] public int RunsPicked     => CountFlag(CardRunFlag.Picked);
-    [JsonIgnore] public int RunsShopSeen   => CountFlag(CardRunFlag.ShopSeen);
-    [JsonIgnore] public int RunsShopBought => CountFlag(CardRunFlag.ShopBought);
-    [JsonIgnore] public int RunsWon        => CountFlag(CardRunFlag.Won);
+    [JsonIgnore] public int RunsPresent    => CountFlag(RunFlag.Present);
+    [JsonIgnore] public int RunsOffered    => CountFlag(RunFlag.Offered);
+    [JsonIgnore] public int RunsPicked     => CountFlag(RunFlag.Picked);
+    [JsonIgnore] public int RunsShopSeen   => CountFlag(RunFlag.ShopSeen);
+    [JsonIgnore] public int RunsShopBought => CountFlag(RunFlag.ShopBought);
+    [JsonIgnore] public int RunsWon        => CountFlag(RunFlag.Won);
 
-    private int CountFlag(CardRunFlag flag)
+    private int CountFlag(RunFlag flag)
     {
         byte bit = (byte)flag;
         int n = 0;
@@ -76,7 +76,7 @@ public class CardStat
     }
 
     /// <summary>Records that run <paramref name="runIndex"/> had these flags for this card+context.</summary>
-    public void SetRun(int runIndex, CardRunFlag flags)
+    public void SetRun(int runIndex, RunFlag flags)
     {
         RunFlags.TryGetValue(runIndex, out var cur);
         RunFlags[runIndex] = (byte)(cur | (byte)flags);
@@ -101,7 +101,7 @@ public class CardStat
         CampfireUpgrades       += other.CampfireUpgrades;
         EventRelicUpgrades     += other.EventRelicUpgrades;
         foreach (var (runIndex, flags) in other.RunFlags)
-            SetRun(runIndex, (CardRunFlag)flags);
+            SetRun(runIndex, (RunFlag)flags);
     }
 }
 

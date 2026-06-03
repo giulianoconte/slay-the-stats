@@ -220,7 +220,8 @@ internal static class RelicHoverHelper
         sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.buys"), TooltipHelper.ColPadInner));
         sb.Append(TooltipHelper.HdrCell(L.T("tooltip.col.win_pct"), TooltipHelper.ColPadLast));
 
-        int totPresent = 0, totWon = 0, totShopSeen = 0, totShopBought = 0;
+        // Total via union across acts (distinct runs), not a sum. See #6.
+        var total = new RelicStat();
 
         // Up to the highest present act, not a hardcoded 3 — scales to act 4+. See #7.
         int maxAct = actStats.Count > 0 ? actStats.Keys.Max() : 0;
@@ -228,10 +229,7 @@ internal static class RelicHoverHelper
         {
             if (actStats.TryGetValue(act, out var stat) && (stat.RunsPresent > 0 || stat.RunsShopSeen > 0))
             {
-                totPresent    += stat.RunsPresent;
-                totWon        += stat.RunsWon;
-                totShopSeen   += stat.RunsShopSeen;
-                totShopBought += stat.RunsShopBought;
+                total.MergeFrom(stat);
 
                 var wrPct   = stat.RunsPresent > 0 ? 100.0 * stat.RunsWon          / stat.RunsPresent  : -1;
                 var shopPct = stat.RunsShopSeen > 0 ? 100.0 * stat.RunsShopBought  / stat.RunsShopSeen : -1;
@@ -253,7 +251,8 @@ internal static class RelicHoverHelper
             }
         }
 
-        // Total row
+        // Total row — union across all acts (distinct runs)
+        int totPresent = total.RunsPresent, totWon = total.RunsWon, totShopSeen = total.RunsShopSeen, totShopBought = total.RunsShopBought;
         var totWrPct   = totPresent  > 0 ? 100.0 * totWon        / totPresent  : -1;
         var totShopPct = totShopSeen > 0 ? 100.0 * totShopBought / totShopSeen : -1;
         var totWr      = totWrPct >= 0 ? $"{Math.Round(totWrPct):F0}%" : "-";

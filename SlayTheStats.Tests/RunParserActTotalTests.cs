@@ -81,6 +81,26 @@ public class RunParserActTotalTests : IDisposable
     }
 
     [Fact]
+    public void Relic_AcquiredInTwoActs_TotalCountsRunOnce()
+    {
+        // Same relic recorded in two act-contexts of one run (rare in practice —
+        // a relic is acquired once — but proves the relic union dedups by act).
+        var db = new StatsDb();
+        var path = TempRun(Build(won: true, relicActs:
+        [
+            [[new RelicChoice("RELIC.ANCHOR", Picked: true)]],
+            [[new RelicChoice("RELIC.ANCHOR", Picked: true)]],
+        ]));
+        RunParser.ProcessRun(path, "run1", "default", db);
+
+        var byAct = StatsAggregator.AggregateRelicsByAct(db.Relics["RELIC.ANCHOR"], character: null, gameMode: null);
+        var total = new RelicStat();
+        foreach (var s in byAct.Values) total.MergeFrom(s);
+        Assert.Equal(1, total.RunsPresent);
+        Assert.Equal(1, total.RunsWon);
+    }
+
+    [Fact]
     public void BothVariantsAcrossActs_GroupedTotalCountsRunOnce()
     {
         // The full unification: one run, base form added in act 1, "+" in act 2.

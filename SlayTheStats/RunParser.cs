@@ -650,10 +650,10 @@ public static class RunParser
 
         // Apply per-run fight-reward counters (Pick% stats)
         foreach (var (cardId, contextKey) in offeredThisRun)
-            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.Offered);
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, RunFlag.Offered);
 
         foreach (var (cardId, contextKey) in pickedThisRun)
-            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.Picked);
+            db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, RunFlag.Picked);
 
         // Apply per-run verbose upgraded fight-reward counters
         foreach (var (cardId, contextKey) in offeredUpgradedThisRun)
@@ -683,7 +683,7 @@ public static class RunParser
             }
         }
 
-        var presenceFlags = CardRunFlag.Present | (won ? CardRunFlag.Won : CardRunFlag.None);
+        var presenceFlags = RunFlag.Present | (won ? RunFlag.Won : RunFlag.None);
         foreach (var (cardId, contextKey) in presenceThisRun)
             db.GetOrCreate(cardId, RunContext.Parse(contextKey)).SetRun(runIndex, presenceFlags);
 
@@ -695,10 +695,10 @@ public static class RunParser
 
         // Per-run shop counters
         foreach (var (id, contextKey) in shopSeenThisRun)
-            db.GetOrCreate(id, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.ShopSeen);
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).SetRun(runIndex, RunFlag.ShopSeen);
 
         foreach (var (id, contextKey) in shopBoughtThisRun)
-            db.GetOrCreate(id, RunContext.Parse(contextKey)).SetRun(runIndex, CardRunFlag.ShopBought);
+            db.GetOrCreate(id, RunContext.Parse(contextKey)).SetRun(runIndex, RunFlag.ShopBought);
 
         // Verbose: upgraded shop counters
         foreach (var (id, contextKey) in shopSeenUpgradedThisRun)
@@ -708,10 +708,10 @@ public static class RunParser
             db.GetOrCreate(id, RunContext.Parse(contextKey)).RunsShopBoughtUpgraded++;
 
         foreach (var (id, contextKey) in relicShopSeenThisRun)
-            db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopSeen++;
+            db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).SetRun(runIndex, RunFlag.ShopSeen);
 
         foreach (var (id, contextKey) in relicShopBoughtThisRun)
-            db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).RunsShopBought++;
+            db.GetOrCreateRelic(id, RunContext.Parse(contextKey)).SetRun(runIndex, RunFlag.ShopBought);
 
         // Verbose: campfire and event/relic upgrade counters
         foreach (var (cardId, context) in campfireUpgradesThisRun)
@@ -728,12 +728,9 @@ public static class RunParser
         }
 
         // Relic stats: one entry per acquired relic
+        var relicPresenceFlags = RunFlag.Present | (won ? RunFlag.Won : RunFlag.None);
         foreach (var (relicId, context) in relicsAcquired)
-        {
-            var stat = db.GetOrCreateRelic(relicId, context);
-            stat.RunsPresent++;
-            if (won) stat.RunsWon++;
-        }
+            db.GetOrCreateRelic(relicId, context).SetRun(runIndex, relicPresenceFlags);
 
         // Character-level run/win counts — used as the WR baseline in tooltips
         var charStat = db.GetOrCreateCharacter(character, gameMode);

@@ -18,13 +18,24 @@ public static class StatFixture
                                 int won = 0, int shopSeen = 0, int shopBought = 0)
     {
         var s = new CardStat();
-        void Add(int n, CardRunFlag flag) { for (int i = 0; i < n; i++) s.SetRun(_seed++, flag); }
-        Add(offered, CardRunFlag.Offered);
-        Add(picked, CardRunFlag.Picked);
-        Add(present, CardRunFlag.Present);
-        Add(won, CardRunFlag.Won);
-        Add(shopSeen, CardRunFlag.ShopSeen);
-        Add(shopBought, CardRunFlag.ShopBought);
+        void Add(int n, RunFlag flag) { for (int i = 0; i < n; i++) s.SetRun(_seed++, flag); }
+        Add(offered, RunFlag.Offered);
+        Add(picked, RunFlag.Picked);
+        Add(present, RunFlag.Present);
+        Add(won, RunFlag.Won);
+        Add(shopSeen, RunFlag.ShopSeen);
+        Add(shopBought, RunFlag.ShopBought);
+        return s;
+    }
+
+    public static RelicStat Relic(int present = 0, int won = 0, int shopSeen = 0, int shopBought = 0)
+    {
+        var s = new RelicStat();
+        void Add(int n, RunFlag flag) { for (int i = 0; i < n; i++) s.SetRun(_seed++, flag); }
+        Add(present, RunFlag.Present);
+        Add(won, RunFlag.Won);
+        Add(shopSeen, RunFlag.ShopSeen);
+        Add(shopBought, RunFlag.ShopBought);
         return s;
     }
 }

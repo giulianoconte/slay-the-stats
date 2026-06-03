@@ -93,8 +93,8 @@ public class StatsAggregatorTests
     {
         var db = new StatsDb();
         // Fast path is empty — fallback scans card context maps
-        db.GetOrCreate("CARD.STRIKE", new RunContext("CHARACTER.IRONCLAD", 5, 1, "standard", "v0.1")).SetRun(StatFixture.NextRun(), CardRunFlag.Won);
-        db.GetOrCreate("CARD.DEFEND", new RunContext("CHARACTER.IRONCLAD", 3, 1, "standard", "v0.1")).SetRun(StatFixture.NextRun(), CardRunFlag.Won);
+        db.GetOrCreate("CARD.STRIKE", new RunContext("CHARACTER.IRONCLAD", 5, 1, "standard", "v0.1")).SetRun(StatFixture.NextRun(), RunFlag.Won);
+        db.GetOrCreate("CARD.DEFEND", new RunContext("CHARACTER.IRONCLAD", 3, 1, "standard", "v0.1")).SetRun(StatFixture.NextRun(), RunFlag.Won);
         Assert.Equal(5, StatsAggregator.GetHighestWonAscension(db, "CHARACTER.IRONCLAD"));
     }
 
@@ -105,8 +105,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, RelicStat>
         {
-            ["CHARACTER.IRONCLAD|0|1|standard|v0.1"] = new RelicStat { RunsPresent = 3, RunsWon = 2 },
-            ["CHARACTER.IRONCLAD|5|1|standard|v0.1"] = new RelicStat { RunsPresent = 2, RunsWon = 1 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.1"] = StatFixture.Relic(present: 3, won: 2),
+            ["CHARACTER.IRONCLAD|5|1|standard|v0.1"] = StatFixture.Relic(present: 2, won: 1),
         };
         var result = StatsAggregator.AggregateRelicsByAct(contextMap, character: null, gameMode: "standard");
         Assert.Single(result);
@@ -119,8 +119,8 @@ public class StatsAggregatorTests
     {
         var contextMap = new Dictionary<string, RelicStat>
         {
-            ["CHARACTER.IRONCLAD|0|1|standard|v0.1"] = new RelicStat { RunsPresent = 4 },
-            ["CHARACTER.SILENT|0|1|standard|v0.1"]   = new RelicStat { RunsPresent = 2 },
+            ["CHARACTER.IRONCLAD|0|1|standard|v0.1"] = StatFixture.Relic(present: 4),
+            ["CHARACTER.SILENT|0|1|standard|v0.1"]   = StatFixture.Relic(present: 2),
         };
         var result = StatsAggregator.AggregateRelicsByAct(contextMap, character: "CHARACTER.IRONCLAD", gameMode: "standard");
         Assert.Single(result);

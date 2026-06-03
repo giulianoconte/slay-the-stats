@@ -466,10 +466,9 @@ public static class StatsAggregator
                 result[ctx.Act] = agg;
             }
 
-            agg.RunsPresent    += stat.RunsPresent;
-            agg.RunsWon        += stat.RunsWon;
-            agg.RunsShopSeen   += stat.RunsShopSeen;
-            agg.RunsShopBought += stat.RunsShopBought;
+            // Union run flags — a relic acquired across multiple acts of one run
+            // is counted once in the per-act union and in the Total. See #6.
+            agg.MergeFrom(stat);
         }
 
         return result;
