@@ -29,6 +29,9 @@ public static partial class CompendiumFilterPatch
 
     // Track active pane instances so they can be hidden from external patches.
     private static readonly List<PanelContainer> _activePanes = new();
+    // Last filter state emitted by NotifyChanged's diagnostics log, to dedupe
+    // repeat/cross-clamp NotifyChanged calls down to one line per real change.
+    private static string? _lastLoggedFilterState;
     // Active sidebar/floating sort buttons we cloned, so action-button clicks
     // (Clear / Reset / Save Defaults) can refresh their "(not default)" suffix
     // immediately rather than waiting for pane VisibilityChanged.
@@ -1355,6 +1358,18 @@ public static partial class CompendiumFilterPatch
             RefreshAllSortButtonStates();
             refreshSaveDefaultsHighlight?.Invoke();
             onFilterChanged?.Invoke();
+
+            // Log the resulting filter state for support diagnostics, mirroring the
+            // boot-line format so both grep together. Deduped against the last logged
+            // state so cross-clamp double-fires (and any no-op NotifyChanged) don't
+            // spam — every control here is a discrete stepper/dropdown, so each real
+            // user action produces exactly one line.
+            var state = SlayTheStatsConfig.DescribeLiveFilters();
+            if (state != _lastLoggedFilterState)
+            {
+                _lastLoggedFilterState = state;
+                MainFile.Logger.Info($"Filter changed: {state}");
+            }
         }
 
         var pane = new FilterPanelContainer();

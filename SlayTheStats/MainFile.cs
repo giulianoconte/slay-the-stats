@@ -84,11 +84,7 @@ public partial class MainFile : Node
             catch (Exception e) { Logger.Warn($"LastSeenModVersion save failed: {e.Message}"); }
         }
         Logger.Info($"Boot: reverted live filters to saved defaults " +
-            $"(asc {SlayTheStatsConfig.AscensionMin}..{SlayTheStatsConfig.AscensionMax}, " +
-            $"ver {SlayTheStatsConfig.VersionMin}..{SlayTheStatsConfig.VersionMax}, " +
-            $"class '{SlayTheStatsConfig.ClassFilter}', profile '{SlayTheStatsConfig.FilterProfile}', " +
-            $"groupUpgrades {SlayTheStatsConfig.GroupCardUpgrades}, " +
-            $"includeMultiplayer {SlayTheStatsConfig.IncludeMultiplayer})");
+            $"({SlayTheStatsConfig.DescribeLiveFilters()})");
         Logger.Info($"Boot: encounter_stats_mode={SlayTheStatsConfig.EncounterStatsRestartRequired} " +
             $"(BestiaryEnabled={SlayTheStatsConfig.BestiaryEnabled}, InCombatTooltipEnabled={SlayTheStatsConfig.InCombatTooltipEnabled})");
 

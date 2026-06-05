@@ -211,6 +211,18 @@ internal class SlayTheStatsConfig : SimpleModConfig
     [ConfigHideInUI] public static bool DefaultGroupCardUpgrades { get; set; } = true;
     [ConfigHideInUI] public static bool DefaultIncludeMultiplayer { get; set; } = false;
 
+    /// <summary>
+    /// One-line description of the live filter state, matching the parenthetical
+    /// content of the boot log line so filter-change logs grep alongside it.
+    /// Shared by the boot line, the live filter-change log, and Save Defaults.
+    /// </summary>
+    internal static string DescribeLiveFilters() =>
+        $"asc {AscensionMin}..{AscensionMax}, " +
+        $"ver {VersionMin}..{VersionMax}, " +
+        $"class '{ClassFilter}', profile '{FilterProfile}', " +
+        $"groupUpgrades {GroupCardUpgrades}, " +
+        $"includeMultiplayer {IncludeMultiplayer}";
+
     internal static void SaveDefaults()
     {
         DefaultAscensionMin = AscensionMin;
@@ -221,6 +233,7 @@ internal class SlayTheStatsConfig : SimpleModConfig
         DefaultFilterProfile = FilterProfile;
         DefaultGroupCardUpgrades = GroupCardUpgrades;
         DefaultIncludeMultiplayer = IncludeMultiplayer;
+        MainFile.Logger.Info($"Save Defaults: saved live filters as defaults ({DescribeLiveFilters()})");
     }
 
     internal static void RestoreDefaults()
