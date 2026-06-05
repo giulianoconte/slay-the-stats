@@ -103,6 +103,7 @@ internal static class SparklinePoc
     private static readonly Color CurrentValueCaretColor = new Color(0.96f, 0.81f, 0.32f, 0.95f);
     private const int CurrentValueCaretHalfWidthPx       = 4;
     private const int CurrentValueCaretHeightPx          = 6;
+    private const int CurrentValueCaretGapPx             = 3; // gap between curve baseline and caret apex (2×-oversampled px)
 
     /// <summary>Which percentile marker treatment to draw. POC-only enum
     /// so we can stamp out three variants side-by-side in the debug
@@ -405,8 +406,14 @@ internal static class SparklinePoc
                 // Fit the tallest peak to ~85% of panel height so the
                 // curve breathes against the top edge and the dots on
                 // the peak have clearance.
-                double yScale = maxDensity > 0 ? 0.85 * (h - 1) / maxDensity : 0;
-                double BaselineY = h - 1;
+                // Reserve a strip at the bottom for the current-value caret so it
+                // sits clear below the curve and IQR shade instead of overlapping
+                // them. Zero when there's no caret, so other callers (the bestiary)
+                // render exactly as before.
+                int caretZone = markerValue.HasValue
+                    ? CurrentValueCaretHeightPx + CurrentValueCaretGapPx : 0;
+                double BaselineY = h - 1 - caretZone;
+                double yScale = maxDensity > 0 ? 0.85 * BaselineY / maxDensity : 0;
                 double YOfDensity(double d) => BaselineY - d * yScale;
 
                 // Pre-curve markers for the shaded-IQR variant: IQR
@@ -418,8 +425,8 @@ internal static class SparklinePoc
                     int iqrRight = System.Math.Clamp((int)System.Math.Round(PxAtDataX(q3)), 0, w - 1);
                     for (int px = iqrLeft; px <= iqrRight; px++)
                     {
-                        int yTop = System.Math.Clamp((int)System.Math.Round(YOfDensity(densities[px])), 0, h - 1);
-                        int yBot = h - 1;
+                        int yTop = System.Math.Clamp((int)System.Math.Round(YOfDensity(densities[px])), 0, (int)BaselineY);
+                        int yBot = (int)BaselineY;
                         for (int py = yTop; py <= yBot; py++)
                             BlendOver(image, px, py, IqrFillColor);
                     }
@@ -433,8 +440,8 @@ internal static class SparklinePoc
                     // zero density at median).
                     double mxPre    = PxAtDataX(q2);
                     double myTopPre = YOfDensity(Density(q2)) + MedianRuleGapPx;
-                    if (myTopPre < h - 1)
-                        DrawAaVerticalLine(image, mxPre, myTopPre, h - 1, MedianRuleWidth, MedianRuleColor);
+                    if (myTopPre < BaselineY)
+                        DrawAaVerticalLine(image, mxPre, myTopPre, BaselineY, MedianRuleWidth, MedianRuleColor);
                 }
 
                 // Polyline through per-pixel density samples. Drawn flat in
@@ -486,7 +493,7 @@ internal static class SparklinePoc
                             double px = PxOfValue(vx);
                             double yTop = PyOnCurve(vx);
                             float width = isMedian ? MedianStemWidth : StemWidth;
-                            DrawAaVerticalLine(image, px, yTop, h - 1, width, StemColor);
+                            DrawAaVerticalLine(image, px, yTop, BaselineY, width, StemColor);
                         }
                         StemAt(q1, isMedian: false);
                         StemAt(q3, isMedian: false);
