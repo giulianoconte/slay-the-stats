@@ -82,25 +82,19 @@ internal class SlayTheStatsConfig : SimpleModConfig
 
     /// <summary>
     /// How the bestiary's monster preview area is rendered.
-    /// Live: live Spine SubViewport with idle animation (highest GPU cost).
-    /// Static: first hover captures a static sprite into an ImageTexture, then
-    /// the SubViewport is freed — dramatic GPU cost drop, no idle animation.
+    /// Live: live Spine SubViewport with idle animation (higher GPU cost).
     /// None: no preview rendering at all (lowest GPU cost, for players who
     /// only care about the stats table).
     /// </summary>
     public enum BestiaryPreviewModeEnum
     {
         Live,
-        Static,
         None,
     }
 
     public static BestiaryPreviewModeEnum BestiaryPreviewMode { get; set; } = BestiaryPreviewModeEnum.Live;
 
-    /// <summary>Shorthand: true iff the preview area should render static sprites (not live, not off).</summary>
-    public static bool BestiaryPreviewStatic => BestiaryPreviewMode == BestiaryPreviewModeEnum.Static;
-
-    /// <summary>Shorthand: true iff the preview area renders at all (Live or Static).</summary>
+    /// <summary>Shorthand: true iff the preview area renders at all (i.e. Live, not None).</summary>
     public static bool BestiaryPreviewEnabled => BestiaryPreviewMode != BestiaryPreviewModeEnum.None;
 
     /// <summary>

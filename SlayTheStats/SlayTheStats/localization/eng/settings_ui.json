@@ -23,9 +23,8 @@
     "SLAYTHESTATS-ENCOUNTER_STATS_RESTART_REQUIRED.Disabled":            "Disabled",
 
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.title": "Bestiary Preview Mode",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live: animated monster preview in the bestiary page (highest GPU cost). Static: first-hover capture; no idle animation. None: no preview rendering at all.",
+    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live: animated monster preview in the bestiary page (higher GPU cost). None: no preview rendering at all.",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Live":   "Live (animated)",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Static": "Static (captured)",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.None":   "None",
 
     "SLAYTHESTATS-DATA_DIRECTORY.title": "Data Directory",

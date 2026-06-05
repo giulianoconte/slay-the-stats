@@ -319,14 +319,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <summary>Quick lookup from encounter id to the node inside
     /// <see cref="_lruOrder"/> so moves to head are O(1).</summary>
     private readonly Dictionary<string, LinkedListNode<string>> _lruNodes = new();
-    /// <summary>Static-sprite cache used when
-    /// <see cref="SlayTheStatsConfig.BestiaryPreviewMode"/> = Static. First
-    /// hover of each encounter still builds a SubViewport and captures its
-    /// texture into an ImageTexture a few frames later; subsequent hovers
-    /// display the captured texture directly, no viewport involved. Keyed by
-    /// encounter id, session-lifetime (cleared when the submenu rebuilds).
-    /// </summary>
-    private readonly Dictionary<string, ImageTexture> _staticSpriteCache = new();
     /// <summary>Debounce timer used to suppress render work during rapid hover
     /// scrolling. Restarted on every new hover; only fires its Timeout after
     /// the mouse has settled for <see cref="HoverDebounceSeconds"/>.</summary>
@@ -1125,9 +1117,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         CompendiumFilterPatch.AddSeparator(vbox);
 
         // ── Preview on/off checkbox (cloned game-native tickbox style) ──
-        // Note: the BestiaryPreviewMode enum still has a Static value for a
-        // possible post-v1.0.0 feature, but the UI here is binary (Live / None)
-        // for v0.3.0 to keep the surface simple.
+        // The preview mode is binary: Live or None.
         var previewCheckbox = CompendiumFilterPatch.BuildStyledCheckbox(
             L.T("bestiary.settings.show_preview"),
             SlayTheStatsConfig.BestiaryPreviewEnabled,
@@ -3580,12 +3570,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// </summary>
     private void ScheduleMonsterPreviewRender(string encounterId)
     {
-        // Cache hit (either mode): instant render, skip debounce.
-        bool staticHit = SlayTheStatsConfig.BestiaryPreviewStatic &&
-                         _staticSpriteCache.ContainsKey(encounterId);
-        bool liveHit   = !SlayTheStatsConfig.BestiaryPreviewStatic &&
-                         _liveViewports.ContainsKey(encounterId);
-        if (staticHit || liveHit)
+        // Cache hit: instant render, skip debounce.
+        bool liveHit = _liveViewports.ContainsKey(encounterId);
+        if (liveHit)
         {
             CancelPendingRender();
             RenderMonsterPreview(encounterId);
@@ -4267,19 +4254,8 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             return;
         }
 
-        // GPU-friendly mode: static-sprite cache hit. Display the baked
-        // ImageTexture directly, no SubViewport involved.
-        if (SlayTheStatsConfig.BestiaryPreviewStatic &&
-            _staticSpriteCache.TryGetValue(encounterId, out var bakedTex) &&
-            bakedTex != null)
-        {
-            AttachStaticTextureRect(bakedTex);
-            return;
-        }
-
-        // Live-animation mode: cache hit reuses the live SubViewport.
-        if (!SlayTheStatsConfig.BestiaryPreviewStatic &&
-            _liveViewports.TryGetValue(encounterId, out var cachedViewport) &&
+        // Cache hit reuses the live SubViewport.
+        if (_liveViewports.TryGetValue(encounterId, out var cachedViewport) &&
             GodotObject.IsInstanceValid(cachedViewport))
         {
             TouchLru(encounterId);
@@ -4542,25 +4518,11 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             cursor += sb.Size.X + MonsterPreviewGap;
         }
 
-        if (SlayTheStatsConfig.BestiaryPreviewStatic)
-        {
-            // GPU-friendly path: show the live viewport temporarily, then a
-            // few frames later capture its texture into an ImageTexture,
-            // swap the displayed rect to the static capture, and free the
-            // SubViewport. Subsequent hovers hit the static cache.
-            ActivateViewport(viewport);
-            AttachViewportTextureRect(viewport);
-            _ = CaptureStaticSpriteAsync(viewport, encounterId);
-        }
-        else
-        {
-            // Live-animation path: hand the viewport to the LRU cache
-            // (evicts the oldest entry if at capacity), mark it active, and
-            // display its live texture.
-            AddToLruCache(encounterId, viewport);
-            ActivateViewport(viewport);
-            AttachViewportTextureRect(viewport);
-        }
+        // Hand the viewport to the LRU cache (evicts the oldest entry if at
+        // capacity), mark it active, and display its live texture.
+        AddToLruCache(encounterId, viewport);
+        ActivateViewport(viewport);
+        AttachViewportTextureRect(viewport);
     }
 
     /// <summary>
@@ -4676,18 +4638,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         float posY = feetY      - (scaledBounds.Position.Y + scaledBounds.Size.Y);
         crabHolder.Position = new Vector2(posX, posY);
 
-        if (SlayTheStatsConfig.BestiaryPreviewStatic)
-        {
-            ActivateViewport(viewport);
-            AttachViewportTextureRect(viewport);
-            _ = CaptureStaticSpriteAsync(viewport, encounterId);
-        }
-        else
-        {
-            AddToLruCache(encounterId, viewport);
-            ActivateViewport(viewport);
-            AttachViewportTextureRect(viewport);
-        }
+        AddToLruCache(encounterId, viewport);
+        ActivateViewport(viewport);
+        AttachViewportTextureRect(viewport);
     }
 
     /// <summary>Measure the Kaiser Crab body's local bounds (in the crab Node2D's
@@ -4721,90 +4674,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         }
         // Fallback: the crab is wide and short; a generous centred box.
         return new Rect2(-500f, -400f, 1000f, 500f);
-    }
-
-    /// <summary>
-    /// GPU-friendly mode helper: wait a few process frames for Spine to
-    /// initialize and the SubViewport to draw at least once, then capture
-    /// its texture into an <see cref="ImageTexture"/>, store it in
-    /// <see cref="_staticSpriteCache"/> under the encounter id, swap the
-    /// displayed TextureRect to the static capture, and free the viewport.
-    /// Bails out (freeing the viewport anyway) if the user has already
-    /// moved to a different encounter by the time the capture is ready.
-    /// </summary>
-    private async Task CaptureStaticSpriteAsync(SubViewport viewport, string encounterId)
-    {
-        try
-        {
-            // Wait 4 process frames — same number NSettingsScreen uses
-            // before its viewport-texture capture. Three is the documented
-            // minimum for Spine initialization; four gives a safety margin.
-            for (int i = 0; i < 4; i++)
-            {
-                await ((GodotObject)this).ToSignal(((Node)this).GetTree(), SceneTree.SignalName.ProcessFrame);
-            }
-            if (!GodotObject.IsInstanceValid(viewport))
-                return;
-
-            var vpTex = viewport.GetTexture();
-            var image = vpTex?.GetImage();
-            if (image == null || image.IsEmpty())
-            {
-                if (GodotObject.IsInstanceValid(viewport))
-                    ((Node)viewport).QueueFree();
-                if (_previewViewport == viewport) _previewViewport = null;
-                return;
-            }
-            var baked = ImageTexture.CreateFromImage(image);
-            _staticSpriteCache[encounterId] = baked;
-
-            // If the user is still hovering this encounter, swap the
-            // TextureRect to the static capture so the visible preview
-            // stops animating. Otherwise the user has moved on and
-            // ClearMonsterPreview has already removed our TextureRect.
-            bool stillHovered = _hoveredEncounterId == encounterId;
-            if (stillHovered && _renderArea != null)
-            {
-                var oldRect = ((Node)_renderArea).GetNodeOrNull("MonsterPreviewTex");
-                if (oldRect != null)
-                {
-                    ((Node)_renderArea).RemoveChild(oldRect);
-                    ((Node)oldRect).QueueFree();
-                }
-                AttachStaticTextureRect(baked);
-            }
-
-            // Free the viewport regardless — static mode never keeps live
-            // viewports around.
-            if (GodotObject.IsInstanceValid(viewport))
-                ((Node)viewport).QueueFree();
-            if (_previewViewport == viewport) _previewViewport = null;
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] CaptureStaticSpriteAsync failed for {encounterId}: {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Add a <see cref="TextureRect"/> to the render area displaying a baked
-    /// static ImageTexture. GPU-friendly mode's equivalent of
-    /// <see cref="AttachViewportTextureRect"/>.
-    /// </summary>
-    private void AttachStaticTextureRect(Texture2D baked)
-    {
-        if (_renderArea == null) return;
-        var rect = new TextureRect
-        {
-            Name = "MonsterPreviewTex",
-            Texture = baked,
-            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            MouseFilter = MouseFilterEnum.Ignore,
-            SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            SizeFlagsVertical = SizeFlags.ExpandFill,
-        };
-        ((Node)_renderArea).AddChild(rect);
     }
 
     // ─────────────────────────── LRU viewport cache ───────────────────────────

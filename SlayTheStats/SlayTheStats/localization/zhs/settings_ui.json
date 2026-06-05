@@ -23,9 +23,8 @@
     "SLAYTHESTATS-ENCOUNTER_STATS_RESTART_REQUIRED.Disabled":            "禁用",
 
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.title": "图鉴预览模式",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live:图鉴页面中显示动画怪物预览(GPU 占用最高)。Static:首次悬停时截图;无空闲动画。None:完全不渲染预览。",
+    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live:图鉴页面中显示动画怪物预览(GPU 占用较高)。None:完全不渲染预览。",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Live":   "动画",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Static": "静态",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.None":   "无",
 
     "SLAYTHESTATS-DATA_DIRECTORY.title": "数据目录",

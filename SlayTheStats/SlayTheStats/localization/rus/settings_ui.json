@@ -23,9 +23,8 @@
     "SLAYTHESTATS-ENCOUNTER_STATS_RESTART_REQUIRED.Disabled":            "Отключено",
 
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.title": "Режим превью Бестиария",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live: анимированное превью монстра на странице Бестиария (максимальная нагрузка на GPU). Static: снимок при первом наведении, без фоновой анимации. None: превью не отображается.",
+    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live: анимированное превью монстра на странице Бестиария (выше нагрузка на GPU). None: превью не отображается.",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Live":   "Анимация",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Static": "Снимок",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.None":   "Нет",
 
     "SLAYTHESTATS-DATA_DIRECTORY.title": "Каталог данных",
