@@ -5004,6 +5004,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     private static readonly System.Reflection.PropertyInfo? _combatStateProp;
     private static readonly System.Reflection.MethodInfo? _setupForBestiaryMethod;
 
+    // MegaSkeletonDataResource exposes animation lookup differently across game
+    // branches: main has `MegaAnimation? FindAnimation(string)`, beta replaced it
+    // with `bool HasAnimation(string)`. A single deployed DLL must run on both, so
+    // we resolve whichever exists by reflection (see SkeletonHasAnimation).
+    private static readonly System.Reflection.MethodInfo? _hasAnimationMethod;
+    private static readonly System.Reflection.MethodInfo? _findAnimationMethod;
+
     static NBestiaryStatsSubmenu()
     {
         try
@@ -5013,6 +5020,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _combatStateProp = typeof(Creature).GetProperty("CombatState");
             _setupForBestiaryMethod = typeof(NCreature).GetMethod(
                 "SetupForBestiary", Type.EmptyTypes);
+            _hasAnimationMethod = typeof(MegaSkeletonDataResource).GetMethod(
+                "HasAnimation", new[] { typeof(string) });
+            _findAnimationMethod = typeof(MegaSkeletonDataResource).GetMethod(
+                "FindAnimation", new[] { typeof(string) });
             BestiaryRecipeAvailable =
                 _nullCombatStateType != null &&
                 _combatStateProp?.CanWrite == true &&
@@ -5222,7 +5233,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             {
                 var data = visuals.SpineBody?.GetSkeleton()?.GetData();
                 if (data == null) return;
-                if (data.FindAnimation(name) == null) continue;
+                if (!SkeletonHasAnimation(data, name)) continue;
                 visuals.SpineAnimation.SetAnimation(name);
                 return;
             }
@@ -5232,6 +5243,21 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
         }
         // No idle animation found — leave the skeleton in its default pose.
+    }
+
+    /// <summary>
+    /// Branch-agnostic "does this skeleton have an animation named <paramref name="name"/>?".
+    /// main exposes <c>MegaAnimation? FindAnimation(string)</c>; beta replaced it with
+    /// <c>bool HasAnimation(string)</c>. We resolve whichever the loaded game provides
+    /// (cached in the static ctor) so one deployed DLL works on both.
+    /// </summary>
+    private static bool SkeletonHasAnimation(MegaSkeletonDataResource data, string name)
+    {
+        if (_hasAnimationMethod != null)
+            return (bool)(_hasAnimationMethod.Invoke(data, new object[] { name }) ?? false);
+        if (_findAnimationMethod != null)
+            return _findAnimationMethod.Invoke(data, new object[] { name }) != null;
+        return false;
     }
 
     /// <summary>

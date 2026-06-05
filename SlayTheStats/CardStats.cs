@@ -245,7 +245,12 @@ public class StatsDb
                 // that data stored under older classifications (e.g. OVERGROWTH_CRAWLERS as
                 // "unknown") picks up new overrides without requiring a full reparse.
                 foreach (var (encId, meta) in db.EncounterMeta)
+                {
                     meta.Category = EncounterCategory.Derive(encId);
+                    // Retroactively strip player-side pets/companions (e.g. Osty) from rosters
+                    // stored before they were filtered, so old data is cleaned without a reparse.
+                    meta.MonsterIds?.RemoveAll(global::SlayTheStats.EncounterMeta.IsCompanionMonster);
+                }
 
                 return db;
             }

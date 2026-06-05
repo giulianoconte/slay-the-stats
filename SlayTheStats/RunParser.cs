@@ -564,7 +564,10 @@ public static class RunParser
                                 foreach (var mid in monsterIdsNode)
                                 {
                                     var mId = mid?.GetValue<string>();
-                                    if (mId != null) monsterIds.Add(mId);
+                                    // Skip player-side pets/companions (e.g. Osty): the save lists
+                                    // every combatant in monster_ids, so a summoned pet would
+                                    // otherwise be recorded as a member of every encounter fought.
+                                    if (mId != null && !EncounterMeta.IsCompanionMonster(mId)) monsterIds.Add(mId);
                                 }
                             }
 

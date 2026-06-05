@@ -117,6 +117,23 @@ public class EncounterMeta
     [JsonPropertyName("category")]    public string Category         { get; set; } = "unknown";
     [JsonPropertyName("biome")]       public string Biome            { get; set; } = "";
     [JsonPropertyName("act")]         public int Act                 { get; set; }
+
+    /// <summary>
+    /// Monster ids that are player-side companions/pets, not enemies belonging to
+    /// an encounter. The run history's per-room <c>monster_ids</c> is a flat list of
+    /// every combatant, with no side/team/pet field, so a summoned pet (e.g. the
+    /// Necrobinder's Osty) shows up in <em>every</em> encounter the player fought.
+    /// The vanilla bestiary excludes these structurally — they appear in no
+    /// EncounterModel's AllPossibleMonsters — but since we derive rosters from run
+    /// data we have to filter them out explicitly. Keyed case-insensitively; extend
+    /// if future characters gain persistent pets.
+    /// </summary>
+    public static readonly HashSet<string> CompanionMonsterIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "MONSTER.OSTY",
+    };
+
+    public static bool IsCompanionMonster(string id) => CompanionMonsterIds.Contains(id);
 }
 
 public static class EncounterCategory
