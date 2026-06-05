@@ -97,6 +97,13 @@ internal static class SparklinePoc
     private const int MedianCaretHalfWidthPx          = 4;
     private const int MedianCaretHeightPx             = 5;
 
+    // "You are here" caret — marks an external value (e.g. the current fight)
+    // on the curve's x-axis. Gold and a touch larger than the percentile carets
+    // so it reads as a distinct annotation rather than another quartile marker.
+    private static readonly Color CurrentValueCaretColor = new Color(0.96f, 0.81f, 0.32f, 0.95f);
+    private const int CurrentValueCaretHalfWidthPx       = 4;
+    private const int CurrentValueCaretHeightPx          = 6;
+
     /// <summary>Which percentile marker treatment to draw. POC-only enum
     /// so we can stamp out three variants side-by-side in the debug
     /// panel and eyeball the least-cluttered option.</summary>
@@ -222,9 +229,10 @@ internal static class SparklinePoc
         IReadOnlyList<double> values,
         Vector2I size,
         MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule,
-        XRange? explicitRange = null)
+        XRange? explicitRange = null,
+        double? markerValue = null)
     {
-        return ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle, explicitRange));
+        return ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle, explicitRange, markerValue));
     }
 
     internal static TextureRect BuildTextureSparkline(
@@ -288,7 +296,8 @@ internal static class SparklinePoc
         IReadOnlyList<double> values,
         Vector2I size,
         MarkerStyle markerStyle,
-        XRange? explicitRange = null)
+        XRange? explicitRange = null,
+        double? markerValue = null)
     {
         int w = System.Math.Max(size.X, 1);
         int h = System.Math.Max(size.Y, 1);
@@ -499,6 +508,17 @@ internal static class SparklinePoc
                         CaretAt(q2, isMedian: true);
                         break;
                     }
+                }
+
+                // "You are here" caret: mark an external value (the current
+                // fight) on the curve's x-axis, clamped into the rendered range
+                // so an extreme outlier still shows pinned at the edge. Drawn
+                // last so it sits over the IQR/median markers.
+                if (markerValue.HasValue)
+                {
+                    double cv = System.Math.Clamp(markerValue.Value, xLo, xHi);
+                    DrawBaselineCaret(image, PxAtDataX(cv),
+                        CurrentValueCaretHalfWidthPx, CurrentValueCaretHeightPx, CurrentValueCaretColor);
                 }
             }
         }

@@ -229,9 +229,10 @@ public static class PostFightTooltipPatch
         // encounter at the same percentile read differently at a glance. Built
         // from the same pooled values the percentile ranks use; each auto-fits
         // its own x-range (damage and turns are different units, so no shared
-        // range). Null when there aren't enough fights to form a distribution.
-        var dmgSpark  = BuildMetricSparkline(combined.DamageValues);
-        var turnSpark = BuildMetricSparkline(combined.TurnsValues);
+        // range), with a "you are here" caret at this fight's value. Null when
+        // there aren't enough fights to form a distribution.
+        var dmgSpark  = BuildMetricSparkline(combined.DamageValues, fight.DamageTaken);
+        var turnSpark = BuildMetricSparkline(combined.TurnsValues, fight.TurnsTaken);
 
         var sb = new StringBuilder();
         sb.Append("[table=5]");
@@ -326,14 +327,17 @@ public static class PostFightTooltipPatch
 
     /// <summary>Build a density sparkline texture for a metric's per-fight
     /// values, or null when there aren't enough fights to be meaningful. Each
-    /// metric auto-fits its own x-range (no shared range — units differ).</summary>
-    private static ImageTexture? BuildMetricSparkline(IReadOnlyList<int>? values)
+    /// metric auto-fits its own x-range (no shared range — units differ).
+    /// <paramref name="markerValue"/> is the current fight's value, drawn as a
+    /// "you are here" caret on the curve.</summary>
+    private static ImageTexture? BuildMetricSparkline(IReadOnlyList<int>? values, double markerValue)
     {
         if (values == null || values.Count < MinSparklinePoints) return null;
         var arr = new double[values.Count];
         for (int i = 0; i < values.Count; i++) arr[i] = values[i];
         return SparklinePoc.BuildSparklineTexture(
-            arr, PostFightSparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule);
+            arr, PostFightSparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule,
+            explicitRange: null, markerValue: markerValue);
     }
 
     /// <summary>Dist-column cell. Emits a SparklineMarker and records the texture
