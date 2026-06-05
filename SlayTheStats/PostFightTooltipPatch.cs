@@ -61,7 +61,7 @@ public static class PostFightTooltipPatch
             if (SlayTheStatsConfig.DebugMode)
                 MainFile.DebugLog($"PostFight: {fightData.EncounterId} dmg={fightData.DamageTaken} turns={fightData.TurnsTaken} pots={fightData.PotionsUsed}");
 
-            var statsText = BuildComparisonText(fightData);
+            var statsText = BuildComparisonText(fightData, out var sparklines);
             if (statsText == null)
             {
                 if (SlayTheStatsConfig.DebugMode)
@@ -69,7 +69,7 @@ public static class PostFightTooltipPatch
                 return;
             }
 
-            Show(__instance, fightData.EncounterName, statsText);
+            Show(__instance, fightData.EncounterName, statsText, sparklines);
         }
         catch (Exception e)
         {
@@ -192,8 +192,13 @@ public static class PostFightTooltipPatch
         return playerStats.Count > 0 ? playerStats[0] : null;
     }
 
-    private static string? BuildComparisonText(FightData fight)
+    private static string? BuildComparisonText(FightData fight, out List<ImageTexture?> sparklines)
     {
+        // One entry per SparklineMarker emitted below (Damage, then Turns), in
+        // document order; nulls render as an empty cell. See
+        // SparklinePoc.PopulateLabelWithSparklines.
+        sparklines = new List<ImageTexture?>();
+
         if (!MainFile.Db.Encounters.TryGetValue(fight.EncounterId, out var contextMap))
             return null;
 
@@ -218,32 +223,47 @@ public static class PostFightTooltipPatch
         double? turnPct = EncounterEvent.PercentileRank(combined.TurnsValues, fight.TurnsTaken);
         double? potPct  = EncounterEvent.PercentileRank(combined.PotionsValues, fight.PotionsUsed);
 
+        // Distribution sparklines for the two metrics whose spread matters most
+        // (damage and turns). Each shows the shape of the full per-fight history
+        // behind the single percentile number, so a low-spread and a high-spread
+        // encounter at the same percentile read differently at a glance. Built
+        // from the same pooled values the percentile ranks use; each auto-fits
+        // its own x-range (damage and turns are different units, so no shared
+        // range). Null when there aren't enough fights to form a distribution.
+        var dmgSpark  = BuildMetricSparkline(combined.DamageValues);
+        var turnSpark = BuildMetricSparkline(combined.TurnsValues);
+
         var sb = new StringBuilder();
-        sb.Append("[table=4]");
+        sb.Append("[table=5]");
 
         // Header
         sb.Append(LabelCell(""));
         sb.Append(HeaderCell(""));
         sb.Append(HeaderCell(L.T("postfight.col.vs_hist")));
         sb.Append(HeaderCell(L.T("postfight.col.pctile")));
+        sb.Append(HeaderCell(L.T("tooltip.col.dist")));
 
-        // Damage: raw | delta vs median | percentile
+        // Damage: raw | delta vs median | percentile | distribution
         sb.Append(LabelCell(L.T("postfight.row.damage")));
         sb.Append(ValueCell($"{fight.DamageTaken}"));
         sb.Append(DeltaCell(fight.DamageTaken - dmgBaseline, highIsBad: true, n));
         sb.Append(PercentileCell(dmgPct));
+        sb.Append(SparkCell(dmgSpark, sparklines));
 
-        // Turns: raw | delta vs avg | percentile
+        // Turns: raw | delta vs avg | percentile | distribution
         sb.Append(LabelCell(L.T("tooltip.col.turns")));
         sb.Append(ValueCell($"{fight.TurnsTaken}"));
         sb.Append(DeltaCell(fight.TurnsTaken - avgTurns, highIsBad: true, n));
         sb.Append(PercentileCell(turnPct));
+        sb.Append(SparkCell(turnSpark, sparklines));
 
-        // Potions: raw | delta vs avg | percentile
+        // Potions: raw | delta vs avg | percentile (no sparkline — usage is
+        // usually 0/1 per fight, so a distribution adds nothing).
         sb.Append(LabelCell(L.T("postfight.row.pots")));
         sb.Append(ValueCell($"{fight.PotionsUsed}"));
         sb.Append(DeltaCell(fight.PotionsUsed - avgPots, highIsBad: true, n));
         sb.Append(PercentileCell(potPct));
+        sb.Append(EmptyCell());
 
         // Fights: total fights fed into this comparison. No delta / pctile —
         // this is context, not a per-fight metric. Dulled + blank trailing
@@ -252,8 +272,13 @@ public static class PostFightTooltipPatch
         sb.Append(DimValueCell($"{combined.Fought}"));
         sb.Append(EmptyCell());
         sb.Append(EmptyCell());
+        sb.Append(EmptyCell());
 
         sb.Append("[/table]");
+
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.DebugLog($"PostFight: sparklines dmg={(dmgSpark != null ? "y" : "n")} " +
+                $"turns={(turnSpark != null ? "y" : "n")} (n={n})");
 
         // Footer
         var charLabel = character != null
@@ -290,6 +315,38 @@ public static class PostFightTooltipPatch
     private static string EmptyCell() =>
         $"[cell {CellPad}][/cell]";
 
+    // Sparkline render geometry. Texture is 2× the displayed footprint so the
+    // AA brush has room and Godot's linear filter downsamples cleanly to the
+    // cell size (matches the bestiary's dist column; see EncounterTooltipHelper).
+    private static readonly Vector2I PostFightSparklineSize = new Vector2I(100, 44);
+    private const int PostFightSparklineDisplayW = 50;
+    private const int PostFightSparklineDisplayH = 22;
+    // Below this many fights a "distribution" is just noise — render nothing.
+    private const int MinSparklinePoints = 4;
+
+    /// <summary>Build a density sparkline texture for a metric's per-fight
+    /// values, or null when there aren't enough fights to be meaningful. Each
+    /// metric auto-fits its own x-range (no shared range — units differ).</summary>
+    private static ImageTexture? BuildMetricSparkline(IReadOnlyList<int>? values)
+    {
+        if (values == null || values.Count < MinSparklinePoints) return null;
+        var arr = new double[values.Count];
+        for (int i = 0; i < values.Count; i++) arr[i] = values[i];
+        return SparklinePoc.BuildSparklineTexture(
+            arr, PostFightSparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule);
+    }
+
+    /// <summary>Dist-column cell. Emits a SparklineMarker and records the texture
+    /// (possibly null) into <paramref name="sink"/> so marker order matches the
+    /// list PopulateLabelWithSparklines consumes; an empty cell with no marker
+    /// when there's no texture to show.</summary>
+    private static string SparkCell(ImageTexture? tex, List<ImageTexture?> sink)
+    {
+        if (tex == null) return EmptyCell();
+        sink.Add(tex);
+        return $"[cell {CellPad}][right]{SparklinePoc.SparklineMarker}[/right][/cell]";
+    }
+
     private static string PercentileCell(double? pctile)
     {
         if (pctile == null)
@@ -319,7 +376,8 @@ public static class PostFightTooltipPatch
         return $"[cell {CellPad}][right][color={color}]{formatted}[/color][/right][/cell]";
     }
 
-    private static void Show(NRewardsScreen rewardsScreen, string encounterName, string statsText)
+    private static void Show(NRewardsScreen rewardsScreen, string encounterName, string statsText,
+        List<ImageTexture?> sparklines)
     {
         Dismiss();
 
@@ -359,7 +417,11 @@ public static class PostFightTooltipPatch
         }
 
         _nameLabel!.Text = $"[b]{encounterName}[/b]";
-        _tableLabel!.Text = statsText;
+        // statsText carries SparklineMarker tokens in the dist column; interleave
+        // the sparkline textures via AddImage rather than a plain .Text assign.
+        SparklinePoc.PopulateLabelWithSparklines(
+            _tableLabel!, statsText, sparklines,
+            PostFightSparklineDisplayW, PostFightSparklineDisplayH);
         _nameLabel.ResetSize();
         _tableLabel.ResetSize();
         _panel.ResetSize();
@@ -524,6 +586,9 @@ public static class PostFightTooltipPatch
         _tableLabel = new RichTextLabel();
         _tableLabel.Name = "PostFightStatsLabel";
         _tableLabel.BbcodeEnabled = true;
+        // Linear filter so the 2×-oversampled sparkline textures downsample to
+        // their display size without aliasing (same as the bestiary host label).
+        _tableLabel.TextureFilter = CanvasItem.TextureFilterEnum.Linear;
         _tableLabel.FitContent = true;
         _tableLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _tableLabel.CustomMinimumSize = new Vector2(258, 0);
