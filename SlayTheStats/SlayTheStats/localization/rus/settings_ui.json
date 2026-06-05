@@ -24,7 +24,7 @@
 
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.title": "Режим превью Бестиария",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.hover.desc": "Live: анимированное превью монстра на странице Бестиария (выше нагрузка на GPU). None: превью не отображается.",
-    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Live":   "Анимация",
+    "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.Live":   "Live",
     "SLAYTHESTATS-BESTIARY_PREVIEW_MODE.None":   "Нет",
 
     "SLAYTHESTATS-DATA_DIRECTORY.title": "Каталог данных",
@@ -61,7 +61,7 @@
     "tooltip.no_encounter_data":   "Нет данных о столкновениях",
     "tooltip.baseline.pick":       "(базовое)    Выбор% {pick}    Побед% {win}",
     "tooltip.baseline.buys":       "(базовое)    Покупки {buys}    Побед% {win}",
-    "tooltip.baseline.encounter_nodata":  "Урон {category}: {dmg} (базовое)",
+    "tooltip.baseline.encounter_nodata":  "(базовое) Урон {category}: {dmg}",
 
     "filter.all_characters":       "Все персонажи",
     "filter.sentinel.lowest":      "Минимум",
