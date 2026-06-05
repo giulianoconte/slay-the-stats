@@ -438,7 +438,13 @@ public static class CardHoverShowPatch
         if (includeCharacter)
         {
             var effectiveChar = GetEffectiveCharacter(filter);
-            parts.Add(effectiveChar != null ? GetCharacterDisplay(effectiveChar) : characterLabel);
+            // For the all-characters aggregate, prefix the Prismatic Gem so footers
+            // carry the same "All view" cue the bestiary uses, instead of reading
+            // like a single-character footer. AllCharsIcon returns a trailing space
+            // (and "" if the icon can't resolve, degrading to plain text).
+            parts.Add(effectiveChar != null
+                ? GetCharacterDisplay(effectiveChar)
+                : EncounterTooltipHelper.AllCharsIcon(18) + characterLabel);
         }
 
         // Version — may be omitted entirely (both sentinels unbounded).
