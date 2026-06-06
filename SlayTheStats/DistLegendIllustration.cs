@@ -126,9 +126,10 @@ public partial class DistLegendIllustration : Control
         DrawString(font, new Vector2(xLabelX, xLabelBaselineY),
             xLabel, HorizontalAlignment.Left, -1, LabelFontSize, LabelColor);
 
-        // Median arrow: tip at curve bottom (pointing UP into the median
-        // rule), base just above the "Median Dmg" caption.
-        float arrowTipY = curveBotY + 2f;
+        // Median arrow: tip just below the curve bottom (pointing UP toward the
+        // median rule), base just above the "Median Dmg" caption. The tip sits a
+        // few px below the curve so the arrowhead doesn't crowd the dist graph.
+        float arrowTipY = curveBotY + 5f;
         float medLabelTopY = xLabelBaselineY + descent + 6f;
         float arrowBaseY = medLabelTopY - 2f;
         DrawArrowUp(new Vector2(medX, arrowBaseY), new Vector2(medX, arrowTipY));
