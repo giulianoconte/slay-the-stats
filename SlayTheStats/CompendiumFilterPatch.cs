@@ -1833,6 +1833,10 @@ public static partial class CompendiumFilterPatch
         };
         refreshSaveDefaultsHighlight();
 
+        // ── Column legend: a static "what the columns mean" section at the
+        //    bottom of the pane (shows whenever the pane is open). ──
+        AddColumnLegend(vbox);
+
         // ── Sync callback: refresh all controls from config when pane opens ──
         _syncCallbacks.Add(() =>
         {
@@ -1915,6 +1919,40 @@ public static partial class CompendiumFilterPatch
         control.AddThemeColorOverride("font_shadow_color", TextShadow);
         control.AddThemeConstantOverride("shadow_offset_x", 1);
         control.AddThemeConstantOverride("shadow_offset_y", 1);
+    }
+
+    /// <summary>Builds the static "what the columns mean" legend at the bottom of
+    /// the filter pane — a combined card+relic column guide (non-collapsible),
+    /// rendered as a BBCode RichTextLabel with bold gold column names that match
+    /// the tooltip table headers.</summary>
+    private static void AddColumnLegend(VBoxContainer vbox)
+    {
+        AddSeparator(vbox);
+
+        var title = new Label { Text = L.T("compendium.legend.columns.title") };
+        title.AddThemeColorOverride("font_color", Gold);
+        ApplyGameFont(title, 18);
+        vbox.AddChild(title);
+
+        var body = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            ScrollActive = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            CustomMinimumSize = new Vector2(300, 0),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        var font = TooltipHelper.GetKreonFont();
+        if (font != null) body.AddThemeFontOverride("normal_font", font);
+        var boldFont = TooltipHelper.GetKreonBoldFont();
+        if (boldFont != null) body.AddThemeFontOverride("bold_font", boldFont);
+        body.AddThemeFontSizeOverride("normal_font_size", 14);
+        body.AddThemeFontSizeOverride("bold_font_size", 14);
+        body.AddThemeColorOverride("default_color", Cream);
+        body.Text = L.T("compendium.legend.columns.body");
+        vbox.AddChild(body);
     }
 
     internal static Label MakeLabel(string text, float minWidth = 0)

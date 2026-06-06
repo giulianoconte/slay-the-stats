@@ -131,6 +131,8 @@
     "bestiary.legend.dismiss_hint":         "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
     "bestiary.help.tutorial_tooltip":   "Show the bestiary tutorial",
     "compendium.help.tutorial_tooltip": "Show the tutorial",
+    "compendium.legend.columns.title":  "What the columns mean",
+    "compendium.legend.columns.body":   "[b][color=#efc851]Act[/color][/b] — stats broken down by act; the bottom row totals all acts.\n[b][color=#efc851]Runs[/color][/b] — how many runs this card or relic appeared in (under the current filters).\n[b][color=#efc851]Pick%[/color][/b] — how often you picked it when it was offered as a reward.\n[b][color=#efc851]Buys[/color][/b] — how often you bought it when it was offered in the shop.\n[b][color=#efc851]Win%[/color][/b] — win rate of the runs that had it.\nThe [b][color=#efc851](baseline)[/color][/b] row is the average across all cards or relics, shown for comparison.",
     "bestiary.help.legend_tooltip":     "What do these columns mean?",
     "bestiary.help.rank_tooltip":       "What do Raw and Significance mean?",
     "bestiary.settings.title":          "Bestiary Settings",

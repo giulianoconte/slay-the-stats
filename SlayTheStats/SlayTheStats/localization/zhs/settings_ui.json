@@ -131,6 +131,8 @@
     "bestiary.legend.dismiss_hint":         "[color=#bfb7a6]点击任意位置关闭。[/color]",
     "bestiary.help.tutorial_tooltip":   "显示图鉴教程",
     "compendium.help.tutorial_tooltip": "显示教程",
+    "compendium.legend.columns.title":  "列的含义",
+    "compendium.legend.columns.body":   "[b][color=#efc851]幕[/color][/b] — 按幕拆分的统计;最后一行汇总所有幕。\n[b][color=#efc851]场次[/color][/b] — 此牌或遗物出现的场次数(受当前筛选影响)。\n[b][color=#efc851]选取率[/color][/b] — 作为奖励出现时你选取它的频率。\n[b][color=#efc851]购买[/color][/b] — 在商店出现时你购买它的频率。\n[b][color=#efc851]胜率[/color][/b] — 拥有它的场次的胜率。\n[b][color=#efc851](基准)[/color][/b] 行是所有牌或遗物的平均值,用于比较。",
     "bestiary.help.legend_tooltip":     "这些列是什么意思?",
     "bestiary.help.rank_tooltip":       "原始值和显著性是什么意思?",
     "bestiary.settings.title":          "图鉴设置",

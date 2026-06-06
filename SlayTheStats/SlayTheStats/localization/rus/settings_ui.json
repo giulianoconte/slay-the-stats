@@ -131,6 +131,8 @@
     "bestiary.legend.dismiss_hint":         "[color=#bfb7a6]Нажмите в любом месте, чтобы закрыть.[/color]",
     "bestiary.help.tutorial_tooltip":   "Показать обучение Бестиария",
     "compendium.help.tutorial_tooltip": "Показать обучение",
+    "compendium.legend.columns.title":  "Что означают столбцы",
+    "compendium.legend.columns.body":   "[b][color=#efc851]Акт[/color][/b] — статистика по актам; нижняя строка суммирует все акты.\n[b][color=#efc851]Забеги[/color][/b] — в скольких забегах встречалась эта карта или реликвия (с учётом фильтров).\n[b][color=#efc851]Выбор%[/color][/b] — как часто вы выбирали её, когда она предлагалась в награду.\n[b][color=#efc851]Покупки[/color][/b] — как часто вы покупали её, когда она появлялась в магазине.\n[b][color=#efc851]Побед%[/color][/b] — процент побед в забегах, где она была.\nСтрока [b][color=#efc851](базовое)[/color][/b] — среднее по всем картам или реликвиям, для сравнения.",
     "bestiary.help.legend_tooltip":     "Что означают эти столбцы?",
     "bestiary.help.rank_tooltip":       "Что означают «Сырой» и «Значимость»?",
     "bestiary.settings.title":          "Настройки Бестиария",
