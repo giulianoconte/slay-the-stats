@@ -190,9 +190,9 @@ public partial class DistLegendIllustration : Control
         // Body: kept thin so the head's triangle reads as the focal point
         // rather than the body matching its width.
         const float BodyWidth = 0.9f;
-        // Head: 6 px wide × 6 px tall — small but with a definite triangle
-        // shape, ~3× the body width.
-        const float HeadHalfWidth = 3f;
+        // Head: 7.5 px wide × 6 px tall — small but with a definite triangle
+        // shape. Half-width widened 1.25× for a slightly broader arrowhead.
+        const float HeadHalfWidth = 3.75f;
         const float HeadHeight = 6f;
 
         DrawLine(from, to, CalloutColor, BodyWidth, true);
