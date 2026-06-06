@@ -938,13 +938,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         _statsFooterLabel.Visible = false;
         statsVbox.AddChild(_statsFooterLabel);
 
-        // Sparkline POC — compares Unicode block characters vs a TextureRect
-        // bar-chart. Removed once a style is chosen; lives in the bestiary
-        // right pane so both renderings sit inside real game chrome and
-        // match the font / color environment we'd ship into.
-        if (SlayTheStatsConfig.DebugMode)
-            rightPanel.AddChild(SparklinePoc.BuildDebugPanel());
-
         rightPanel.AddChild(new HSeparator());
 
         // Clicks on the right-hand stats / preview area also release a locked row

@@ -17,45 +17,6 @@ namespace SlayTheStats;
 // ─────────────────────────────────────────────────────────────────────
 internal static class SparklinePoc
 {
-    // Fallback synthetic series used only when the user's DB has no
-    // Regent-vs-Byrdonis fights yet. Real data is preferred — the shape
-    // of an actual distribution is what we're trying to eyeball.
-    private static readonly double[] FallbackSampleValues = { 12, 18, 5, 22, 8, 15, 20, 3, 18, 14 };
-
-    private const string EncounterIdByrdonisElite = "ENCOUNTER.BYRDONIS_ELITE";
-    private const string CharacterIdRegent        = "CHARACTER.REGENT";
-
-    /// <summary>
-    /// Pulls damage-taken values for Byrdonis-elite fights played as
-    /// Regent from the live stats DB. Returns null when the DB lacks
-    /// data for that matchup, so the caller can fall through to a
-    /// synthetic series.
-    /// </summary>
-    internal static double[]? GetByrdonisVsRegentDamageValues()
-    {
-        try
-        {
-            var db = MainFile.Db;
-            if (db == null) return null;
-            if (!db.Encounters.TryGetValue(EncounterIdByrdonisElite, out var contextMap))
-                return null;
-
-            var filter = new AggregationFilter { Character = CharacterIdRegent };
-            var perChar = StatsAggregator.AggregateEncountersByCharacter(contextMap, filter);
-            if (!perChar.TryGetValue(CharacterIdRegent, out var stat)) return null;
-            if (stat.DamageValues == null || stat.DamageValues.Count == 0) return null;
-
-            var arr = new double[stat.DamageValues.Count];
-            for (int i = 0; i < arr.Length; i++) arr[i] = stat.DamageValues[i];
-            return arr;
-        }
-        catch (System.Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] SparklinePoc.GetByrdonisVsRegentDamageValues: {e.Message}");
-            return null;
-        }
-    }
-
     // Curve color. Matches NeutralShade (#b5b5b5) used as the
     // significance-coloring neutral text color — the shade rendered when a
     // value's deviation is below threshold or sample size is too small. In
@@ -64,18 +25,14 @@ internal static class SparklinePoc
     // instead of competing with the colored numeric stats.
     private static readonly Color CurveColor = new Color(0.71f, 0.71f, 0.71f, 1f);
 
-    // Percentile marker styling. Warm neutral fill with a dark
-    // outline — same palette across all three marker variants so
-    // only the glyph shape changes between them.
-    private static readonly Color PercentileDotColor        = new Color(0.95f, 0.92f, 0.82f, 0.95f);
+    // Dark outline drawn under the single dot used for a degenerate
+    // (all-values-identical) distribution.
     private static readonly Color PercentileDotOutlineColor = new Color(0.08f, 0.07f, 0.05f, 0.80f);
-    private const float PercentileDotRadius                 = 2.0f;
-    private const float PercentileMedianExtraRadius         = 0.6f;
 
-    // Shaded IQR + median rule variant. Median rule uses a cool steel-blue
-    // so it stays distinct from the warm-grey curve and the warm-cream IQR
-    // band — important on bumpy curves where the rule's tip would otherwise
-    // blend into a peak's color.
+    // Shaded IQR + median rule. Median rule uses a cool steel-blue so it stays
+    // distinct from the warm-grey curve and the warm-cream IQR band — important
+    // on bumpy curves where the rule's tip would otherwise blend into a peak's
+    // color.
     private static readonly Color IqrFillColor        = new Color(0.95f, 0.92f, 0.82f, 0.12f);
     private static readonly Color MedianRuleColor     = new Color(0.30f, 0.60f, 0.96f, 1.0f);
     // Pixel gap between the median rule's top and the curve at median x.
@@ -85,18 +42,6 @@ internal static class SparklinePoc
     private const float MedianRuleGapPx               = 2.0f;
     private const float MedianRuleWidth               = 1.5f;
 
-    // Stem variant.
-    private static readonly Color StemColor           = new Color(0.95f, 0.92f, 0.82f, 0.55f);
-    private const float StemWidth                     = 1.0f;
-    private const float MedianStemWidth               = 1.6f;
-
-    // Caret variant — small filled triangle at the baseline pointing up.
-    private static readonly Color CaretColor          = new Color(0.95f, 0.92f, 0.82f, 0.90f);
-    private const int CaretHalfWidthPx                = 3;
-    private const int CaretHeightPx                   = 4;
-    private const int MedianCaretHalfWidthPx          = 4;
-    private const int MedianCaretHeightPx             = 5;
-
     // "You are here" caret — marks an external value (e.g. the current fight)
     // on the curve's x-axis. Gold and a touch larger than the percentile carets
     // so it reads as a distinct annotation rather than another quartile marker.
@@ -104,17 +49,6 @@ internal static class SparklinePoc
     private const int CurrentValueCaretHalfWidthPx       = 4;
     private const int CurrentValueCaretHeightPx          = 6;
     private const int CurrentValueCaretGapPx             = 3; // gap between curve baseline and caret apex (2×-oversampled px)
-
-    /// <summary>Which percentile marker treatment to draw. POC-only enum
-    /// so we can stamp out three variants side-by-side in the debug
-    /// panel and eyeball the least-cluttered option.</summary>
-    internal enum MarkerStyle
-    {
-        Dots,                   // original — filled dots on the curve
-        ShadedIqrMedianRule,    // translucent IQR fill + full-height median rule
-        BaselineCarets,         // small ▲ triangles below the baseline at p25/p50/p75
-        Stems,                  // vertical stems from baseline up to the curve at p25/p50/p75
-    }
 
     /// <summary>Placeholder token written into BBCode cells where a
     /// sparkline texture should be inserted. Characters are from the
@@ -176,35 +110,6 @@ internal static class SparklinePoc
         MainFile.DebugLog($"Sparkline size: texture={texW}x{texH} display={displayW}x{displayH} [{tag}]");
     }
 
-    // Eight discrete bar heights from Unicode's block elements range
-    // (U+2581..U+2588). Index 0 is the shortest bar, index 7 is full.
-    private static readonly char[] BlockChars = { '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█' };
-
-    /// <summary>
-    /// Renders <paramref name="values"/> as a sequence of Unicode block
-    /// characters. Kept for comparison in the debug panel.
-    /// </summary>
-    internal static string BuildUnicodeSparkline(IReadOnlyList<double> values)
-    {
-        if (values == null || values.Count == 0) return "";
-
-        double min = double.MaxValue, max = double.MinValue;
-        foreach (var v in values) { if (v < min) min = v; if (v > max) max = v; }
-        double range = max - min;
-
-        var sb = new System.Text.StringBuilder(values.Count);
-        foreach (var v in values)
-        {
-            int idx = range <= 0
-                ? BlockChars.Length / 2
-                : (int)System.Math.Clamp(
-                    System.Math.Round((v - min) / range * (BlockChars.Length - 1)),
-                    0, BlockChars.Length - 1);
-            sb.Append(BlockChars[idx]);
-        }
-        return sb.ToString();
-    }
-
     /// <summary>
     /// Renders <paramref name="values"/> as a Gaussian-KDE density
     /// curve TextureRect. X axis = value (low→high); Y axis = relative
@@ -229,28 +134,10 @@ internal static class SparklinePoc
     internal static ImageTexture BuildSparklineTexture(
         IReadOnlyList<double> values,
         Vector2I size,
-        MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule,
         XRange? explicitRange = null,
         double? markerValue = null)
     {
-        return ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle, explicitRange, markerValue));
-    }
-
-    internal static TextureRect BuildTextureSparkline(
-        IReadOnlyList<double> values,
-        Vector2I size,
-        MarkerStyle markerStyle = MarkerStyle.ShadedIqrMedianRule,
-        XRange? explicitRange = null)
-    {
-        int w = System.Math.Max(size.X, 1);
-        int h = System.Math.Max(size.Y, 1);
-        var texture = ImageTexture.CreateFromImage(BuildSparklineImage(values, size, markerStyle, explicitRange));
-        return new TextureRect
-        {
-            Texture = texture,
-            StretchMode = TextureRect.StretchModeEnum.Keep,
-            CustomMinimumSize = new Vector2(w, h),
-        };
+        return ImageTexture.CreateFromImage(BuildSparklineImage(values, size, explicitRange, markerValue));
     }
 
     // Percentile cutoffs for the shared-range computation. Asymmetric: pLow=0
@@ -296,7 +183,6 @@ internal static class SparklinePoc
     private static Image BuildSparklineImage(
         IReadOnlyList<double> values,
         Vector2I size,
-        MarkerStyle markerStyle,
         XRange? explicitRange = null,
         double? markerValue = null)
     {
@@ -416,33 +302,30 @@ internal static class SparklinePoc
                 double yScale = maxDensity > 0 ? 0.85 * BaselineY / maxDensity : 0;
                 double YOfDensity(double d) => BaselineY - d * yScale;
 
-                // Pre-curve markers for the shaded-IQR variant: IQR
-                // fill + median rule, both clipped to the curve Y so
-                // neither draws above the density line.
-                if (markerStyle == MarkerStyle.ShadedIqrMedianRule)
+                // Pre-curve markers: IQR fill + median rule, both clipped to the
+                // curve Y so neither draws above the density line. Drawn before
+                // the polyline so the curve paints on top and caps the rule.
+                int iqrLeft  = System.Math.Clamp((int)System.Math.Round(PxAtDataX(q1)), 0, w - 1);
+                int iqrRight = System.Math.Clamp((int)System.Math.Round(PxAtDataX(q3)), 0, w - 1);
+                for (int px = iqrLeft; px <= iqrRight; px++)
                 {
-                    int iqrLeft  = System.Math.Clamp((int)System.Math.Round(PxAtDataX(q1)), 0, w - 1);
-                    int iqrRight = System.Math.Clamp((int)System.Math.Round(PxAtDataX(q3)), 0, w - 1);
-                    for (int px = iqrLeft; px <= iqrRight; px++)
-                    {
-                        int yTop = System.Math.Clamp((int)System.Math.Round(YOfDensity(densities[px])), 0, (int)BaselineY);
-                        int yBot = (int)BaselineY;
-                        for (int py = yTop; py <= yBot; py++)
-                            BlendOver(image, px, py, IqrFillColor);
-                    }
-
-                    // Median rule stops MedianRuleGapPx below the curve so a
-                    // visible gap separates the two shapes — important when
-                    // the median lands in a valley between bimodal peaks,
-                    // where the rule would otherwise read as part of the
-                    // curve. Skip drawing entirely when the gap would push
-                    // the rule's top past the baseline (curve already near
-                    // zero density at median).
-                    double mxPre    = PxAtDataX(q2);
-                    double myTopPre = YOfDensity(Density(q2)) + MedianRuleGapPx;
-                    if (myTopPre < BaselineY)
-                        DrawAaVerticalLine(image, mxPre, myTopPre, BaselineY, MedianRuleWidth, MedianRuleColor);
+                    int yTop = System.Math.Clamp((int)System.Math.Round(YOfDensity(densities[px])), 0, (int)BaselineY);
+                    int yBot = (int)BaselineY;
+                    for (int py = yTop; py <= yBot; py++)
+                        BlendOver(image, px, py, IqrFillColor);
                 }
+
+                // Median rule stops MedianRuleGapPx below the curve so a
+                // visible gap separates the two shapes — important when
+                // the median lands in a valley between bimodal peaks,
+                // where the rule would otherwise read as part of the
+                // curve. Skip drawing entirely when the gap would push
+                // the rule's top past the baseline (curve already near
+                // zero density at median).
+                double mxPre    = PxAtDataX(q2);
+                double myTopPre = YOfDensity(Density(q2)) + MedianRuleGapPx;
+                if (myTopPre < BaselineY)
+                    DrawAaVerticalLine(image, mxPre, myTopPre, BaselineY, MedianRuleWidth, MedianRuleColor);
 
                 // Polyline through per-pixel density samples. Drawn flat in
                 // CurveColor; cross-row comparability comes from the shared
@@ -453,68 +336,6 @@ internal static class SparklinePoc
                     double y1 = YOfDensity(densities[px]);
                     double y2 = YOfDensity(densities[px + 1]);
                     DrawAaSegment(image, px, y1, px + 1, y2, LineRadius);
-                }
-
-                // Post-curve percentile marker rendering. One branch
-                // per style — all three get the same q1/q2/q3 inputs
-                // so the shape differences are the only variable.
-                double PxOfValue(double vx) => PxAtDataX(vx);
-                double PyOnCurve(double vx) => YOfDensity(Density(vx));
-
-                switch (markerStyle)
-                {
-                    case MarkerStyle.Dots:
-                    {
-                        void DotAtValue(double vx, bool isMedian)
-                        {
-                            double px = PxOfValue(vx);
-                            double py = PyOnCurve(vx);
-                            float rFill    = PercentileDotRadius + (isMedian ? PercentileMedianExtraRadius : 0f);
-                            float rOutline = rFill + 1.0f;
-                            DrawAaDisc(image, px, py, rOutline, PercentileDotOutlineColor);
-                            DrawAaDisc(image, px, py, rFill,    PercentileDotColor);
-                        }
-                        DotAtValue(q1, isMedian: false);
-                        DotAtValue(q3, isMedian: false);
-                        DotAtValue(q2, isMedian: true);
-                        break;
-                    }
-
-                    case MarkerStyle.ShadedIqrMedianRule:
-                        // Both the IQR fill and the median rule draw
-                        // pre-curve so the line paints on top and
-                        // naturally caps the rule at its top.
-                        break;
-
-                    case MarkerStyle.Stems:
-                    {
-                        void StemAt(double vx, bool isMedian)
-                        {
-                            double px = PxOfValue(vx);
-                            double yTop = PyOnCurve(vx);
-                            float width = isMedian ? MedianStemWidth : StemWidth;
-                            DrawAaVerticalLine(image, px, yTop, BaselineY, width, StemColor);
-                        }
-                        StemAt(q1, isMedian: false);
-                        StemAt(q3, isMedian: false);
-                        StemAt(q2, isMedian: true);
-                        break;
-                    }
-
-                    case MarkerStyle.BaselineCarets:
-                    {
-                        void CaretAt(double vx, bool isMedian)
-                        {
-                            double px = PxOfValue(vx);
-                            int halfW = isMedian ? MedianCaretHalfWidthPx : CaretHalfWidthPx;
-                            int heightPx = isMedian ? MedianCaretHeightPx : CaretHeightPx;
-                            DrawBaselineCaret(image, px, halfW, heightPx, CaretColor);
-                        }
-                        CaretAt(q1, isMedian: false);
-                        CaretAt(q3, isMedian: false);
-                        CaretAt(q2, isMedian: true);
-                        break;
-                    }
                 }
 
                 // "You are here" caret: mark an external value (the current
@@ -570,14 +391,6 @@ internal static class SparklinePoc
         }
     }
 
-    /// <summary>Ascending-sorted copy of <paramref name="values"/> as int[] — used by the debug panel header for human-readable value lists.</summary>
-    private static int[] Sorted(IReadOnlyList<double> values)
-    {
-        var arr = new int[values.Count];
-        for (int i = 0; i < values.Count; i++) arr[i] = (int)System.Math.Round(values[i]);
-        System.Array.Sort(arr);
-        return arr;
-    }
 
     /// <summary>Type-7 (linear-interpolated) percentile on a pre-sorted array.</summary>
     private static double Percentile(double[] sorted, double p)
@@ -767,75 +580,4 @@ internal static class SparklinePoc
         img.SetPixel(x, y, new Color(outR, outG, outB, outA));
     }
 
-    /// <summary>
-    /// Builds a titled debug panel comparing the two sparkline renderers
-    /// on the same series. Prefers live Regent-vs-Byrdonis damage values
-    /// from the DB; falls back to a synthetic series when that matchup
-    /// has no data yet.
-    /// </summary>
-    internal static Control BuildDebugPanel()
-    {
-        var real   = GetByrdonisVsRegentDamageValues();
-        var values = real ?? FallbackSampleValues;
-        var source = real != null
-            ? $"Regent vs Byrdonis (n={values.Length})"
-            : $"fallback synthetic (n={values.Length})";
-
-        var root = new VBoxContainer
-        {
-            Name = "SparklinePocDebug",
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-        };
-        root.AddThemeConstantOverride("separation", 2);
-
-        var header = new Label
-        {
-            Text = $"Sparkline POC  [{source}]  {System.String.Join(",", Sorted(values))}",
-        };
-        header.AddThemeColorOverride("font_color", new Color(0.56f, 0.53f, 0.46f, 1f));
-        header.AddThemeFontSizeOverride("font_size", 12);
-        header.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        header.CustomMinimumSize = new Vector2(300, 0);
-        root.AddChild(header);
-
-        // Unicode block-character row (kept for comparison).
-        var unicodeRow = new HBoxContainer();
-        unicodeRow.AddThemeConstantOverride("separation", 8);
-        var unicodeLabel = new Label { Text = "Unicode:" };
-        unicodeLabel.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
-        unicodeLabel.AddThemeFontSizeOverride("font_size", 14);
-        unicodeLabel.CustomMinimumSize = new Vector2(70, 0);
-        unicodeRow.AddChild(unicodeLabel);
-
-        var unicodeSpark = new Label { Text = BuildUnicodeSparkline(values) };
-        unicodeSpark.AddThemeFontSizeOverride("font_size", 20);
-        unicodeSpark.AddThemeColorOverride("font_color", new Color(0.58f, 0.80f, 0.62f, 1f));
-        unicodeRow.AddChild(unicodeSpark);
-        root.AddChild(unicodeRow);
-
-        // One row per MarkerStyle variant so we can eyeball them
-        // stacked. All three share the same values + panel size so
-        // only the marker treatment varies.
-        var styleVariants = new (string name, MarkerStyle style)[]
-        {
-            ("IQR+Rule:", MarkerStyle.ShadedIqrMedianRule),
-            ("Carets:",   MarkerStyle.BaselineCarets),
-            ("Stems:",    MarkerStyle.Stems),
-        };
-
-        foreach (var (name, style) in styleVariants)
-        {
-            var row = new HBoxContainer();
-            row.AddThemeConstantOverride("separation", 8);
-            var lbl = new Label { Text = name };
-            lbl.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.72f, 1f));
-            lbl.AddThemeFontSizeOverride("font_size", 14);
-            lbl.CustomMinimumSize = new Vector2(70, 0);
-            row.AddChild(lbl);
-            row.AddChild(BuildTextureSparkline(values, new Vector2I(60, 28), style));
-            root.AddChild(row);
-        }
-
-        return root;
-    }
 }

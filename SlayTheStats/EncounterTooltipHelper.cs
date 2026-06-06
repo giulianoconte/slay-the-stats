@@ -299,7 +299,6 @@ public static class EncounterTooltipHelper
             result.Add(SparklinePoc.BuildSparklineTexture(
                 values,
                 BestiarySparklineSize,
-                SparklinePoc.MarkerStyle.ShadedIqrMedianRule,
                 range));
         }
         return result;

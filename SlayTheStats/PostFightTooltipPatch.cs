@@ -336,7 +336,7 @@ public static class PostFightTooltipPatch
         var arr = new double[values.Count];
         for (int i = 0; i < values.Count; i++) arr[i] = values[i];
         return SparklinePoc.BuildSparklineTexture(
-            arr, PostFightSparklineSize, SparklinePoc.MarkerStyle.ShadedIqrMedianRule,
+            arr, PostFightSparklineSize,
             explicitRange: null, markerValue: markerValue);
     }
 
@@ -427,7 +427,7 @@ public static class PostFightTooltipPatch
             _tableLabel!, statsText, sparklines,
             PostFightSparklineDisplayW, PostFightSparklineDisplayH);
         _nameLabel.ResetSize();
-        _tableLabel.ResetSize();
+        _tableLabel!.ResetSize();
         _panel.ResetSize();
 
         // Start transparent; PositionTopRight tweens alpha + x into place so the

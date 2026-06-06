@@ -67,7 +67,7 @@ public partial class DistLegendIllustration : Control
 
         var xRange = new SparklinePoc.XRange(0, max);
         _texture = SparklinePoc.BuildSparklineTexture(LegendDistValues, new Vector2I(CurveW, CurveH),
-            SparklinePoc.MarkerStyle.ShadedIqrMedianRule, xRange);
+            xRange);
 
         // Map landmark data values to pixel x within the curve.
         float Map(double v) => (float)((v - xRange.Lo) / (xRange.Hi - xRange.Lo) * (CurveW - 1));
