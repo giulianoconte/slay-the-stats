@@ -3,6 +3,8 @@
 
     "SLAYTHESTATS-COLOR_BLIND_MODE.title": "Color Blind Mode",
     "SLAYTHESTATS-COLOR_BLIND_MODE.hover.desc": "Use a color-blind-friendly palette instead of red/green for stat coloring.",
+    "SLAYTHESTATS-SIGNIFICANCE_COLORING.title": "Stat Significance Colors",
+    "SLAYTHESTATS-SIGNIFICANCE_COLORING.hover.desc": "Shade stats green/red by how far they sit from the baseline. Turn off to show all stats in a neutral shade (bold emphasis is kept).",
 
     "SLAYTHESTATS-SHOW_IN_RUN_STATS.title": "Show In-Run Stats",
     "SLAYTHESTATS-SHOW_IN_RUN_STATS.hover.desc": "Show stat tooltips during a run (card rewards, shop, relic hovers). When off, stats only appear in the compendium.",

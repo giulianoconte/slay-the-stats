@@ -3,6 +3,8 @@
 
     "SLAYTHESTATS-COLOR_BLIND_MODE.title": "色盲模式",
     "SLAYTHESTATS-COLOR_BLIND_MODE.hover.desc": "使用色盲友好的配色,替代统计色彩中的红绿色。",
+    "SLAYTHESTATS-SIGNIFICANCE_COLORING.title": "数据显著性着色",
+    "SLAYTHESTATS-SIGNIFICANCE_COLORING.hover.desc": "根据数据偏离基准的程度用绿色/红色着色。关闭后所有数据以中性色显示(保留加粗强调)。",
 
     "SLAYTHESTATS-SHOW_IN_RUN_STATS.title": "战局中显示统计",
     "SLAYTHESTATS-SHOW_IN_RUN_STATS.hover.desc": "在战局中显示统计提示(卡牌奖励、商店、遗物悬停)。关闭时,统计仅在图鉴中显示。",

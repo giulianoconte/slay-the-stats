@@ -737,8 +737,16 @@ internal static class TooltipHelper
     private static readonly string[] _normalBadShades  = { "#C07828", "#C04020", "#CC2828" };
     private static readonly string[] _normalGoodShades = { "#88B840", "#40C040", "#28CC28" };
 
-    private static string[] BadShades  => SlayTheStatsConfig.ColorBlindMode ? _cbBadShades  : _normalBadShades;
-    private static string[] GoodShades => SlayTheStatsConfig.ColorBlindMode ? _cbGoodShades : _normalGoodShades;
+    // When significance coloring is disabled, every level collapses to the neutral
+    // shade — the central off-switch for all five sig colorers (ColWR/ColBuys/ColPR/
+    // ColByZScoreInverted, which all index these). Bold (level 2) is applied
+    // separately, so weight emphasis survives.
+    private static readonly string[] _neutralShades = { NeutralShade, NeutralShade, NeutralShade };
+
+    private static string[] BadShades  => !SlayTheStatsConfig.SignificanceColoring ? _neutralShades
+                                        : SlayTheStatsConfig.ColorBlindMode ? _cbBadShades  : _normalBadShades;
+    private static string[] GoodShades => !SlayTheStatsConfig.SignificanceColoring ? _neutralShades
+                                        : SlayTheStatsConfig.ColorBlindMode ? _cbGoodShades : _normalGoodShades;
 
     // k_win calibrated for Win%, where n = RunsPresent.
     // k_pick = k_win * KPickFactor: Pick% uses RunsOffered as n, which is ~4× larger than

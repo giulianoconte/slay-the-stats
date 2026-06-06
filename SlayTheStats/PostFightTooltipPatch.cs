@@ -364,7 +364,7 @@ public static class PostFightTooltipPatch
         string formatted = $"{sign}{delta:F1}";
 
         string color;
-        if (sampleSize <= 3 || Math.Abs(delta) < 0.05)
+        if (!SlayTheStatsConfig.SignificanceColoring || sampleSize <= 3 || Math.Abs(delta) < 0.05)
         {
             color = TooltipHelper.NeutralShade;
         }

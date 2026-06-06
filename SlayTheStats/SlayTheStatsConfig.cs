@@ -24,6 +24,13 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool ColorBlindMode { get; set; } = false;
 
     /// <summary>
+    /// When true (default), stats are shaded green/red by significance (how far
+    /// they sit from the baseline). When false, every stat renders in the neutral
+    /// shade — bold/weight emphasis is kept, only the color grading is dropped.
+    /// </summary>
+    public static bool SignificanceColoring { get; set; } = true;
+
+    /// <summary>
     /// When true, stat tooltips appear everywhere (in-run card/relic hovers, shop, compendium).
     /// When false, stats only appear in the compendium.
     /// </summary>
