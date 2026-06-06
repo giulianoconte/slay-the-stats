@@ -100,7 +100,6 @@ public static partial class CompendiumFilterPatch
             var button = CloneSortButton(template);
             sidebar.AddChild(button);
             WireSortButtonToPane(button, pane);
-            AttachTutorialHelpButton(button);
         }
         else
         {
@@ -248,30 +247,7 @@ public static partial class CompendiumFilterPatch
 
         parent.AddChild(button);
         WireSortButtonToPane(button, pane);
-        AttachTutorialHelpButton(button);
         return button;
-    }
-
-    /// <summary>Attach the tutorial "?" help button just to the right of a filter
-    /// button. Parented to the button (not the page) and anchored to its right
-    /// edge, so it floats beside the button the same way on both layouts — the
-    /// relic page's floating button and the card page's sidebar-column button.
-    /// Mirrors the bestiary's help button; replays the compendium tutorial.</summary>
-    private static void AttachTutorialHelpButton(NCardViewSortButton filterButton)
-    {
-        const float gap = 6f;
-        const float helpSize = 22f;
-        var help = NBestiaryStatsSubmenu.BuildHelpButton(
-            L.T("compendium.help.tutorial_tooltip"), () => ForceShowTutorial(filterButton));
-        // Anchor to the button's right edge, vertically centred. Relative anchors
-        // resolve at layout time, so this tracks the button wherever it lands.
-        help.AnchorLeft = 1f; help.AnchorRight = 1f;
-        help.AnchorTop = 0.5f; help.AnchorBottom = 0.5f;
-        help.OffsetLeft = gap;
-        help.OffsetRight = gap + helpSize;
-        help.OffsetTop = -helpSize / 2f;
-        help.OffsetBottom = helpSize / 2f;
-        filterButton.AddChild(help);
     }
 
     /// <summary>
@@ -887,27 +863,6 @@ public static partial class CompendiumFilterPatch
         // Defer by one frame so the page has laid out (button's global rect is
         // populated and visibility has propagated, so the dimmer/arrow render
         // in the right place).
-        var tree = (SceneTree)Engine.GetMainLoop();
-        tree.ProcessFrame += DeferredShow;
-        void DeferredShow()
-        {
-            tree.ProcessFrame -= DeferredShow;
-            if (!GodotObject.IsInstanceValid(anchorButton)) return;
-            BuildTutorialPanel(anchorButton);
-        }
-    }
-
-    /// <summary>Force-show the compendium tutorial anchored to
-    /// <paramref name="anchorButton"/>, ignoring TutorialSeen. Wired to the
-    /// card/relic "?" help button so players can replay the tutorial, mirroring
-    /// the bestiary's help button.</summary>
-    internal static void ForceShowTutorial(NCardViewSortButton anchorButton)
-    {
-        if (_tutorialPanel != null && GodotObject.IsInstanceValid(_tutorialPanel)) return;
-        if (!GodotObject.IsInstanceValid(anchorButton)) return;
-
-        // One-frame defer so layout is settled before BuildTutorialPanel measures
-        // the anchor's global rect (same pattern as MaybeShowTutorialFor).
         var tree = (SceneTree)Engine.GetMainLoop();
         tree.ProcessFrame += DeferredShow;
         void DeferredShow()
