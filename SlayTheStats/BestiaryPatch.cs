@@ -1810,7 +1810,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// <summary>Text shadow matching the game's description tooltip (stolen values in
     /// <see cref="TooltipHelper.Fonts"/>). Softer than `ApplyTextShadow` (3px/2px offset),
     /// which is too far for the popup body text on a tooltip-style blue panel.</summary>
-    private static void ApplyTooltipTextShadow(Control control)
+    internal static void ApplyTooltipTextShadow(Control control)
     {
         var f = TooltipHelper.Fonts;
         switch (control)
@@ -2684,7 +2684,10 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// "?" glyph visually shifted up-left in a small fixed-size square. PanelContainer + a
     /// Label with Horizontal/VerticalAlignment=Center gives pixel-centered glyph placement.
     /// GuiInput dispatches the click to the caller-supplied toggle action.</summary>
-    private Control BuildHelpButton(string tooltip, Action onPressed)
+    // Shared "?" help-button chrome. Static + internal so the compendium
+    // (card/relic filter rows) can reuse the exact same button as the bestiary
+    // title row. Uses no instance state.
+    internal static Control BuildHelpButton(string tooltip, Action onPressed)
     {
         var normal = new StyleBoxFlat();
         normal.BgColor = new Color(0.10f, 0.11f, 0.15f, 0.85f);

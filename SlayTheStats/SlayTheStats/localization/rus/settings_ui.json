@@ -130,6 +130,7 @@
     "bestiary.legend.dist.y_axis":         "↑ бои",
     "bestiary.legend.dismiss_hint":         "[color=#bfb7a6]Нажмите в любом месте, чтобы закрыть.[/color]",
     "bestiary.help.tutorial_tooltip":   "Показать обучение Бестиария",
+    "compendium.help.tutorial_tooltip": "Показать обучение",
     "bestiary.help.legend_tooltip":     "Что означают эти столбцы?",
     "bestiary.help.rank_tooltip":       "Что означают «Сырой» и «Значимость»?",
     "bestiary.settings.title":          "Настройки Бестиария",

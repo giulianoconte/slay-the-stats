@@ -130,6 +130,7 @@
     "bestiary.legend.dist.y_axis":         "↑ fights",
     "bestiary.legend.dismiss_hint":         "[color=#bfb7a6]Click anywhere to dismiss.[/color]",
     "bestiary.help.tutorial_tooltip":   "Show the bestiary tutorial",
+    "compendium.help.tutorial_tooltip": "Show the tutorial",
     "bestiary.help.legend_tooltip":     "What do these columns mean?",
     "bestiary.help.rank_tooltip":       "What do Raw and Significance mean?",
     "bestiary.settings.title":          "Bestiary Settings",

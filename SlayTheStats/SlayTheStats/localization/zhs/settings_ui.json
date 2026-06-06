@@ -130,6 +130,7 @@
     "bestiary.legend.dist.y_axis":         "↑ 战斗",
     "bestiary.legend.dismiss_hint":         "[color=#bfb7a6]点击任意位置关闭。[/color]",
     "bestiary.help.tutorial_tooltip":   "显示图鉴教程",
+    "compendium.help.tutorial_tooltip": "显示教程",
     "bestiary.help.legend_tooltip":     "这些列是什么意思?",
     "bestiary.help.rank_tooltip":       "原始值和显著性是什么意思?",
     "bestiary.settings.title":          "图鉴设置",
