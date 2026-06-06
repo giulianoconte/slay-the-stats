@@ -126,16 +126,20 @@ public partial class DistLegendIllustration : Control
         DrawString(font, new Vector2(xLabelX, xLabelBaselineY),
             xLabel, HorizontalAlignment.Left, -1, LabelFontSize, LabelColor);
 
-        // Median arrow: tip below the curve bottom (pointing UP toward the
-        // median rule), base just above the "Median Dmg" caption. The tip sits
-        // well below the curve so the arrowhead doesn't crowd the dist graph.
-        float arrowTipY = curveBotY + 16f;
-        float medLabelTopY = xLabelBaselineY + descent + 6f;
-        float arrowBaseY = medLabelTopY - 2f;
+        // Median arrow: a fixed-length up-arrow pointing toward the median rule,
+        // its tip a clear gap below the curve so the arrowhead doesn't crowd the
+        // dist graph. The whole arrow + caption shift down together with
+        // ArrowCurveGap (rather than the tip eating into a caption-pinned base),
+        // so a bigger gap keeps the arrow full-length instead of shrinking it.
+        const float ArrowCurveGap = 16f;  // curve bottom → arrow tip
+        const float ArrowLength   = 16f;   // tip → base
+        float arrowTipY  = curveBotY + ArrowCurveGap;
+        float arrowBaseY = arrowTipY + ArrowLength;
         DrawArrowUp(new Vector2(medX, arrowBaseY), new Vector2(medX, arrowTipY));
 
         var medLabel = L.T("bestiary.legend.dist.median_label");
         var medLabelSize = font.GetStringSize(medLabel, HorizontalAlignment.Left, -1, LabelFontSize);
+        float medLabelTopY = arrowBaseY + 4f;  // caption just below the arrow base
         float medLabelBaselineY = medLabelTopY + ascent;
         DrawString(font, new Vector2(medX - medLabelSize.X / 2f, medLabelBaselineY),
             medLabel, HorizontalAlignment.Left, -1, LabelFontSize, CalloutColor);
