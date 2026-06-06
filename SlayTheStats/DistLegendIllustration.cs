@@ -99,7 +99,7 @@ public partial class DistLegendIllustration : Control
         float curveBotY = MarginTop + CurveH;
 
         // ── TOP: "Mid 50%" label + bracket spanning the IQR ──
-        var midLabel = "Mid 50%";
+        var midLabel = L.T("tooltip.col.mid50");
         var midLabelSize = font.GetStringSize(midLabel, HorizontalAlignment.Left, -1, LabelFontSize);
         float midLabelTopY = 2f;
         float midLabelBaselineY = midLabelTopY + ascent;
@@ -115,7 +115,7 @@ public partial class DistLegendIllustration : Control
         // axis label sits to the right side of the curve so it doesn't
         // crowd the median arrow (which is at medX, near the left of centre
         // for this dataset). ──
-        var xLabel = "damage →";
+        var xLabel = L.T("bestiary.legend.dist.x_axis");
         var xLabelSize = font.GetStringSize(xLabel, HorizontalAlignment.Left, -1, LabelFontSize);
         float xLabelTopY = curveBotY + 4f;
         float xLabelBaselineY = xLabelTopY + ascent;
@@ -133,14 +133,14 @@ public partial class DistLegendIllustration : Control
         float arrowBaseY = medLabelTopY - 2f;
         DrawArrowUp(new Vector2(medX, arrowBaseY), new Vector2(medX, arrowTipY));
 
-        var medLabel = "Median Dmg";
+        var medLabel = L.T("bestiary.legend.dist.median_label");
         var medLabelSize = font.GetStringSize(medLabel, HorizontalAlignment.Left, -1, LabelFontSize);
         float medLabelBaselineY = medLabelTopY + ascent;
         DrawString(font, new Vector2(medX - medLabelSize.X / 2f, medLabelBaselineY),
             medLabel, HorizontalAlignment.Left, -1, LabelFontSize, CalloutColor);
 
         // ── LEFT: "↑ fights" y-axis label, vertically centred with the curve ──
-        var yLabel = "↑ fights";
+        var yLabel = L.T("bestiary.legend.dist.y_axis");
         var yLabelSize = font.GetStringSize(yLabel, HorizontalAlignment.Left, -1, LabelFontSize);
         DrawString(font,
             new Vector2(MarginLeft - yLabelSize.X - 6f, MarginTop + CurveH / 2f + ascent / 2f - descent / 2f),
