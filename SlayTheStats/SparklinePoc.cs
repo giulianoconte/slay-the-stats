@@ -518,13 +518,22 @@ internal static class SparklinePoc
                 }
 
                 // "You are here" caret: mark an external value (the current
-                // fight) on the curve's x-axis, clamped into the rendered range
-                // so an extreme outlier still shows pinned at the edge. Drawn
-                // last so it sits over the IQR/median markers.
+                // fight) on the curve's x-axis. Drawn last so it sits over the
+                // IQR/median markers. The data value is clamped into the rendered
+                // range (an out-of-range fight pins at the edge), and the *pixel*
+                // center is then inset by the caret's half-width so the whole
+                // triangle always stays on-image. Without the pixel inset, a
+                // new-extreme value lands on pixel 0 / w-1 and DrawBaselineCaret
+                // clips half the triangle — which is why a tight distribution
+                // (turns) showed a smaller-looking caret than a wide one (damage)
+                // in the same tooltip. The inset keeps the caret a consistent
+                // size across metrics. #19
                 if (markerValue.HasValue)
                 {
                     double cv = System.Math.Clamp(markerValue.Value, xLo, xHi);
-                    DrawBaselineCaret(image, PxAtDataX(cv),
+                    double caretPx = System.Math.Clamp(PxAtDataX(cv),
+                        CurrentValueCaretHalfWidthPx, w - 1 - CurrentValueCaretHalfWidthPx);
+                    DrawBaselineCaret(image, caretPx,
                         CurrentValueCaretHalfWidthPx, CurrentValueCaretHeightPx, CurrentValueCaretColor);
                 }
             }
