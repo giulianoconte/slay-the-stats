@@ -986,6 +986,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             onClose: () => { if (_filterPane != null) _filterPane.Visible = false; },
             includeClassFilter: false,
             includeGroupUpgrades: false,
+            combatColumns: true,
             onFilterChanged: () =>
             {
                 // Filters changed via the pane — re-aggregate and redraw the whole list,

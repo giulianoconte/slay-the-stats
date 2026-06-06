@@ -1345,7 +1345,8 @@ public static partial class CompendiumFilterPatch
         Action? onClose = null,
         bool includeClassFilter = true,
         bool includeGroupUpgrades = true,
-        Action? onFilterChanged = null)
+        Action? onFilterChanged = null,
+        bool combatColumns = false)
     {
         // Local helper invoked at the end of every filter mutation. Wraps the existing sidebar
         // suffix refresh and forwards to any caller-supplied callback.
@@ -1789,8 +1790,10 @@ public static partial class CompendiumFilterPatch
         refreshSaveDefaultsHighlight();
 
         // ── Column legend: a static "what the columns mean" section at the
-        //    bottom of the pane (shows whenever the pane is open). ──
-        AddColumnLegend(vbox);
+        //    bottom of the pane (shows whenever the pane is open). Surface-
+        //    specific: card/relic panes explain the card/relic tooltip columns;
+        //    the bestiary pane explains the in-fight / post-fight columns. ──
+        AddColumnLegend(vbox, combatColumns);
 
         // ── Sync callback: refresh all controls from config when pane opens ──
         _syncCallbacks.Add(() =>
@@ -1877,10 +1880,11 @@ public static partial class CompendiumFilterPatch
     }
 
     /// <summary>Builds the static "what the columns mean" legend at the bottom of
-    /// the filter pane — a combined card+relic column guide (non-collapsible),
-    /// rendered as a BBCode RichTextLabel with bold gold column names that match
-    /// the tooltip table headers.</summary>
-    private static void AddColumnLegend(VBoxContainer vbox)
+    /// the filter pane — a non-collapsible column guide rendered as a BBCode
+    /// RichTextLabel with bold gold column names that match the table headers.
+    /// <paramref name="combat"/> picks the surface: the card/relic tooltip columns
+    /// (default) or the in-fight / post-fight summary columns (bestiary pane).</summary>
+    private static void AddColumnLegend(VBoxContainer vbox, bool combat = false)
     {
         AddSeparator(vbox);
 
@@ -1906,7 +1910,7 @@ public static partial class CompendiumFilterPatch
         body.AddThemeFontSizeOverride("normal_font_size", 14);
         body.AddThemeFontSizeOverride("bold_font_size", 14);
         body.AddThemeColorOverride("default_color", Cream);
-        body.Text = L.T("compendium.legend.columns.body");
+        body.Text = L.T(combat ? "compendium.legend.combat.body" : "compendium.legend.columns.body");
         vbox.AddChild(body);
     }
 
