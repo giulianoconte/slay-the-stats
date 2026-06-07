@@ -1173,6 +1173,19 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             _bestiarySettingsPane.Size = spSize;
             _bestiarySettingsPane.GlobalPosition = new Vector2(fpGlobal.X, fpGlobal.Y - spSize.Y - gap);
             _bestiarySettingsPane.Visible = true;
+
+            // Stack the column-legend tooltip above the settings pane (i.e. above
+            // both panes) rather than above the filter pane, where it would
+            // overlap the settings pane.
+            if (_filterPane is FilterPanelContainer fpcLegend
+                && fpcLegend.AssociatedLegendPane is Control legend
+                && GodotObject.IsInstanceValid(legend))
+            {
+                var spGlobal = _bestiarySettingsPane.GlobalPosition;
+                var lgSize = legend.GetCombinedMinimumSize();
+                legend.Size = lgSize;
+                legend.GlobalPosition = new Vector2(spGlobal.X, spGlobal.Y - lgSize.Y - gap);
+            }
             MainFile.DebugLog($"BestiarySettingsPane reposition: fpGlobal={fpGlobal} fpSize={fpSize} spSize={spSize} → spGlobal={_bestiarySettingsPane.GlobalPosition} spPosition={_bestiarySettingsPane.Position}");
         }).CallDeferred();
     }

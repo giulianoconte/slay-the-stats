@@ -710,6 +710,19 @@ public static partial class CompendiumFilterPatch
         var btnBottom = button.GlobalPosition.Y + button.Size.Y;
 
         pane.GlobalPosition = new Vector2(btnRight + padding, btnBottom - paneHeight);
+
+        // Place the column-legend tooltip (if any) directly above the pane,
+        // left-aligned. The bestiary re-stacks it above its settings pane in its
+        // own deferred reposition (which runs after this).
+        if (pane is FilterPanelContainer fpc
+            && fpc.AssociatedLegendPane is Control legend
+            && GodotObject.IsInstanceValid(legend))
+        {
+            const float legendGap = 8f;
+            var legendSize = legend.GetCombinedMinimumSize();
+            legend.Size = legendSize;
+            legend.GlobalPosition = new Vector2(pane.GlobalPosition.X, pane.GlobalPosition.Y - legendSize.Y - legendGap);
+        }
     }
 
     /// <summary>
@@ -1785,11 +1798,14 @@ public static partial class CompendiumFilterPatch
         };
         refreshSaveDefaultsHighlight();
 
-        // ── Column legend: a static "what the columns mean" section at the
-        //    bottom of the pane (shows whenever the pane is open). Surface-
-        //    specific: card/relic panes explain the card/relic tooltip columns;
-        //    the bestiary pane explains the in-fight / post-fight columns. ──
-        AddColumnLegend(vbox, combatColumns);
+        // ── Column legend: its own tooltip pane shown above the filter pane
+        //    (positioned by RepositionPaneNextToButton; the bestiary stacks it
+        //    above its settings pane too). TopLevel child so the filter pane's
+        //    PanelContainer doesn't lay it out, and visibility follows the pane.
+        //    Surface-specific: card/relic columns vs in-fight/post-fight columns. ──
+        var legendPane = BuildColumnLegendPane(combatColumns);
+        pane.AddChild(legendPane);
+        pane.AssociatedLegendPane = legendPane;
 
         // ── Sync callback: refresh all controls from config when pane opens ──
         _syncCallbacks.Add(() =>
@@ -1875,14 +1891,32 @@ public static partial class CompendiumFilterPatch
         control.AddThemeConstantOverride("shadow_offset_y", 1);
     }
 
-    /// <summary>Builds the static "what the columns mean" legend at the bottom of
-    /// the filter pane — a non-collapsible column guide rendered as a BBCode
-    /// RichTextLabel with bold gold column names that match the table headers.
-    /// <paramref name="combat"/> picks the surface: the card/relic tooltip columns
-    /// (default) or the in-fight / post-fight summary columns (bestiary pane).</summary>
-    private static void AddColumnLegend(VBoxContainer vbox, bool combat = false)
+    /// <summary>Builds the column legend as its own tooltip pane, shown above the
+    /// filter pane (positioned by <see cref="RepositionPaneNextToButton"/>).
+    /// Top-level styled panel with a non-collapsible BBCode column guide; bold gold
+    /// column names match the table headers. <paramref name="combat"/> picks the
+    /// surface: card/relic tooltip columns, or the in-fight / post-fight summary
+    /// columns (bestiary pane).</summary>
+    private static PanelContainer BuildColumnLegendPane(bool combat)
     {
-        AddSeparator(vbox);
+        var legend = new PanelContainer { Name = "SlayTheStatsColumnLegend" };
+        // Top-level so the filter PanelContainer doesn't lay it out — it's
+        // positioned independently above the pane. Same stone style + tint as the
+        // filter pane so it reads as a matching tooltip.
+        legend.TopLevel = true;
+        legend.AddThemeStyleboxOverride("panel", BuildPanelStyle());
+        legend.SelfModulate = new Color(0.60f, 0.68f, 0.88f, 1f);
+
+        var legendMargin = new MarginContainer();
+        legendMargin.AddThemeConstantOverride("margin_left", 14);
+        legendMargin.AddThemeConstantOverride("margin_right", 14);
+        legendMargin.AddThemeConstantOverride("margin_top", 14);
+        legendMargin.AddThemeConstantOverride("margin_bottom", 14);
+        legend.AddChild(legendMargin);
+
+        var vbox = new VBoxContainer();
+        vbox.AddThemeConstantOverride("separation", 8);
+        legendMargin.AddChild(vbox);
 
         var title = new Label { Text = L.T("compendium.legend.columns.title") };
         title.AddThemeColorOverride("font_color", Gold);
@@ -1908,6 +1942,8 @@ public static partial class CompendiumFilterPatch
         body.AddThemeColorOverride("default_color", Cream);
         body.Text = L.T(combat ? "compendium.legend.combat.body" : "compendium.legend.columns.body");
         vbox.AddChild(body);
+
+        return legend;
     }
 
     internal static Label MakeLabel(string text, float minWidth = 0)

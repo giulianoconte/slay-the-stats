@@ -33,6 +33,13 @@ public partial class FilterPanelContainer : PanelContainer
     /// </summary>
     public Control? AssociatedSiblingPane { get; set; }
 
+    /// <summary>
+    /// Optional column-legend tooltip shown above this pane. Excluded from
+    /// outside-click dismissal like <see cref="AssociatedSiblingPane"/> so a
+    /// click on the legend doesn't close the filter pane.
+    /// </summary>
+    public Control? AssociatedLegendPane { get; set; }
+
     public override void _Input(InputEvent ev)
     {
         if (!Visible) return;
@@ -57,6 +64,13 @@ public partial class FilterPanelContainer : PanelContainer
             && GodotObject.IsInstanceValid(AssociatedSiblingPane)
             && AssociatedSiblingPane.Visible
             && AssociatedSiblingPane.GetGlobalRect().HasPoint(globalMouse))
+            return;
+
+        // Clicks on the legend tooltip above the pane stay inside the unit too.
+        if (AssociatedLegendPane != null
+            && GodotObject.IsInstanceValid(AssociatedLegendPane)
+            && AssociatedLegendPane.Visible
+            && AssociatedLegendPane.GetGlobalRect().HasPoint(globalMouse))
             return;
 
         Visible = false;
