@@ -212,7 +212,10 @@ public static class EncounterTooltipHelper
         // --- Footer (kept separate so it can stay sticky below the scroll area) ---
         var footer = new StringBuilder();
         var filterCtx = filter != null
-            ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter)
+            // includeCharacter:false — this is the all-characters bestiary table,
+            // so the footer's character segment is always "All chars" (with the
+            // prismatic gem); drop it as redundant, matching the focused views.
+            ? CardHoverShowPatch.BuildFilterContext(characterLabel ?? "All chars", filter, includeCharacter: false)
             : "";
         var footerStr = TooltipHelper.FormatFooter(filterCtx);
         if (footerStr.StartsWith("\n")) footerStr = footerStr.Substring(1);
