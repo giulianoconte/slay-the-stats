@@ -2006,10 +2006,13 @@ public static partial class CompendiumFilterPatch
     /// than the surrounding pane with a warm border that matches the action buttons.</summary>
     private static void ApplyDropdownStyle(OptionButton btn)
     {
+        // Palette matched to the ascension stepper's ▲/▼ arrow buttons
+        // (MakeArrowButton) — darker and more muted than the old warm brown, so
+        // the dropdowns read as the same neutral family as the steppers.
         var normal = new StyleBoxFlat();
-        normal.BgColor = new Color(0.18f, 0.15f, 0.12f, 0.85f);
+        normal.BgColor = new Color(0.08f, 0.06f, 0.05f, 0.6f);
         normal.SetBorderWidthAll(1);
-        normal.BorderColor = new Color(0.55f, 0.45f, 0.30f, 0.7f);
+        normal.BorderColor = new Color(0.4f, 0.35f, 0.25f, 0.5f);
         normal.SetCornerRadiusAll(3);
         normal.ContentMarginLeft = 8;
         normal.ContentMarginRight = 8;
@@ -2018,16 +2021,16 @@ public static partial class CompendiumFilterPatch
         btn.AddThemeStyleboxOverride("normal", normal);
 
         var hover = (StyleBoxFlat)normal.Duplicate();
-        hover.BgColor = new Color(0.24f, 0.20f, 0.16f, 0.92f);
-        hover.BorderColor = new Color(0.75f, 0.62f, 0.40f, 0.85f);
+        hover.BgColor = new Color(0.12f, 0.09f, 0.07f, 0.7f);
+        hover.BorderColor = new Color(0.6f, 0.5f, 0.3f, 0.6f);
         btn.AddThemeStyleboxOverride("hover", hover);
 
         var pressed = (StyleBoxFlat)normal.Duplicate();
-        pressed.BgColor = new Color(0.12f, 0.10f, 0.08f, 0.95f);
+        pressed.BgColor = new Color(0.05f, 0.04f, 0.03f, 0.7f);
         btn.AddThemeStyleboxOverride("pressed", pressed);
 
         var focus = (StyleBoxFlat)normal.Duplicate();
-        focus.BorderColor = new Color(0.85f, 0.70f, 0.45f, 1f);
+        focus.BorderColor = new Color(0.6f, 0.5f, 0.3f, 0.85f);
         focus.SetBorderWidthAll(2);
         btn.AddThemeStyleboxOverride("focus", focus);
     }
