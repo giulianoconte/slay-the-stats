@@ -1169,22 +1169,23 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             const float gap = 8f;
             var fpGlobal = _filterPane.GlobalPosition;
             var fpSize = _filterPane.Size;
+            // Match the settings pane width to the filter pane.
+            _bestiarySettingsPane.CustomMinimumSize = new Vector2(fpSize.X, 0);
             var spSize = _bestiarySettingsPane.GetCombinedMinimumSize();
+            spSize.X = fpSize.X;
             _bestiarySettingsPane.Size = spSize;
             _bestiarySettingsPane.GlobalPosition = new Vector2(fpGlobal.X, fpGlobal.Y - spSize.Y - gap);
             _bestiarySettingsPane.Visible = true;
 
             // Stack the column-legend tooltip above the settings pane (i.e. above
-            // both panes) rather than above the filter pane, where it would
-            // overlap the settings pane.
+            // both panes), width-matched to the filter pane as well.
             if (_filterPane is FilterPanelContainer fpcLegend
-                && fpcLegend.AssociatedLegendPane is Control legend
+                && fpcLegend.AssociatedLegendPane is PanelContainer legend
                 && GodotObject.IsInstanceValid(legend))
             {
                 var spGlobal = _bestiarySettingsPane.GlobalPosition;
-                var lgSize = legend.GetCombinedMinimumSize();
-                legend.Size = lgSize;
-                legend.GlobalPosition = new Vector2(spGlobal.X, spGlobal.Y - lgSize.Y - gap);
+                float lgH = CompendiumFilterPatch.SizeLegendToWidth(legend, fpSize.X);
+                legend.GlobalPosition = new Vector2(spGlobal.X, spGlobal.Y - lgH - gap);
             }
             MainFile.DebugLog($"BestiarySettingsPane reposition: fpGlobal={fpGlobal} fpSize={fpSize} spSize={spSize} → spGlobal={_bestiarySettingsPane.GlobalPosition} spPosition={_bestiarySettingsPane.Position}");
         }).CallDeferred();

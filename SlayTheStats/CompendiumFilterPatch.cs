@@ -715,13 +715,13 @@ public static partial class CompendiumFilterPatch
         // left-aligned. The bestiary re-stacks it above its settings pane in its
         // own deferred reposition (which runs after this).
         if (pane is FilterPanelContainer fpc
-            && fpc.AssociatedLegendPane is Control legend
+            && fpc.AssociatedLegendPane is PanelContainer legend
             && GodotObject.IsInstanceValid(legend))
         {
             const float legendGap = 8f;
-            var legendSize = legend.GetCombinedMinimumSize();
-            legend.Size = legendSize;
-            legend.GlobalPosition = new Vector2(pane.GlobalPosition.X, pane.GlobalPosition.Y - legendSize.Y - legendGap);
+            float paneW = pane.GetCombinedMinimumSize().X;
+            float legendH = SizeLegendToWidth(legend, paneW);
+            legend.GlobalPosition = new Vector2(pane.GlobalPosition.X, pane.GlobalPosition.Y - legendH - legendGap);
         }
     }
 
@@ -1925,6 +1925,7 @@ public static partial class CompendiumFilterPatch
 
         var body = new RichTextLabel
         {
+            Name = "LegendBody",
             BbcodeEnabled = true,
             FitContent = true,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
@@ -1944,6 +1945,25 @@ public static partial class CompendiumFilterPatch
         vbox.AddChild(body);
 
         return legend;
+    }
+
+    // Horizontal chrome of a pane built with BuildPanelStyle + a 14px
+    // MarginContainer: panel content margins (16+16) + margins (14+14). The
+    // legend and the filter pane share both, so matching their body widths makes
+    // their outer widths match.
+    private const float LegendHorizontalInset = 60f;
+
+    /// <summary>Width-matches the legend tooltip to <paramref name="outerWidth"/>
+    /// (the filter pane's width) by driving its body's wrap width, sets its Size,
+    /// and returns its height. Used by both the card/relic reposition and the
+    /// bestiary's settings-pane reposition.</summary>
+    internal static float SizeLegendToWidth(PanelContainer legend, float outerWidth)
+    {
+        if (legend.FindChild("LegendBody", true, false) is RichTextLabel body)
+            body.CustomMinimumSize = new Vector2(System.Math.Max(40f, outerWidth - LegendHorizontalInset), 0f);
+        float h = legend.GetCombinedMinimumSize().Y;
+        legend.Size = new Vector2(outerWidth, h);
+        return h;
     }
 
     internal static Label MakeLabel(string text, float minWidth = 0)
