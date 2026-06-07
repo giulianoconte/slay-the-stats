@@ -1575,11 +1575,7 @@ public static partial class CompendiumFilterPatch
                 classLabels.Add(FormatCharName(ch));
             }
             classSelect = new OptionButton();
-            classSelect.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-            classSelect.AddThemeColorOverride("font_color", Cream);
-            classSelect.AddThemeColorOverride("font_hover_color", Gold);
-            classSelect.AddThemeColorOverride("font_focus_color", Gold);
-            ApplyGameFont(classSelect, 16);
+            StyleFilterDropdown(classSelect, 110);
             for (int i = 0; i < classLabels.Count; i++)
                 classSelect.AddItem(classLabels[i], i);
             SelectClassFilter(classSelect, classValues, SlayTheStatsConfig.ClassFilter);
@@ -1933,13 +1929,7 @@ public static partial class CompendiumFilterPatch
     private static OptionButton MakeVersionDropdown(List<string> labels, List<string> values, string selected)
     {
         var btn = new OptionButton();
-        btn.CustomMinimumSize = new Vector2(150, 0);
-        btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        btn.AddThemeColorOverride("font_color", Cream);
-        btn.AddThemeColorOverride("font_hover_color", Gold);
-        btn.AddThemeColorOverride("font_focus_color", Gold);
-        ApplyGameFont(btn, 19);
-        ApplyDropdownStyle(btn);
+        StyleFilterDropdown(btn, 150);
         for (int i = 0; i < labels.Count; i++)
             btn.AddItem(labels[i], i);
         SelectVersionValue(btn, values, selected);
@@ -1988,18 +1978,27 @@ public static partial class CompendiumFilterPatch
     private static OptionButton MakeDropdown(List<string> items, string selected)
     {
         var btn = new OptionButton();
-        btn.CustomMinimumSize = new Vector2(110, 0);
+        StyleFilterDropdown(btn, 110);
+        btn.AddItem(L.T("filter.dropdown.any"), 0);
+        for (int i = 0; i < items.Count; i++)
+            btn.AddItem(items[i], i + 1);
+        SelectOptionByText(btn, selected);
+        return btn;
+    }
+
+    /// <summary>Shared styling for every filter-pane dropdown (class / version /
+    /// profile) so they read as one family — same colors, font, and bordered
+    /// background. Was previously duplicated, and the class dropdown diverged
+    /// (smaller font, no border).</summary>
+    private static void StyleFilterDropdown(OptionButton btn, float minWidth)
+    {
+        btn.CustomMinimumSize = new Vector2(minWidth, 0);
         btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         btn.AddThemeColorOverride("font_color", Cream);
         btn.AddThemeColorOverride("font_hover_color", Gold);
         btn.AddThemeColorOverride("font_focus_color", Gold);
         ApplyGameFont(btn, 19);
         ApplyDropdownStyle(btn);
-        btn.AddItem(L.T("filter.dropdown.any"), 0);
-        for (int i = 0; i < items.Count; i++)
-            btn.AddItem(items[i], i + 1);
-        SelectOptionByText(btn, selected);
-        return btn;
     }
 
     /// <summary>Applies a visible bordered background to an OptionButton dropdown so it
