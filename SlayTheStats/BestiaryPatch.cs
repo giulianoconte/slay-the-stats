@@ -1184,8 +1184,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 && GodotObject.IsInstanceValid(legend))
             {
                 var spGlobal = _bestiarySettingsPane.GlobalPosition;
-                float lgH = CompendiumFilterPatch.SizeLegendToWidth(legend, fpSize.X);
-                legend.GlobalPosition = new Vector2(spGlobal.X, spGlobal.Y - lgH - gap);
+                CompendiumFilterPatch.PlaceLegendAbove(legend, spGlobal.X, spGlobal.Y, fpSize.X, gap);
             }
             MainFile.DebugLog($"BestiarySettingsPane reposition: fpGlobal={fpGlobal} fpSize={fpSize} spSize={spSize} → spGlobal={_bestiarySettingsPane.GlobalPosition} spPosition={_bestiarySettingsPane.Position}");
         }).CallDeferred();

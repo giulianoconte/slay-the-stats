@@ -718,10 +718,8 @@ public static partial class CompendiumFilterPatch
             && fpc.AssociatedLegendPane is PanelContainer legend
             && GodotObject.IsInstanceValid(legend))
         {
-            const float legendGap = 8f;
             float paneW = pane.GetCombinedMinimumSize().X;
-            float legendH = SizeLegendToWidth(legend, paneW);
-            legend.GlobalPosition = new Vector2(pane.GlobalPosition.X, pane.GlobalPosition.Y - legendH - legendGap);
+            PlaceLegendAbove(legend, pane.GlobalPosition.X, pane.GlobalPosition.Y, paneW, 8f);
         }
     }
 
@@ -1954,16 +1952,27 @@ public static partial class CompendiumFilterPatch
     private const float LegendHorizontalInset = 60f;
 
     /// <summary>Width-matches the legend tooltip to <paramref name="outerWidth"/>
-    /// (the filter pane's width) by driving its body's wrap width, sets its Size,
-    /// and returns its height. Used by both the card/relic reposition and the
-    /// bestiary's settings-pane reposition.</summary>
-    internal static float SizeLegendToWidth(PanelContainer legend, float outerWidth)
+    /// (the filter pane's width), sizes its height to fit the wrapped text, and
+    /// places it so its bottom sits <paramref name="gap"/> above
+    /// <paramref name="bottomY"/>, left-aligned at <paramref name="x"/>. Used by the
+    /// card/relic reposition and the bestiary's settings-pane reposition.</summary>
+    internal static void PlaceLegendAbove(PanelContainer legend, float x, float bottomY, float outerWidth, float gap)
     {
         if (legend.FindChild("LegendBody", true, false) is RichTextLabel body)
-            body.CustomMinimumSize = new Vector2(System.Math.Max(40f, outerWidth - LegendHorizontalInset), 0f);
+        {
+            float bodyW = System.Math.Max(40f, outerWidth - LegendHorizontalInset);
+            // Wrap the body at the matched width, then pin its height to the
+            // wrapped content height. GetContentHeight() reflows at the current
+            // width, so we set the width first — this makes the legend's combined
+            // min size exact synchronously instead of measuring before the
+            // re-wrap (which left a couple lines of trailing blank space).
+            body.CustomMinimumSize = new Vector2(bodyW, 0f);
+            body.Size = new Vector2(bodyW, body.Size.Y);
+            body.CustomMinimumSize = new Vector2(bodyW, body.GetContentHeight());
+        }
         float h = legend.GetCombinedMinimumSize().Y;
         legend.Size = new Vector2(outerWidth, h);
-        return h;
+        legend.GlobalPosition = new Vector2(x, bottomY - gap - h);
     }
 
     internal static Label MakeLabel(string text, float minWidth = 0)
