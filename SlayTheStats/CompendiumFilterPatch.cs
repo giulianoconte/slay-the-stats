@@ -1916,7 +1916,7 @@ public static partial class CompendiumFilterPatch
         vbox.AddThemeConstantOverride("separation", 8);
         legendMargin.AddChild(vbox);
 
-        var title = new Label { Text = L.T("compendium.legend.columns.title") };
+        var title = new Label { Text = L.T(combat ? "compendium.legend.combat.title" : "compendium.legend.columns.title") };
         title.AddThemeColorOverride("font_color", Gold);
         ApplyGameFont(title, 18);
         vbox.AddChild(title);
