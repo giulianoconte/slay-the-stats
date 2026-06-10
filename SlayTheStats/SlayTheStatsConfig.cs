@@ -105,6 +105,29 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool BestiaryPreviewEnabled => BestiaryPreviewMode != BestiaryPreviewModeEnum.None;
 
     /// <summary>
+    /// Community stats (Spire Codex integration) participation level.
+    /// Off: no network calls at all. ReadOnly: pull community baselines and show
+    /// them in tooltips. ReadShare: also submit completed runs to the community
+    /// corpus. Default Off — opt-in only.
+    ///
+    /// Visible on DEV builds (as a raw enum dropdown) so the read/share paths can
+    /// be exercised during Phase 1/2 dev; hidden on release until Phase 3 (#34)
+    /// ships the real user-facing 3-state setting with consent copy + onboarding
+    /// (#35). Mirrors the DebugMode gating pattern below.
+    /// </summary>
+    public enum CommunityMode
+    {
+        Off,
+        ReadOnly,
+        ReadShare,
+    }
+
+#if !DEV_BUILD
+    [ConfigHideInUI]
+#endif
+    public static CommunityMode Community { get; set; } = CommunityMode.Off;
+
+    /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
     /// (the folder that contains the "steam" subfolder).
     /// Leave empty to use the platform default.

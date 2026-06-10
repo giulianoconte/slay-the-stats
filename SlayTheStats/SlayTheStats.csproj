@@ -70,6 +70,15 @@
         <DeployToMods Condition="'$(DeployToMods)' == ''">false</DeployToMods>
     </PropertyGroup>
 
+    <!-- Spire Codex API origin baked into the build as BuildInfo.SpireCodexBaseUrl.
+         Defaults to production; a DEV build can override it via the deploy script's
+         spire-url flag (which passes /p:SpireCodexBaseUrl=…). The deploy script
+         refuses that flag on a release build, and CommunityStats.BaseUrl hard-pins
+         prod when IsRelease, so a localhost URL can never ship. -->
+    <PropertyGroup>
+        <SpireCodexBaseUrl Condition="'$(SpireCodexBaseUrl)' == ''">https://spire-codex.com</SpireCodexBaseUrl>
+    </PropertyGroup>
+
     <!-- DEV_BUILD: define on every non-Release configuration so developer-only
          features (the dev-build banner, table wireframe overlay, sparkline
          debug panel, and the BaseLib config toggle that gates them) compile
@@ -218,6 +227,7 @@
             <_BuildInfoLine Include="    internal const string BuildTime = %22$(_BuildTime)%22%3B" />
             <_BuildInfoLine Include="    internal const string BuildUtc = %22$(_BuildUtc)%22%3B" />
             <_BuildInfoLine Include="    internal const bool IsRelease = $(_IsRelease)%3B" />
+            <_BuildInfoLine Include="    internal const string SpireCodexBaseUrl = %22$(SpireCodexBaseUrl)%22%3B" />
             <_BuildInfoLine Include="}" />
         </ItemGroup>
         <WriteLinesToFile File="$(_BuildInfoPath)" Lines="@(_BuildInfoLine)" Overwrite="true" />

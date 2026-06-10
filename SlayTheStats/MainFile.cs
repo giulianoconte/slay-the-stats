@@ -10,6 +10,12 @@ public partial class MainFile : Node
 {
     public const string ModId = "SlayTheStats"; //At the moment, this is used only for the Logger and harmony names.
 
+    /// <summary>Display/identification version (keep in sync with SlayTheStats.json on
+    /// release). Distinct from <see cref="StatsDb.CurrentModVersion"/>, which is a
+    /// schema/migration baseline. Used in the Spire Codex client's User-Agent so peter
+    /// can identify the mod's API traffic.</summary>
+    public const string ModVersion = "v1.1.0";
+
     public static MegaCrit.Sts2.Core.Logging.Logger Logger { get; } = new(ModId, MegaCrit.Sts2.Core.Logging.LogType.Generic);
 
     /// <summary>
@@ -93,6 +99,10 @@ public partial class MainFile : Node
 
         Db = StatsDb.Load(SavePath, msg => Logger.Warn(msg));
         DebugTestData.InjectIfDebug(Db);
+
+        // Community stats: load the on-disk snapshot into memory now (no network).
+        // The throttled refresh is kicked from NMainMenu._Ready (MainMenuReadyPatch).
+        Community.CommunityStats.LoadAtBoot();
         // RunParser.ProcessNewRuns is called from MainMenuReadyPatch (NMainMenu._Ready),
         // which fires on boot and after every run ends.
     }

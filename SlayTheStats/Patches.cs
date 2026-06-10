@@ -208,6 +208,9 @@ public static class MainMenuReadyPatch
         // history shrinkage) should be visible in normal logs. Ref #4, cf. #3.
         RunParser.ProcessNewRuns(MainFile.Db, MainFile.SavePath, msg => MainFile.Logger.Info(msg), msg => MainFile.Logger.Warn(msg));
 
+        // Throttled, off-thread community-stats refresh (no-ops unless due + enabled).
+        Community.CommunityStats.MaybeRefresh();
+
         if (!BuildInfo.IsRelease && !_devBannerShown)
         {
             _devBannerShown = true;

@@ -30,5 +30,10 @@
     <Compile Include="../SlayTheStats/RunParser.cs" />
     <Compile Include="../SlayTheStats/StatsAggregator.cs" />
     <Compile Include="../SlayTheStats/L.cs" />
+    <!-- Community: the Godot-free pieces (DTOs, cache+backoff, HTTP client).
+         CommunityStats.cs is excluded — it depends on Godot (OS/Logger). -->
+    <Compile Include="../SlayTheStats/Community/SpireCodexDtos.cs" />
+    <Compile Include="../SlayTheStats/Community/CommunityCache.cs" />
+    <Compile Include="../SlayTheStats/Community/SpireCodexClient.cs" />
   </ItemGroup>
 </Project>
