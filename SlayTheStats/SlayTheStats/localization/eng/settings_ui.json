@@ -64,6 +64,11 @@
     "tooltip.baseline.pick":       "(baseline)    Pick% {pick}    Win% {win}",
     "tooltip.baseline.buys":       "(baseline)    Buys {buys}    Win% {win}",
     "tooltip.baseline.encounter_nodata":  "(baseline) {category} dmg: {dmg}",
+    "tooltip.community.pick":      "(community {cohort})    Pick% {pick}    Win% {win}",
+    "tooltip.community.win":       "(community {cohort})    Win% {win}",
+    "tooltip.community.asof":      "    (as of {date})",
+    "community.cohort.all":        "all",
+    "community.cohort.a10":        "A10",
 
     "filter.all_characters":       "All characters",
     "filter.sentinel.lowest":      "Lowest",

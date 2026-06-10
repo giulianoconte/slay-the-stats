@@ -66,7 +66,8 @@ public static class CardHoverShowPatch
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db, filter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
-                statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter);
+                var communityRow        = CommunityTooltip.CardRow(rawId, upgradeLevel > 0);
+                statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter, communityRow);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -642,12 +643,12 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, string? communityRow = null)
     {
         var sb = new StringBuilder();
 
         if (showBuysLayout)
-            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter);
+            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter, communityRow);
 
         // Class card columns: Act | Runs (present/offered) | Pick% | Win%
         sb.Append("[table=4]");
@@ -721,6 +722,10 @@ public static class CardHoverShowPatch
         var baselineText = L.T("tooltip.baseline.pick", ("pick", prBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
 
+        // Community reference row (Area 5) — appended below our baseline when enabled
+        // and a community figure exists; null = omit (disabled / no data).
+        if (communityRow != null) sb.Append(communityRow);
+
         var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
 
@@ -733,7 +738,7 @@ public static class CardHoverShowPatch
     /// Buys shows RunsShopBought/RunsShopSeen (purchases / shop appearances).
     /// Win% is placed last, consistent across all stat tables.
     /// </summary>
-    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null)
+    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null, string? communityRow = null)
     {
         var sb = new StringBuilder();
         // Columns: Act | Runs | Buys (bought/seen) | Win%
@@ -795,6 +800,8 @@ public static class CardHoverShowPatch
         var buysBaseStr  = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
         var baselineText = L.T("tooltip.baseline.buys", ("buys", buysBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
+
+        if (communityRow != null) sb.Append(communityRow);
 
         var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
@@ -947,9 +954,10 @@ public static class InspectCardDisplayPatch
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: inspFilter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: inspFilter);
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db, inspFilter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, inspFilter);
+                var communityRow        = CommunityTooltip.CardRow(rawId, upgradeLevel > 0);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(inspFilter)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline, inspFilter);
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline, inspFilter, communityRow);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -1043,9 +1051,10 @@ public static class MerchantCardCreateHoverTipPatch
                 var actStats            = StatsAggregator.AggregateByAct(contextMap, filter);
                 var characterWR         = effectiveChar != null ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter) : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
+                var communityRow        = CommunityTooltip.CardRow(rawId, upgradeLevel > 0);
                 statsText = actStats.Count == 0
                     ? CardHoverShowPatch.NoDataText(filter)
-                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline, filter);
+                    : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline, filter, communityRow);
             }
 
             TooltipHelper.TrySceneTheftOnce();

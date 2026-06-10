@@ -128,6 +128,23 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static CommunityMode Community { get; set; } = CommunityMode.Off;
 
     /// <summary>
+    /// Which community reference cohort the baseline row shows (Area 4/6): the broad
+    /// "everyone" line (All) or ascension-10+ (A10). A coarse reference, never matched
+    /// to the player's active filters. DEV-visible like <see cref="Community"/>; the
+    /// polished selector ships with #34.
+    /// </summary>
+    public enum CommunityCohort
+    {
+        All,
+        A10,
+    }
+
+#if !DEV_BUILD
+    [ConfigHideInUI]
+#endif
+    public static CommunityCohort CommunityReferenceCohort { get; set; } = CommunityCohort.All;
+
+    /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
     /// (the folder that contains the "steam" subfolder).
     /// Leave empty to use the platform default.

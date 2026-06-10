@@ -119,7 +119,8 @@ internal static class RelicHoverHelper
                     ? StatsAggregator.GetCharacterWR(MainFile.Db, effectiveChar, filter: filter)
                     : StatsAggregator.GetGlobalWR(MainFile.Db, filter: filter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
-                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(filter) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter);
+                var communityRow        = CommunityTooltip.RelicRow(rawId);
+                statsText = actStats.Count == 0 ? CardHoverShowPatch.NoDataText(filter) : BuildStatsText(actStats, wrBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, shopBuyRateBaseline, filter, communityRow);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -209,7 +210,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, string? communityRow = null)
     {
         var sb = new StringBuilder();
 
@@ -271,6 +272,9 @@ internal static class RelicHoverHelper
         var buysBaseStr = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
         var baselineText = L.T("tooltip.baseline.buys", ("buys", buysBaseStr), ("win", wrStr));
         sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
+
+        // Community reference row (Area 5) — win-rate only (community has no shop-buy figure).
+        if (communityRow != null) sb.Append(communityRow);
 
         var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
