@@ -67,6 +67,7 @@
     "tooltip.community.pick":      "(community {cohort})    Pick% {pick}    Win% {win}",
     "tooltip.community.win":       "(community {cohort})    Win% {win}",
     "tooltip.community.asof":      "    (as of {date})",
+    "descriptor.community":        "community ({cohort})",
     "community.cohort.all":        "all",
     "community.cohort.a10":        "A10",
 

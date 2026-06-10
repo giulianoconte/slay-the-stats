@@ -43,6 +43,18 @@ internal static class CommunityTooltip
         return TooltipHelper.FormatBaselineLine(line + AsOfSuffix());
     }
 
+    /// <summary>Community encounter figures + descriptor for the bestiary row, or null to
+    /// omit. Encounter stats aren't cohort-split in the API (one global set), so the row is
+    /// always the full-community ("all") reference regardless of the card/relic cohort.</summary>
+    internal static (CommunityEncounterMetric metric, string descriptor)? EncounterFigures(string encounterId)
+    {
+        if (!Enabled) return null;
+        if (CommunityAdapter.GetEncounterMetric(CommunityStats.Current, encounterId) is not { } m)
+            return null;
+        var descriptor = L.T("descriptor.community", ("cohort", L.T("community.cohort.all"))) + AsOfSuffix();
+        return (m, descriptor);
+    }
+
     private static (string cohort, string label) Cohort() =>
         SlayTheStatsConfig.CommunityReferenceCohort == SlayTheStatsConfig.CommunityCohort.A10
             ? (CommunityAdapter.CohortA10, L.T("community.cohort.a10"))

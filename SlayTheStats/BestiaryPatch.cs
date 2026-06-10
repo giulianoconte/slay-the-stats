@@ -3955,10 +3955,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
             else
             {
+                var community = CommunityTooltip.EncounterFigures(encounterId);
                 var parts = EncounterTooltipHelper.BuildEncounterStatsTextParts(
                     charStats, deathRateBaseline, dmgPctBaseline, iqrcBaseline,
                     filter.AscensionMin, filter.AscensionMax, categoryLabel,
-                    filter: filter);
+                    filter: filter,
+                    communityMetric: community?.metric,
+                    communityLabel: community?.descriptor);
                 ShowAllCharsStats(parts);
             }
             return;

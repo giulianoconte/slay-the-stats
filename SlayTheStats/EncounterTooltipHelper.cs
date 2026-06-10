@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using Godot;
 using MegaCrit.Sts2.Core.Localization;
+using SlayTheStats.Community;
 
 namespace SlayTheStats;
 
@@ -84,7 +85,9 @@ public static class EncounterTooltipHelper
         int? ascensionMax,
         string categoryLabel,
         AggregationFilter? filter = null,
-        string? characterLabel = null)
+        string? characterLabel = null,
+        CommunityEncounterMetric? communityMetric = null,
+        string? communityLabel = null)
     {
         var startingHps = MainFile.Db.CharacterStartingHp;
 
@@ -205,6 +208,14 @@ public static class EncounterTooltipHelper
             AppendEmptyDataCells(body);
             sparklineValues.Add(null);
         }
+
+        // Community reference row (Area 5) — appended below the All baseline row when
+        // enabled and present. Coarse data: only the columns with comparable units are
+        // filled (Turns, Deaths%); Fights (no n-display), Dmg% (raw≠HP-normalized),
+        // Dist/Mid50/Spread/Potions have no community equivalent and render empty.
+        if (communityMetric is { } cm)
+            AppendCommunityRow(body, cm, communityLabel ?? "community", sparklineValues);
+
         var sparklines = BuildSparklinesFromValues(sparklineValues);
 
         body.Append("[/table]");
@@ -716,6 +727,37 @@ public static class EncounterTooltipHelper
         sb.Append($"[cell {P.Turns}][right]{cTurns}[/right][/cell]");
         sb.Append($"[cell {P.Pots}][right]{cPots}[/right][/cell]");
         sb.Append($"[cell {P.Deaths}][right]{cDeaths}[/right][/cell]");
+    }
+
+    /// <summary>
+    /// The community reference row for the all-chars (bestiary) table. Renders neutral
+    /// (a reference line, not a judged sample). Community encounter data is coarse, so only
+    /// the same-unit columns are filled — Turns (avg_turns) and Deaths (fatal/total %). The
+    /// Fights cell is left empty (no n-display, Area 5), the Dmg% cell is empty because the
+    /// community avg_damage is raw rather than HP-normalized, and Dist/Mid50/Spread/Potions
+    /// have no community equivalent. A null sparkline slot keeps the 1:1 marker↔sparkline
+    /// invariant the table relies on.
+    /// </summary>
+    private static void AppendCommunityRow(StringBuilder sb, CommunityEncounterMetric m, string descriptor, List<double[]?> sparklineValues)
+    {
+        var P = AllCharsColumns;
+        string color = ContextRowDataColor;
+
+        AppendDescriptorCell(sb, descriptor, parts: AllCharsDescriptorParts);
+        sb.Append(EmptyDataCell(P.Fought, color));
+        AppendSparkMarkerCell(sb, P);
+        sb.Append(EmptyDataCell(P.Dmg, color));
+        sb.Append(EmptyDataCell(P.Mid50, color));
+        sb.Append(EmptyDataCell(P.Spread, color));
+
+        var fTurns = m.AvgTurns is { } t ? $"{t:F1}" : "-";
+        sb.Append($"[cell {P.Turns}][right][color={color}]{fTurns}[/color][/right][/cell]");
+        sb.Append(EmptyDataCell(P.Pots, color));
+
+        var fDeaths = m.DeathRate is { } dr ? $"{dr * 100:F0}%" : "-";
+        sb.Append($"[cell {P.Deaths}][right][color={color}]{fDeaths}[/color][/right][/cell]");
+
+        sparklineValues.Add(null);
     }
 
     /// <summary>Pool (rows 2/3/4) data cells. Dull neutral color across the
