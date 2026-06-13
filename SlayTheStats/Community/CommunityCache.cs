@@ -54,6 +54,11 @@ public sealed class CommunityCache
     /// <summary>True while a prior failure's backoff window is still open.</summary>
     public bool InBackoff(DateTimeOffset now) => Backoff.NextEligibleUtc is { } next && now < next;
 
+    /// <summary>True while a server-requested <c>Retry-After</c> window is still open.
+    /// A manual "refresh now" ignores the ordinary backoff (<see cref="InBackoff"/>)
+    /// but still respects this — we never hammer a server that explicitly asked us to wait.</summary>
+    public bool InRetryAfter(DateTimeOffset now) => Backoff.RetryAfterUntilUtc is { } until && now < until;
+
     /// <summary>A refresh should be attempted iff data is stale and we're not in a backoff window.</summary>
     public bool ShouldRefresh(DateTimeOffset now) => !InBackoff(now) && IsStale(now);
 
@@ -66,6 +71,9 @@ public sealed class CommunityCache
         var delay = BackoffSchedule[idx];
         if (retryAfter is { } ra && ra > delay) delay = ra;
         Backoff.NextEligibleUtc = now + delay;
+        // Track the server-requested window separately: it gates even a manual refresh,
+        // whereas the scheduled backoff above only gates the automatic cadence.
+        Backoff.RetryAfterUntilUtc = retryAfter is { } r ? now + r : null;
     }
 
     /// <summary>Clears backoff after a successful refresh.</summary>
@@ -73,6 +81,7 @@ public sealed class CommunityCache
     {
         Backoff.ConsecutiveFailures = 0;
         Backoff.NextEligibleUtc = null;
+        Backoff.RetryAfterUntilUtc = null;
     }
 
     private static readonly JsonSerializerOptions SerOpts = new()
@@ -134,4 +143,8 @@ public sealed class BackoffState
 {
     [JsonPropertyName("consecutive_failures")] public int ConsecutiveFailures { get; set; }
     [JsonPropertyName("next_eligible_utc")]    public DateTimeOffset? NextEligibleUtc { get; set; }
+    /// <summary>When a server <c>Retry-After</c> window closes (null if the last failure
+    /// wasn't a 429 / didn't carry one). Distinct from <see cref="NextEligibleUtc"/> so a
+    /// manual refresh can ignore the ordinary backoff yet still honor an explicit server ask.</summary>
+    [JsonPropertyName("retry_after_until_utc")] public DateTimeOffset? RetryAfterUntilUtc { get; set; }
 }

@@ -160,6 +160,28 @@ public class CommunityCacheTests
         cache.RecordSuccess();
         Assert.Equal(0, cache.Backoff.ConsecutiveFailures);
         Assert.Null(cache.Backoff.NextEligibleUtc);
+        Assert.Null(cache.Backoff.RetryAfterUntilUtc);
         Assert.False(cache.InBackoff(now));
+        Assert.False(cache.InRetryAfter(now));
+    }
+
+    [Fact]
+    public void InRetryAfter_OnlySetByServerRetryAfter()
+    {
+        var now = new DateTimeOffset(2026, 6, 9, 0, 0, 0, TimeSpan.Zero);
+
+        // An ordinary failure (no Retry-After) opens a backoff window but NOT a
+        // retry-after window — so a manual refresh stays allowed.
+        var plain = new CommunityCache();
+        plain.RecordFailure(now);
+        Assert.True(plain.InBackoff(now));
+        Assert.False(plain.InRetryAfter(now));
+
+        // A 429 with Retry-After opens both; the retry-after window closes when it elapses.
+        var throttled = new CommunityCache();
+        throttled.RecordFailure(now, TimeSpan.FromHours(3));
+        Assert.True(throttled.InRetryAfter(now));
+        Assert.True(throttled.InRetryAfter(now + TimeSpan.FromHours(2)));
+        Assert.False(throttled.InRetryAfter(now + TimeSpan.FromHours(3)));
     }
 }

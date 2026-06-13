@@ -36,6 +36,26 @@
     "SLAYTHESTATS-DEBUG_MODE.title": "Debug Mode",
     "SLAYTHESTATS-DEBUG_MODE.hover.desc": "Surface internal state in tooltips (context key, raw counters, build version) to help diagnose issues without reading logs.",
 
+    "SLAYTHESTATS-COMMUNITY_STATS.title": "Community Stats (Spire Codex)",
+
+    "SLAYTHESTATS-COMMUNITY.title": "Community Stats",
+    "SLAYTHESTATS-COMMUNITY.hover.title": "Community Stats (Spire Codex)",
+    "SLAYTHESTATS-COMMUNITY.hover.desc": "Show how the wider community fares with each card, relic, and encounter, pulled from spire-codex.com and shown as a reference line next to your own stats.\n\nOff — hidden; no network connection is ever made.\nRead-only — downloads community stats to display; your own runs are never uploaded.\nRead + Share — also contributes your completed runs to the public community dataset.\n\nEnabling Read-only or Read + Share connects to spire-codex.com.",
+    "SLAYTHESTATS-COMMUNITY.Off": "Off",
+    "SLAYTHESTATS-COMMUNITY.ReadOnly": "Read-only",
+    "SLAYTHESTATS-COMMUNITY.ReadShare": "Read + Share",
+
+    "SLAYTHESTATS-COMMUNITY_REFERENCE_COHORT.title": "Reference Cohort",
+    "SLAYTHESTATS-COMMUNITY_REFERENCE_COHORT.hover.desc": "Which slice of the community the reference line represents. Everyone covers all recorded runs; Ascension 10+ restricts it to high-ascension play. Encounter stats are always shown for everyone (the data source doesn't split those by ascension).",
+    "SLAYTHESTATS-COMMUNITY_REFERENCE_COHORT.All": "Everyone",
+    "SLAYTHESTATS-COMMUNITY_REFERENCE_COHORT.A10": "Ascension 10+",
+
+    "SLAYTHESTATS-COMMUNITY_REFRESH_NOW.title": "Refresh community data",
+    "SLAYTHESTATS-COMMUNITY_REFRESH_NOW_BUTTON.title": "Refresh now",
+
+    "SLAYTHESTATS-COMMUNITY_OPEN_WEBSITE.title": "Data source",
+    "SLAYTHESTATS-COMMUNITY_ATTRIBUTION_BUTTON.title": "spire-codex.com",
+
 
     "tooltip.col.act":             "Act",
     "tooltip.col.runs":            "Runs",

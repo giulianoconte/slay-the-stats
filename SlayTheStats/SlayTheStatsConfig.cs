@@ -1,4 +1,5 @@
 using BaseLib.Config;
+using SlayTheStats.Community;
 
 namespace SlayTheStats;
 
@@ -105,46 +106,6 @@ internal class SlayTheStatsConfig : SimpleModConfig
     public static bool BestiaryPreviewEnabled => BestiaryPreviewMode != BestiaryPreviewModeEnum.None;
 
     /// <summary>
-    /// Community stats (Spire Codex integration) participation level.
-    /// Off: no network calls at all. ReadOnly: pull community baselines and show
-    /// them in tooltips. ReadShare: also submit completed runs to the community
-    /// corpus. Default Off — opt-in only.
-    ///
-    /// Visible on DEV builds (as a raw enum dropdown) so the read/share paths can
-    /// be exercised during Phase 1/2 dev; hidden on release until Phase 3 (#34)
-    /// ships the real user-facing 3-state setting with consent copy + onboarding
-    /// (#35). Mirrors the DebugMode gating pattern below.
-    /// </summary>
-    public enum CommunityMode
-    {
-        Off,
-        ReadOnly,
-        ReadShare,
-    }
-
-#if !DEV_BUILD
-    [ConfigHideInUI]
-#endif
-    public static CommunityMode Community { get; set; } = CommunityMode.Off;
-
-    /// <summary>
-    /// Which community reference cohort the baseline row shows (Area 4/6): the broad
-    /// "everyone" line (All) or ascension-10+ (A10). A coarse reference, never matched
-    /// to the player's active filters. DEV-visible like <see cref="Community"/>; the
-    /// polished selector ships with #34.
-    /// </summary>
-    public enum CommunityCohort
-    {
-        All,
-        A10,
-    }
-
-#if !DEV_BUILD
-    [ConfigHideInUI]
-#endif
-    public static CommunityCohort CommunityReferenceCohort { get; set; } = CommunityCohort.All;
-
-    /// <summary>
     /// Override the root directory where SlayTheSpire2 stores its data
     /// (the folder that contains the "steam" subfolder).
     /// Leave empty to use the platform default.
@@ -164,6 +125,64 @@ internal class SlayTheStatsConfig : SimpleModConfig
     [ConfigHideInUI]
 #endif
     public static bool DebugMode { get; set; } = false;
+
+    // ── Community stats (Spire Codex integration, #29) ──────────────────────
+    // Declared last among the UI-visible properties so the [ConfigSection] header
+    // groups exactly these rows — a section runs until the next [ConfigSection],
+    // and everything below here is [ConfigHideInUI], so nothing else is swept in.
+
+    /// <summary>
+    /// Community stats (Spire Codex integration) participation level. (#34)
+    /// Off: no network calls at all. ReadOnly: pull community baselines and show
+    /// them in tooltips. ReadShare: also submit completed runs to the community
+    /// corpus. Default Off — opt-in only; enabling makes outbound calls to
+    /// spire-codex.com. (The share half of ReadShare wires up in #36; until then
+    /// ReadShare reads exactly like ReadOnly and uploads nothing.)
+    /// </summary>
+    public enum CommunityMode
+    {
+        Off,
+        ReadOnly,
+        ReadShare,
+    }
+
+    [ConfigSection("CommunityStats")]
+    [ConfigHoverTip]
+    public static CommunityMode Community { get; set; } = CommunityMode.Off;
+
+    /// <summary>
+    /// Which community reference cohort the baseline row shows (Area 4/6): the broad
+    /// "everyone" line (All) or ascension-10+ (A10). A coarse reference, never matched
+    /// to the player's active filters. Only meaningful while community stats are on,
+    /// so the row is hidden when <see cref="Community"/> is Off.
+    /// </summary>
+    public enum CommunityCohort
+    {
+        All,
+        A10,
+    }
+
+    [ConfigVisibleIf(nameof(Community), CommunityMode.ReadOnly, CommunityMode.ReadShare)]
+    [ConfigHoverTip]
+    public static CommunityCohort CommunityReferenceCohort { get; set; } = CommunityCohort.All;
+
+    /// <summary>
+    /// [ConfigButton] Force an immediate community-stats refresh now, bypassing the
+    /// normal staleness/cadence gate (but still honoring a server 429 Retry-After).
+    /// Shown only when community stats are enabled.
+    /// </summary>
+    [ConfigButton("CommunityRefreshNowButton")]
+    [ConfigVisibleIf(nameof(Community), CommunityMode.ReadOnly, CommunityMode.ReadShare)]
+    private static void CommunityRefreshNow() => CommunityStats.ForceRefresh();
+
+    /// <summary>
+    /// [ConfigButton] Opens spire-codex.com — the visible attribution / data-source
+    /// link required by the integration (Area 7). Shown only when community stats
+    /// are enabled. Always points at the public site, never a dev override URL.
+    /// </summary>
+    [ConfigButton("CommunityAttributionButton")]
+    [ConfigVisibleIf(nameof(Community), CommunityMode.ReadOnly, CommunityMode.ReadShare)]
+    private static void CommunityOpenWebsite() => CommunityStats.OpenWebsite();
 
     // ── Aggregation filter properties (v0.2.0) ──────────────────────────────
 

@@ -97,6 +97,31 @@ public static class CommunityStats
         _ = Task.Run(RefreshAsync);
     }
 
+    /// <summary>
+    /// Manual "refresh now" (settings button, #34). Forces an attempt regardless of
+    /// the staleness gate and the once-per-launch guard that <see cref="MaybeRefresh"/>
+    /// honors — the user explicitly asked. The one thing it won't override is a server
+    /// <c>Retry-After</c> window: we never hammer a server that asked us to wait. Single-
+    /// flight is still enforced inside <see cref="RefreshAsync"/>, so a double-click is safe.
+    /// </summary>
+    public static void ForceRefresh()
+    {
+        if (SlayTheStatsConfig.Community == SlayTheStatsConfig.CommunityMode.Off) return;
+        var now = DateTimeOffset.UtcNow;
+        if (_current.InRetryAfter(now))
+        {
+            MainFile.Logger.Info(
+                $"Manual community refresh skipped — server asked to retry after {_current.Backoff.RetryAfterUntilUtc:u}.");
+            return;
+        }
+        _attemptedThisLaunch = true;
+        _ = Task.Run(RefreshAsync);
+    }
+
+    /// <summary>Opens the Spire Codex site in the player's browser — the attribution /
+    /// data-source link (settings button, #34). Always the public site, never a dev override.</summary>
+    public static void OpenWebsite() => OS.ShellOpen(ProdBaseUrl);
+
     private static async Task RefreshAsync()
     {
         // Single-flight: never two refreshes in flight at once.

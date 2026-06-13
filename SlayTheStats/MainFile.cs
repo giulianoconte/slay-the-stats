@@ -57,6 +57,12 @@ public partial class MainFile : Node
         SlayTheStatsConfig.Sanitize();
         ModConfigRegistry.Register(ModId, config);
 
+        // When the user turns community stats on in settings, kick a refresh right
+        // away — otherwise baselines wouldn't appear until the next launch's menu-ready
+        // pass. MaybeRefresh self-gates on Off / staleness / once-per-launch, so firing
+        // it on every settings change (not just the community dropdown) is harmless.
+        config.ConfigChanged += (_, _) => Community.CommunityStats.MaybeRefresh();
+
         // On every boot, discard any unsaved filter tweaks from the previous session
         // and snap the live filter values back to the user's saved defaults. Filter
         // changes only persist across restarts if the user clicked "Save Defaults".
