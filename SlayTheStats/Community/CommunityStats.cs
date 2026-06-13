@@ -70,11 +70,18 @@ public static class CommunityStats
             // left behind in a prod build) so we never serve cross-origin data.
             if (cache.HasData && !string.IsNullOrEmpty(cache.SourceBaseUrl) && cache.SourceBaseUrl != BaseUrl)
             {
-                MainFile.DebugLog($"Community cache origin '{cache.SourceBaseUrl}' != current '{BaseUrl}' — discarding.");
+                MainFile.Logger.Info($"Community cache origin '{cache.SourceBaseUrl}' != current '{BaseUrl}' — discarding.");
                 cache = new CommunityCache { Backoff = cache.Backoff };
             }
             _current = cache;
-            MainFile.DebugLog($"Community cache loaded (fetched={cache.FetchedUtc?.ToString("o") ?? "never"}, runs={cache.TotalRuns}).");
+            // One Info line per launch summarizing what we start with — including an active
+            // backoff, so a silently-suppressed auto-refresh (the failure path advances the
+            // backoff window) is visible without DebugMode.
+            var b = cache.Backoff;
+            string backoffNote = b.ConsecutiveFailures > 0
+                ? $", backoff until {b.NextEligibleUtc:u} after {b.ConsecutiveFailures} failure(s)"
+                : "";
+            MainFile.Logger.Info($"Community cache loaded (fetched={cache.FetchedUtc?.ToString("o") ?? "never"}, runs={cache.TotalRuns}{backoffNote}).");
         }
         catch (Exception e)
         {
@@ -114,6 +121,10 @@ public static class CommunityStats
                 $"Manual community refresh skipped — server asked to retry after {_current.Backoff.RetryAfterUntilUtc:u}.");
             return;
         }
+        // Logged synchronously (before the off-thread launch) so a button press is
+        // visible immediately — distinguishes "button fired" from a refresh that
+        // never concluded (network hang / game closed mid-fetch).
+        MainFile.Logger.Info($"Manual community refresh requested (base={BaseUrl}).");
         _attemptedThisLaunch = true;
         _ = Task.Run(RefreshAsync);
     }
@@ -125,11 +136,16 @@ public static class CommunityStats
     private static async Task RefreshAsync()
     {
         // Single-flight: never two refreshes in flight at once.
-        if (!await _refreshLock.WaitAsync(0).ConfigureAwait(false)) return;
+        if (!await _refreshLock.WaitAsync(0).ConfigureAwait(false))
+        {
+            MainFile.Logger.Info("Community refresh already in progress — skipping duplicate request.");
+            return;
+        }
         try
         {
             var now = DateTimeOffset.UtcNow;
             _client ??= new SpireCodexClient(BaseUrl, UserAgent);
+            MainFile.Logger.Info($"Community refresh started (base={BaseUrl}).");
 
             var built = new CommunityCache { SourceBaseUrl = BaseUrl };
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -194,6 +210,6 @@ public static class CommunityStats
     {
         _current.RecordFailure(now, retryAfter);
         _current.Save(CachePath, msg => MainFile.Logger.Warn(msg));
-        MainFile.DebugLog($"Community refresh failed ({reason}); next attempt after {_current.Backoff.NextEligibleUtc:o}.");
+        MainFile.Logger.Warn($"Community refresh failed ({reason}); next attempt after {_current.Backoff.NextEligibleUtc:o}.");
     }
 }
