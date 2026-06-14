@@ -117,6 +117,56 @@ public class CommunityCacheTests
     }
 
     [Fact]
+    public void ShouldRefresh_FreshButIncomplete_True()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var cache = new CommunityCache { FetchedUtc = now, Complete = false }; // fresh, partial
+        Assert.False(cache.IsStale(now));
+        Assert.True(cache.ShouldRefresh(now)); // incomplete → still wants to fill the gaps
+    }
+
+    [Fact]
+    public void ShouldRefresh_FreshAndComplete_False()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var cache = new CommunityCache { FetchedUtc = now, Complete = true };
+        Assert.False(cache.ShouldRefresh(now));
+    }
+
+    [Fact]
+    public void ShouldRefresh_IncompleteButInBackoff_False()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var cache = new CommunityCache { FetchedUtc = now, Complete = false };
+        cache.RecordFailure(now); // a partial refresh sets a backoff window
+        Assert.False(cache.ShouldRefresh(now)); // backoff still gates the retry
+        Assert.True(cache.ShouldRefresh(now + TimeSpan.FromHours(2))); // ...until it elapses
+    }
+
+    [Fact]
+    public void CloneForRefresh_CopiesDataAndBackoff_ButIsIndependent()
+    {
+        var now = new DateTimeOffset(2026, 6, 14, 0, 0, 0, TimeSpan.Zero);
+        var orig = new CommunityCache { FetchedUtc = now, Complete = true, TotalRuns = 100 };
+        orig.Cohorts["all"] = new CohortMetrics { Cards = new MetricsResponse { TotalRuns = 100 } };
+        orig.RecordFailure(now); // ConsecutiveFailures = 1
+
+        var clone = orig.CloneForRefresh();
+        Assert.Equal(1, clone.Backoff.ConsecutiveFailures); // backoff carried forward
+        Assert.True(clone.Cohorts.ContainsKey("all"));       // existing data carried forward
+
+        // Mutating the clone's cohort dict and backoff must not disturb the original
+        // (the live snapshot readers still hold).
+        clone.Cohorts["all"].Relics = new MetricsResponse();
+        clone.Cohorts["a10"] = new CohortMetrics();
+        clone.RecordFailure(now); // clone → 2
+
+        Assert.Null(orig.Cohorts["all"].Relics);
+        Assert.False(orig.Cohorts.ContainsKey("a10"));
+        Assert.Equal(1, orig.Backoff.ConsecutiveFailures);
+    }
+
+    [Fact]
     public void RecordFailure_AdvancesSchedule_AndClamps()
     {
         var now = new DateTimeOffset(2026, 6, 9, 0, 0, 0, TimeSpan.Zero);

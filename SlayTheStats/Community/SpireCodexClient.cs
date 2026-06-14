@@ -110,7 +110,12 @@ public sealed class SpireCodexClient : IDisposable
                 ? FetchResult<T>.Err("empty/null response body")
                 : FetchResult<T>.Ok(value);
         }
-        catch (OperationCanceledException) { throw; }
+        // Our caller's token cancelling means the whole refresh is being torn down — propagate.
+        // A cancellation WITHOUT that token firing is the per-request HttpClient.Timeout (15s):
+        // treat it as an ordinary per-unit failure so one slow endpoint can't abort the rest
+        // of a partial refresh (it previously surfaced as a misleading "refresh timed out").
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) { return FetchResult<T>.Err("request timed out (15s)"); }
         catch (Exception e) { return FetchResult<T>.Err(e.Message); }
     }
 

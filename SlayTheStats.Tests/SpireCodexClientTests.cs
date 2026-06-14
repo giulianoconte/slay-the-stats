@@ -33,9 +33,48 @@ internal sealed class FakeHandler : HttpMessageHandler
         => new(code) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
 }
 
+/// <summary>A handler that always faults with a given exception — used to simulate
+/// the per-request <see cref="System.Net.Http.HttpClient.Timeout"/> firing.</summary>
+internal sealed class FaultingHandler : HttpMessageHandler
+{
+    private readonly Func<Exception> _ex;
+    public FaultingHandler(Func<Exception> ex) => _ex = ex;
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        => Task.FromException<HttpResponseMessage>(_ex());
+}
+
 public class SpireCodexClientTests
 {
     private static SpireCodexClient Client(FakeHandler h) => new("https://example.test", "SlayTheStats/test", h);
+
+    [Fact]
+    public async Task PerRequestTimeout_BecomesUnitError_DoesNotThrow()
+    {
+        // HttpClient.Timeout throws OperationCanceledException while the CALLER's token is
+        // not cancelled — that must surface as an ordinary unit failure (so a partial refresh
+        // can keep going), not propagate as a whole-refresh cancellation.
+        var client = new SpireCodexClient("https://example.test", "SlayTheStats/test",
+            new FaultingHandler(() => new OperationCanceledException()));
+
+        var r = await client.GetMetricsAsync("cards", "all", CancellationToken.None);
+
+        Assert.False(r.IsOk);
+        Assert.Contains("timed out", r.Error);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_Propagates()
+    {
+        // The caller's token cancelling (the overall 2-min budget / shutdown) must propagate
+        // so the manager's catch tears the whole refresh down.
+        var client = new SpireCodexClient("https://example.test", "SlayTheStats/test",
+            new FaultingHandler(() => new OperationCanceledException()));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.GetMetricsAsync("cards", "all", cts.Token));
+    }
 
     [Fact]
     public async Task GetMetrics_ParsesRowsAndNullableFields()

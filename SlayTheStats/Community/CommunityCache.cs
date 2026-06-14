@@ -44,6 +44,12 @@ public sealed class CommunityCache
     [JsonPropertyName("encounters")] public List<EncounterRow> Encounters { get; set; } = new();
     [JsonPropertyName("versions")]   public List<string> Versions { get; set; } = new();
 
+    /// <summary>True iff the last refresh fetched every unit (all cohort×entity metrics,
+    /// encounters, versions). A partial refresh publishes what it got but leaves this false,
+    /// which keeps <see cref="ShouldRefresh"/> true (after the backoff window) so the gaps
+    /// refill without waiting out the full freshness window.</summary>
+    [JsonPropertyName("complete")]   public bool Complete { get; set; }
+
     [JsonPropertyName("backoff")]    public BackoffState Backoff { get; set; } = new();
 
     [JsonIgnore] public bool HasData => FetchedUtc.HasValue;
@@ -59,8 +65,9 @@ public sealed class CommunityCache
     /// but still respects this — we never hammer a server that explicitly asked us to wait.</summary>
     public bool InRetryAfter(DateTimeOffset now) => Backoff.RetryAfterUntilUtc is { } until && now < until;
 
-    /// <summary>A refresh should be attempted iff data is stale and we're not in a backoff window.</summary>
-    public bool ShouldRefresh(DateTimeOffset now) => !InBackoff(now) && IsStale(now);
+    /// <summary>A refresh should be attempted iff we're not in a backoff window and the data
+    /// is either stale or incomplete (a prior partial refresh left units unfetched).</summary>
+    public bool ShouldRefresh(DateTimeOffset now) => !InBackoff(now) && (IsStale(now) || !Complete);
 
     /// <summary>Records a failed refresh: advances the backoff step and sets the next-eligible time.
     /// A server <c>Retry-After</c> wins if it's longer than the scheduled step.</summary>
@@ -82,6 +89,38 @@ public sealed class CommunityCache
         Backoff.ConsecutiveFailures = 0;
         Backoff.NextEligibleUtc = null;
         Backoff.RetryAfterUntilUtc = null;
+    }
+
+    /// <summary>
+    /// A working copy for a partial refresh. The manager fetches each unit (per cohort×entity
+    /// metrics, encounters, versions) independently and overwrites only the slices that
+    /// succeed, so a failed unit keeps its last-known-good value. Cohort entries are copied
+    /// into a fresh dictionary so mutating the working copy never disturbs the live snapshot
+    /// readers hold; the immutable payloads and the encounter/version lists (replaced wholesale
+    /// on success, never mutated in place) are shared by reference. The backoff is copied so a
+    /// failure advances from the current step.
+    /// </summary>
+    public CommunityCache CloneForRefresh()
+    {
+        var clone = new CommunityCache
+        {
+            SchemaVersion = SchemaVersion,
+            FetchedUtc = FetchedUtc,
+            SourceBaseUrl = SourceBaseUrl,
+            TotalRuns = TotalRuns,
+            Encounters = Encounters,
+            Versions = Versions,
+            Complete = Complete,
+            Backoff = new BackoffState
+            {
+                ConsecutiveFailures = Backoff.ConsecutiveFailures,
+                NextEligibleUtc = Backoff.NextEligibleUtc,
+                RetryAfterUntilUtc = Backoff.RetryAfterUntilUtc,
+            },
+        };
+        foreach (var (key, metrics) in Cohorts)
+            clone.Cohorts[key] = new CohortMetrics { Cards = metrics.Cards, Relics = metrics.Relics, Potions = metrics.Potions };
+        return clone;
     }
 
     private static readonly JsonSerializerOptions SerOpts = new()

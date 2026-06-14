@@ -146,49 +146,79 @@ public static class CommunityStats
             var now = DateTimeOffset.UtcNow;
             _client ??= new SpireCodexClient(BaseUrl, UserAgent);
             MainFile.Logger.Info($"Community refresh started (base={BaseUrl}).");
-
-            var built = new CommunityCache { SourceBaseUrl = BaseUrl };
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+
+            // Partial publish: start from the live snapshot and overwrite only the units
+            // (per cohort×entity metrics, encounters, versions) that succeed this round, so
+            // one dead endpoint can't discard the data that fetched fine. Each unit's failure
+            // is isolated; we keep its last-known-good value and retry the gaps next round.
+            var built = _current.CloneForRefresh();
+            built.SourceBaseUrl = BaseUrl;
+
+            int ok = 0;
+            var failures = new System.Collections.Generic.List<string>();
+            TimeSpan? retryAfter = null;
 
             foreach (var cohort in Cohorts)
             {
-                var metrics = new CohortMetrics();
+                if (!built.Cohorts.TryGetValue(cohort, out var metrics))
+                    built.Cohorts[cohort] = metrics = new CohortMetrics();
                 foreach (var entity in EntityTypes)
                 {
                     var r = await _client.GetMetricsAsync(entity, cohort, cts.Token).ConfigureAwait(false);
-                    if (!r.IsOk || r.Value == null)
+                    if (r.IsOk && r.Value != null)
                     {
-                        FailAndPersist(now, $"metrics/{entity}?cohort={cohort}: {r.Error}", r.RetryAfter);
-                        return;
+                        switch (entity)
+                        {
+                            case "cards":   metrics.Cards = r.Value; break;
+                            case "relics":  metrics.Relics = r.Value; break;
+                            case "potions": metrics.Potions = r.Value; break;
+                        }
+                        ok++;
                     }
-                    switch (entity)
+                    else
                     {
-                        case "cards":   metrics.Cards = r.Value; break;
-                        case "relics":  metrics.Relics = r.Value; break;
-                        case "potions": metrics.Potions = r.Value; break;
+                        failures.Add($"metrics/{entity}?cohort={cohort}: {r.Error}");
+                        retryAfter = MaxSpan(retryAfter, r.RetryAfter);
                     }
                 }
-                built.Cohorts[cohort] = metrics;
             }
 
             var enc = await _client.GetEncounterStatsAsync(cts.Token).ConfigureAwait(false);
-            if (!enc.IsOk || enc.Value == null)
-            {
-                FailAndPersist(now, $"encounter-stats: {enc.Error}", enc.RetryAfter);
-                return;
-            }
-            built.Encounters = enc.Value;
+            if (enc.IsOk && enc.Value != null) { built.Encounters = enc.Value; ok++; }
+            else { failures.Add($"encounter-stats: {enc.Error}"); retryAfter = MaxSpan(retryAfter, enc.RetryAfter); }
 
             var ver = await _client.GetVersionsAsync(cts.Token).ConfigureAwait(false);
-            if (ver.IsOk && ver.Value != null) built.Versions = ver.Value.Versions;
+            if (ver.IsOk && ver.Value != null) { built.Versions = ver.Value.Versions; ok++; }
+            else { failures.Add($"versions: {ver.Error}"); retryAfter = MaxSpan(retryAfter, ver.RetryAfter); }
 
-            built.FetchedUtc = DateTimeOffset.UtcNow;
+            // Nothing landed at all → keep the prior snapshot, advance backoff, publish nothing.
+            if (ok == 0)
+            {
+                FailAndPersist(now, string.Join("; ", failures), retryAfter);
+                return;
+            }
+
             built.TotalRuns = built.Cohorts.TryGetValue("all", out var all) ? (all.Cards?.TotalRuns ?? 0) : 0;
-            built.RecordSuccess();
-            built.Save(CachePath, msg => MainFile.Logger.Warn(msg));
+            built.FetchedUtc = DateTimeOffset.UtcNow;
+            built.Complete = failures.Count == 0;
 
+            if (built.Complete)
+                built.RecordSuccess();
+            else
+                // Partial: publish what we have, but schedule a retry to fill the gaps. The
+                // backoff advances (so we don't hammer) while Complete=false keeps ShouldRefresh
+                // true once the window elapses, even inside the 24h freshness window.
+                built.RecordFailure(now, retryAfter);
+
+            built.Save(CachePath, msg => MainFile.Logger.Warn(msg));
             _current = built; // atomic publish
-            MainFile.Logger.Info($"Community stats refreshed: {built.TotalRuns} runs, {built.Encounters.Count} encounters, base={BaseUrl}.");
+
+            if (built.Complete)
+                MainFile.Logger.Info($"Community stats refreshed: {built.TotalRuns} runs, {built.Encounters.Count} encounters, base={BaseUrl}.");
+            else
+                MainFile.Logger.Warn(
+                    $"Community stats refreshed partially ({ok} of {ok + failures.Count} units ok): {string.Join("; ", failures)}. Retry after {built.Backoff.NextEligibleUtc:o}.");
         }
         catch (OperationCanceledException)
         {
@@ -203,6 +233,11 @@ public static class CommunityStats
             _refreshLock.Release();
         }
     }
+
+    /// <summary>The longer of two optional spans (null = absent), so a partial refresh
+    /// honors the most conservative server-requested <c>Retry-After</c> across its units.</summary>
+    private static TimeSpan? MaxSpan(TimeSpan? a, TimeSpan? b)
+        => a is null ? b : b is null ? a : (a.Value >= b.Value ? a : b);
 
     /// <summary>Records a refresh failure on the live snapshot, persists the advanced
     /// backoff, and logs. Keeps the previously-loaded data intact (degraded, not wiped).</summary>
