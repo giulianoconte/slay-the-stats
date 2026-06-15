@@ -57,11 +57,21 @@ public partial class MainFile : Node
         SlayTheStatsConfig.Sanitize();
         ModConfigRegistry.Register(ModId, config);
 
+        // Seed the consent popup's settings-toggle watcher with the loaded value so a
+        // later ConfigChanged can tell a real toggle from noise.
+        CommunityConsentPrompt.InitSettingsWatch();
+
         // When the user turns community stats on in settings, kick a refresh right
         // away — otherwise baselines wouldn't appear until the next launch's menu-ready
         // pass. MaybeRefresh self-gates on Off / staleness / once-per-launch, so firing
         // it on every settings change (not just the community dropdown) is harmless.
-        config.ConfigChanged += (_, _) => Community.CommunityStats.MaybeRefresh();
+        // An explicit Community toggle also resolves the onboarding consent flow
+        // (cancels a pending re-prompt / closes an open popup).
+        config.ConfigChanged += (_, _) =>
+        {
+            Community.CommunityStats.MaybeRefresh();
+            CommunityConsentPrompt.OnConfigChanged();
+        };
 
         // On every boot, discard any unsaved filter tweaks from the previous session
         // and snap the live filter values back to the user's saved defaults. Filter

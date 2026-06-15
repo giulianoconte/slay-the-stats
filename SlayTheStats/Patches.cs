@@ -211,6 +211,9 @@ public static class MainMenuReadyPatch
         // Throttled, off-thread community-stats refresh (no-ops unless due + enabled).
         Community.CommunityStats.MaybeRefresh();
 
+        // First-run community consent popup (no-ops unless due; once per launch).
+        CommunityConsentPrompt.MaybeShow();
+
         if (!BuildInfo.IsRelease && !_devBannerShown)
         {
             _devBannerShown = true;

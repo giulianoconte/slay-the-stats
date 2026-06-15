@@ -36,5 +36,6 @@
     <Compile Include="../SlayTheStats/Community/CommunityCache.cs" />
     <Compile Include="../SlayTheStats/Community/SpireCodexClient.cs" />
     <Compile Include="../SlayTheStats/Community/CommunityAdapter.cs" />
+    <Compile Include="../SlayTheStats/Community/ConsentFlow.cs" />
   </ItemGroup>
 </Project>

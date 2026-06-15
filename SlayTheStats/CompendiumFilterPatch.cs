@@ -2155,20 +2155,24 @@ public static partial class CompendiumFilterPatch
         return cb;
     }
 
-    private static Button MakeActionButton(string text, Action action)
+    /// <summary>Stone-textured action button matching the filter pane chrome. When
+    /// <paramref name="primary"/> is set the resting style picks up a warm gold tint
+    /// and the label sits in gold, so a promoted choice (e.g. the consent popup's
+    /// Enable) reads as the default without a second widget type.</summary>
+    internal static Button MakeActionButton(string text, Action action, bool primary = false)
     {
         var btn = new Button();
         btn.Text = text;
         btn.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        btn.AddThemeColorOverride("font_color", Cream);
+        btn.AddThemeColorOverride("font_color", primary ? Gold : Cream);
         btn.AddThemeColorOverride("font_hover_color", Gold);
         btn.AddThemeColorOverride("font_pressed_color", Gold);
         ApplyGameFont(btn, 17);
 
         var normal = new StyleBoxFlat();
-        normal.BgColor = new Color(0.08f, 0.06f, 0.05f, 0.6f);
+        normal.BgColor = primary ? new Color(0.16f, 0.12f, 0.05f, 0.7f) : new Color(0.08f, 0.06f, 0.05f, 0.6f);
         normal.SetBorderWidthAll(1);
-        normal.BorderColor = new Color(0.4f, 0.35f, 0.25f, 0.5f);
+        normal.BorderColor = primary ? new Color(0.7f, 0.58f, 0.30f, 0.8f) : new Color(0.4f, 0.35f, 0.25f, 0.5f);
         normal.SetCornerRadiusAll(3);
         normal.ContentMarginLeft = 8;
         normal.ContentMarginRight = 8;
@@ -2177,7 +2181,7 @@ public static partial class CompendiumFilterPatch
         btn.AddThemeStyleboxOverride("normal", normal);
 
         var hover = (StyleBoxFlat)normal.Duplicate();
-        hover.BgColor = new Color(0.12f, 0.09f, 0.07f, 0.7f);
+        hover.BgColor = primary ? new Color(0.22f, 0.16f, 0.07f, 0.8f) : new Color(0.12f, 0.09f, 0.07f, 0.7f);
         hover.BorderColor = new Color(0.6f, 0.5f, 0.3f, 0.6f);
         btn.AddThemeStyleboxOverride("hover", hover);
 

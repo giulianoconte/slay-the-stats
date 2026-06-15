@@ -56,6 +56,13 @@
     "SLAYTHESTATS-COMMUNITY_OPEN_WEBSITE.title": "Data source",
     "SLAYTHESTATS-COMMUNITY_ATTRIBUTION_BUTTON.title": "spire-codex.com",
 
+    "community.consent.title":         "Community Stats",
+    "community.consent.body":          "SlayTheStats can show how the wider community fares with each card, relic, and encounter — a reference line next to your own stats, pulled from spire-codex.com.\n\nEnable also shares your completed runs with the public community dataset to help everyone's stats. Enabling connects to spire-codex.com.",
+    "community.consent.readonly_hint": "Want community stats without sharing your runs? Turn on read-only in Settings.",
+    "community.consent.enable":        "Enable",
+    "community.consent.decline":       "No thanks",
+    "community.consent.decide_later":  "(Esc or click outside to decide later)",
+
 
     "tooltip.col.act":             "Act",
     "tooltip.col.runs":            "Runs",

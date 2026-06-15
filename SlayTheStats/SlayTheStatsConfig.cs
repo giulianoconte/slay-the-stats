@@ -184,6 +184,24 @@ internal class SlayTheStatsConfig : SimpleModConfig
     [ConfigVisibleIf(nameof(Community), CommunityMode.ReadOnly, CommunityMode.ReadShare)]
     private static void CommunityOpenWebsite() => CommunityStats.OpenWebsite();
 
+    /// <summary>
+    /// Persisted state of the Spire Codex onboarding consent flow (#35). Drives whether
+    /// the first-run consent popup appears: Unset → not yet shown; Dismissed → shown once
+    /// and decide-later (re-prompts once after <see cref="CommunityConsentDismissedLaunches"/>
+    /// reaches <see cref="ConsentFlow.ReshowAfterLaunches"/>); Resolved → terminal
+    /// (Enable/Decline, the re-prompt's dismissal, or any explicit Community settings toggle).
+    /// Hidden from the settings UI — pure bookkeeping; the transition logic lives in
+    /// <see cref="ConsentFlow"/>.
+    /// </summary>
+    [ConfigHideInUI] public static ConsentFlow.State CommunityConsentState { get; set; } = ConsentFlow.State.Unset;
+
+    /// <summary>
+    /// Launches elapsed since the consent popup was decide-later dismissed. Only ticks
+    /// while <see cref="CommunityConsentState"/> is Dismissed; the popup re-shows once it
+    /// reaches <see cref="ConsentFlow.ReshowAfterLaunches"/>. Hidden bookkeeping.
+    /// </summary>
+    [ConfigHideInUI] public static int CommunityConsentDismissedLaunches { get; set; } = 0;
+
     // ── Aggregation filter properties (v0.2.0) ──────────────────────────────
 
     /// <summary>
