@@ -715,6 +715,33 @@ internal static class TooltipHelper
         return $"\n[font_size=16][color={ThemeStyle.FooterGrey}]{body}[/color][/font_size]";
     }
 
+    // ── Reference (baseline / community) rows (#37) ───────────────────────────
+    //
+    // The reference rows live in their OWN detached, header-less [table=4] directly
+    // below the main stats table, instead of as free-text lines. Independent Godot
+    // tables don't share column widths, so this can't pin the reference figures to the
+    // data columns exactly — but mirroring the main table's 4-column shape + the same
+    // expand padding aligns the reference rows with EACH OTHER (the actual complaint:
+    // "(baseline)" vs "(community A10)" not lining up) and places them roughly under the
+    // Pick/Win columns. Always reference-grey: a reference line is never significance-
+    // colored. Column map mirrors the data table: blank | label | metric | win, where
+    // "metric" is whatever the data table's 3rd column is (Pick% for the pick layout,
+    // Buys for the buys/relic layout); pass null for an absent value (e.g. community has
+    // no buy-rate) to leave that cell blank.
+
+    internal static string OpenReferenceBlock() => "\n[table=4]";
+    internal static string CloseReferenceBlock() => "[/table]";
+
+    /// <summary>One reference row for the block opened by <see cref="OpenReferenceBlock"/>.</summary>
+    internal static string ReferenceRow(string label, string? metric, string? win)
+        => $"[cell {ColPadOuter}][right][/right][/cell]"
+         + $"[cell {ColPadInner}][right]{RefSpan(label)}[/right][/cell]"
+         + $"[cell {ColPadInner}][right]{RefSpan(metric)}[/right][/cell]"
+         + $"[cell {ColPadLast}][right]{RefSpan(win)}[/right][/cell]";
+
+    private static string RefSpan(string? s)
+        => string.IsNullOrEmpty(s) ? "" : $"[font_size=16][color={ThemeStyle.FooterGrey}]{s}[/color][/font_size]";
+
     /// <summary>Wraps text in a BBCode color tag based on sample size. Bolds at n≥16 when bold font is loaded.</summary>
     internal static string ColN(string text, int n) => n switch
     {

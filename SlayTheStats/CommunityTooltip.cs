@@ -5,11 +5,11 @@ using SlayTheStats.Community;
 namespace SlayTheStats;
 
 /// <summary>
-/// Formats the community "second baseline-like" reference row (Area 5) for a
-/// tooltip surface. Reads the live <see cref="CommunityStats.Current"/> snapshot
-/// through the Godot-free <see cref="CommunityAdapter"/> and renders a single
-/// labeled line via <see cref="TooltipHelper.FormatBaselineLine"/> — mirroring the
-/// local "(baseline)" line directly below the table.
+/// Supplies the community reference figures (Area 5) for a tooltip surface. Reads the
+/// live <see cref="CommunityStats.Current"/> snapshot through the Godot-free
+/// <see cref="CommunityAdapter"/> and returns a structured <see cref="CommunityRef"/>
+/// (cohort label + pick/win) that the card/relic builders render alongside the local
+/// "(baseline)" row in the detached reference table below the stats (#37).
 ///
 /// Returns <c>null</c> to OMIT the row: community Off, no cached data, or no
 /// community figure for this entity (Area 5 empty/disabled states). The row is a
@@ -20,28 +20,38 @@ internal static class CommunityTooltip
 {
     private static bool Enabled => SlayTheStatsConfig.Community != SlayTheStatsConfig.CommunityMode.Off;
 
-    /// <summary>Card community row: "(community {cohort})  Pick% {p}  Win% {w}". Null to omit.</summary>
-    internal static string? CardRow(string rawCardId, bool upgraded)
+    /// <summary>Structured community reference figures for the in-tooltip reference table
+    /// (#37): a right-aligned cohort label, the pick value, and the win value (any may be
+    /// absent). The pick/buys layout split is the caller's concern — the buys layout drops
+    /// <see cref="Pick"/> (community has no buy-rate) and shows win only.</summary>
+    internal readonly record struct CommunityRef(string Label, string? Pick, string? Win);
+
+    /// <summary>Community card reference figures, or null to omit (Off / no cached data /
+    /// no figure for this entity).</summary>
+    internal static CommunityRef? CardRow(string rawCardId, bool upgraded)
     {
         if (!Enabled) return null;
         var (cohort, label) = Cohort();
         if (CommunityAdapter.GetEntityMetric(CommunityStats.Current, "cards", rawCardId, upgraded, cohort) is not { } m)
             return null;
-        var line = L.T("tooltip.community.pick", ("cohort", label), ("pick", Pct(m.PickRate)), ("win", Pct(m.WinRate)));
-        return TooltipHelper.FormatBaselineLine(line + AsOfSuffix());
+        return new CommunityRef(CommunityLabel(label), Pct(m.PickRate), Pct(m.WinRate));
     }
 
-    /// <summary>Relic community row: "(community {cohort})  Win% {w}". Community has no shop-buy
-    /// figure, so the relic row carries win-rate only. Null to omit.</summary>
-    internal static string? RelicRow(string relicId)
+    /// <summary>Community relic reference figures (win-rate only — community has no shop-buy
+    /// figure), or null to omit.</summary>
+    internal static CommunityRef? RelicRow(string relicId)
     {
         if (!Enabled) return null;
         var (cohort, label) = Cohort();
         if (CommunityAdapter.GetEntityMetric(CommunityStats.Current, "relics", relicId, upgraded: false, cohort) is not { } m)
             return null;
-        var line = L.T("tooltip.community.win", ("cohort", label), ("win", Pct(m.WinRate)));
-        return TooltipHelper.FormatBaselineLine(line + AsOfSuffix());
+        return new CommunityRef(CommunityLabel(label), Pick: null, Pct(m.WinRate));
     }
+
+    /// <summary>"(community {cohort})" with a trailing "(as of …)" only when the snapshot
+    /// is stale — the right-aligned label cell of the reference row.</summary>
+    private static string CommunityLabel(string cohortLabel)
+        => L.T("tooltip.community.label", ("cohort", cohortLabel)) + AsOfSuffix();
 
     /// <summary>Community encounter figures + descriptor for the bestiary row, or null to
     /// omit. Encounter stats aren't cohort-split in the API (one global set), so the row is

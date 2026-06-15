@@ -210,7 +210,7 @@ internal static class RelicHoverHelper
             ?? id.ToString();
     }
 
-    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, string? communityRow = null)
+    private static string BuildStatsText(Dictionary<int, RelicStat> actStats, double wrBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, CommunityTooltip.CommunityRef? community = null)
     {
         var sb = new StringBuilder();
 
@@ -266,15 +266,16 @@ internal static class RelicHoverHelper
 
         sb.Append("[/table]");
 
-        // Baseline line below the table (plain text — avoids in-table column overflow).
-        // NaN baselines (filter matched zero runs/contexts) render as "—".
+        // Reference rows in their own detached, column-locked table below (#37):
+        // (baseline) Buys/Win%, then the community row (win-rate only — community has no
+        // shop-buy figure, so its Buys cell stays blank). NaN baselines render "—".
         var wrStr       = double.IsNaN(wrBaseline)          ? "—" : $"{Math.Round(wrBaseline):F0}%";
         var buysBaseStr = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
-        var baselineText = L.T("tooltip.baseline.buys", ("buys", buysBaseStr), ("win", wrStr));
-        sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
-
-        // Community reference row (Area 5) — win-rate only (community has no shop-buy figure).
-        if (communityRow != null) sb.Append(communityRow);
+        sb.Append(TooltipHelper.OpenReferenceBlock());
+        sb.Append(TooltipHelper.ReferenceRow(L.T("tooltip.baseline.label"), buysBaseStr, wrStr));
+        if (community is { } c)
+            sb.Append(TooltipHelper.ReferenceRow(c.Label, metric: null, c.Win));
+        sb.Append(TooltipHelper.CloseReferenceBlock());
 
         var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";
         sb.Append(TooltipHelper.FormatFooter(filterCtx));

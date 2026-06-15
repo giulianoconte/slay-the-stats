@@ -643,12 +643,12 @@ public static class CardHoverShowPatch
         return $"A0-{ascMax} ";
     }
 
-    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, string? communityRow = null)
+    internal static string BuildStatsText(Dictionary<int, CardStat> actStats, double characterWR, double pickRateBaseline, string characterLabel, int? ascensionMin = null, int? ascensionMax = null, bool showBuysLayout = false, double shopBuyRateBaseline = 20.0, AggregationFilter? filter = null, CommunityTooltip.CommunityRef? community = null)
     {
         var sb = new StringBuilder();
 
         if (showBuysLayout)
-            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter, communityRow);
+            return BuildBuysStatsText(actStats, characterWR, characterLabel, ascensionMin, ascensionMax, shopBuyRateBaseline, filter, community);
 
         // Class card columns: Act | Runs (present/offered) | Pick% | Win%
         sb.Append("[table=4]");
@@ -712,19 +712,17 @@ public static class CardHoverShowPatch
 
         sb.Append("[/table]");
 
-        // Baseline line below the table (plain text — avoids in-table column overflow).
-        // NaN baselines (filter matched zero runs/contexts) render as "—".
-        // Baseline character is already implied by the filter-context footer (which
-        // renders the active character icon + name), so the baseline line itself
-        // doesn't need a "character" marker — just "(baseline)" is enough.
+        // Reference rows in their own detached, column-locked table below (#37):
+        // (baseline) Pick%/Win%, then the community row when enabled. NaN baselines
+        // (filter matched zero runs/contexts) render as "—". Baseline character is
+        // implied by the filter-context footer, so the label is just "(baseline)".
         var prBaseStr = double.IsNaN(pickRateBaseline) ? "—" : $"{Math.Round(pickRateBaseline):F0}%";
         var wrStr     = double.IsNaN(characterWR)     ? "—" : $"{Math.Round(characterWR):F0}%";
-        var baselineText = L.T("tooltip.baseline.pick", ("pick", prBaseStr), ("win", wrStr));
-        sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
-
-        // Community reference row (Area 5) — appended below our baseline when enabled
-        // and a community figure exists; null = omit (disabled / no data).
-        if (communityRow != null) sb.Append(communityRow);
+        sb.Append(TooltipHelper.OpenReferenceBlock());
+        sb.Append(TooltipHelper.ReferenceRow(L.T("tooltip.baseline.label"), prBaseStr, wrStr));
+        if (community is { } c)
+            sb.Append(TooltipHelper.ReferenceRow(c.Label, c.Pick, c.Win));
+        sb.Append(TooltipHelper.CloseReferenceBlock());
 
         var filterCtx = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
@@ -738,7 +736,7 @@ public static class CardHoverShowPatch
     /// Buys shows RunsShopBought/RunsShopSeen (purchases / shop appearances).
     /// Win% is placed last, consistent across all stat tables.
     /// </summary>
-    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null, string? communityRow = null)
+    private static string BuildBuysStatsText(Dictionary<int, CardStat> actStats, double characterWR, string characterLabel, int? ascensionMin, int? ascensionMax, double shopBuyRateBaseline, AggregationFilter? filter = null, CommunityTooltip.CommunityRef? community = null)
     {
         var sb = new StringBuilder();
         // Columns: Act | Runs | Buys (bought/seen) | Win%
@@ -794,14 +792,16 @@ public static class CardHoverShowPatch
 
         sb.Append("[/table]");
 
-        // Baseline line below the table (plain text — avoids in-table column overflow).
-        // NaN baselines (filter matched zero runs/contexts) render as "—".
+        // Reference rows in their own detached, column-locked table below (#37):
+        // (baseline) Buys/Win%, then the community row when enabled. Community has no
+        // buy-rate, so its Buys cell stays blank — win-rate only. NaN baselines render "—".
         var wrStr        = double.IsNaN(characterWR)         ? "—" : $"{Math.Round(characterWR):F0}%";
         var buysBaseStr  = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
-        var baselineText = L.T("tooltip.baseline.buys", ("buys", buysBaseStr), ("win", wrStr));
-        sb.Append(TooltipHelper.FormatBaselineLine(baselineText));
-
-        if (communityRow != null) sb.Append(communityRow);
+        sb.Append(TooltipHelper.OpenReferenceBlock());
+        sb.Append(TooltipHelper.ReferenceRow(L.T("tooltip.baseline.label"), buysBaseStr, wrStr));
+        if (community is { } c)
+            sb.Append(TooltipHelper.ReferenceRow(c.Label, metric: null, c.Win));
+        sb.Append(TooltipHelper.CloseReferenceBlock());
 
         var filterCtx    = filter != null ? BuildFilterContext(characterLabel, filter) : "";
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
