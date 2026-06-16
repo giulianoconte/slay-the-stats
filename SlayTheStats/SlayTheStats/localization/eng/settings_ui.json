@@ -40,10 +40,10 @@
 
     "SLAYTHESTATS-COMMUNITY.title": "Community Stats",
     "SLAYTHESTATS-COMMUNITY.hover.title": "Community Stats (Spire Codex)",
-    "SLAYTHESTATS-COMMUNITY.hover.desc": "Show how the wider community fares with each card, relic, and encounter, pulled from spire-codex.com and shown as a reference line next to your own stats.\n\nOff — hidden; no network connection is ever made.\nRead-only — downloads community stats to display; your own runs are never uploaded.\nRead + Share — also contributes your completed runs to the public community dataset.\n\nEnabling Read-only or Read + Share connects to spire-codex.com.",
+    "SLAYTHESTATS-COMMUNITY.hover.desc": "Show how the wider community fares with each card, relic, and encounter, pulled from spire-codex.com and shown as a reference line next to your own stats.\n\nOff — hidden; no network connection is ever made.\nEnable without sharing — downloads community stats to display; your own runs are never uploaded.\nEnable & share runs — also contributes your completed runs to the public community dataset.\n\nEither enabled option connects to spire-codex.com.",
     "SLAYTHESTATS-COMMUNITY.Off": "Off",
-    "SLAYTHESTATS-COMMUNITY.ReadOnly": "Read-only",
-    "SLAYTHESTATS-COMMUNITY.ReadShare": "Read + Share",
+    "SLAYTHESTATS-COMMUNITY.ReadOnly": "Enable without sharing",
+    "SLAYTHESTATS-COMMUNITY.ReadShare": "Enable & share runs",
 
     "SLAYTHESTATS-COMMUNITY_REFERENCE_COHORT.title": "Reference Cohort",
     "SLAYTHESTATS-COMMUNITY_REFERENCE_COHORT.hover.desc": "Which slice of the community the reference line represents. Everyone covers all recorded runs; Ascension 10+ restricts it to high-ascension play. Encounter stats are always shown for everyone (the data source doesn't split those by ascension).",
@@ -57,10 +57,10 @@
     "SLAYTHESTATS-COMMUNITY_ATTRIBUTION_BUTTON.title": "spire-codex.com",
 
     "community.consent.title":         "Community Stats",
-    "community.consent.body":          "SlayTheStats can show how the wider community fares with each card, relic, and encounter — a reference line next to your own stats, pulled from spire-codex.com.\n\nEnable also shares your completed runs with the public community dataset to help everyone's stats. Enabling connects to spire-codex.com.",
-    "community.consent.readonly_hint": "Want community stats without sharing your runs? Turn on read-only in Settings.",
-    "community.consent.enable":        "Enable",
-    "community.consent.decline":       "No thanks",
+    "community.consent.body":          "SlayTheStats can show how the wider community fares with each card, relic, and encounter — a reference line next to your own stats, pulled from spire-codex.com.\n\nSharing your completed runs helps keep everyone's stats accurate. Either option connects to spire-codex.com; you can change this anytime in Settings.",
+    "community.consent.enable_share":   "Enable & share runs",
+    "community.consent.enable_noshare": "Enable without sharing",
+    "community.consent.leave_off":      "Leave off",
     "community.consent.decide_later":  "(Esc or click outside to decide later)",
 
 

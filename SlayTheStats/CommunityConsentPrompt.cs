@@ -17,6 +17,15 @@ namespace SlayTheStats;
 /// </summary>
 internal static partial class CommunityConsentPrompt
 {
+    /// <summary>
+    /// DEBUG ONLY — when true, the popup re-shows on every main-menu entry, ignoring the
+    /// once-per-launch guard and every suppression rule (resolved state, community already
+    /// on, re-prompt cadence). Double-gated behind <c>!BuildInfo.IsRelease</c> so it can
+    /// never fire on a release build. TODO(#35): set back to false (or delete) before
+    /// shipping — this is a temporary aid for eyeballing the modal.
+    /// </summary>
+    private const bool DebugAlwaysShow = true;
+
     private static bool _attemptedThisLaunch;
     private static CanvasLayer? _layer;
     private static ConsentFlow.State _stateAtShow;
@@ -39,6 +48,17 @@ internal static partial class CommunityConsentPrompt
     /// </summary>
     internal static void MaybeShow()
     {
+        // DEBUG: re-show on every main-menu entry, bypassing all guards. Skips only if a
+        // popup is already up (don't stack duplicates on rapid menu re-entry).
+        if (DebugAlwaysShow && !BuildInfo.IsRelease)
+        {
+            if (_layer != null && GodotObject.IsInstanceValid(_layer)) return;
+            _stateAtShow = SlayTheStatsConfig.CommunityConsentState;
+            MainFile.Logger.Info("Community consent popup shown (DEBUG always-show; suppression bypassed).");
+            BuildPopup();
+            return;
+        }
+
         if (_attemptedThisLaunch) return;
         _attemptedThisLaunch = true;
 
@@ -82,24 +102,23 @@ internal static partial class CommunityConsentPrompt
 
     // ── Actions ──────────────────────────────────────────────────────────────
 
-    private static void OnEnable()
+    private static void OnEnableShare()  => Resolve(SlayTheStatsConfig.CommunityMode.ReadShare, "enabled (share runs)");
+    private static void OnEnableNoShare() => Resolve(SlayTheStatsConfig.CommunityMode.ReadOnly, "enabled (without sharing)");
+    private static void OnLeaveOff()      => Resolve(SlayTheStatsConfig.CommunityMode.Off, "left off");
+
+    /// <summary>Apply one of the three popup choices: set the mode, resolve the consent
+    /// flow (terminal), persist, and kick a first fetch when a reading mode was chosen.</summary>
+    private static void Resolve(SlayTheStatsConfig.CommunityMode mode, string what)
     {
-        SlayTheStatsConfig.Community = SlayTheStatsConfig.CommunityMode.ReadShare;
-        _lastKnownCommunity = SlayTheStatsConfig.Community; // so OnConfigChanged doesn't re-handle
+        SlayTheStatsConfig.Community = mode;
+        _lastKnownCommunity = mode; // so OnConfigChanged doesn't re-handle
         SlayTheStatsConfig.CommunityConsentState = ConsentFlow.OnDecided();
         Persist();
-        MainFile.Logger.Info("Community consent: Enabled (Read + Share) from onboarding popup.");
+        MainFile.Logger.Info($"Community consent: {what} from onboarding popup.");
         // Setting the property in code doesn't raise BaseLib's ConfigChanged, so kick the
         // first fetch ourselves — otherwise baselines wouldn't appear until next launch.
-        CommunityStats.MaybeRefresh();
-        Close();
-    }
-
-    private static void OnDecline()
-    {
-        SlayTheStatsConfig.CommunityConsentState = ConsentFlow.OnDecided();
-        Persist();
-        MainFile.Logger.Info("Community consent: Declined from onboarding popup.");
+        if (mode != SlayTheStatsConfig.CommunityMode.Off)
+            CommunityStats.MaybeRefresh();
         Close();
     }
 
@@ -189,20 +208,12 @@ internal static partial class CommunityConsentPrompt
 
             vbox.AddChild(MakeBody(L.T("community.consent.body")));
 
-            var hint = new Label
-            {
-                Text = L.T("community.consent.readonly_hint"),
-                AutowrapMode = TextServer.AutowrapMode.WordSmart,
-                CustomMinimumSize = new Vector2(BodyWidth, 0),
-            };
-            hint.AddThemeColorOverride("font_color", new Color(ThemeStyle.HintR, ThemeStyle.HintG, ThemeStyle.HintB, 1f));
-            CompendiumFilterPatch.ApplyGameFont(hint, 15);
-            vbox.AddChild(hint);
-
-            var buttons = new HBoxContainer();
-            buttons.AddThemeConstantOverride("separation", 12);
-            buttons.AddChild(CompendiumFilterPatch.MakeActionButton(L.T("community.consent.enable"), OnEnable, primary: true));
-            buttons.AddChild(CompendiumFilterPatch.MakeActionButton(L.T("community.consent.decline"), OnDecline));
+            // Three stacked choices, promoted default first.
+            var buttons = new VBoxContainer();
+            buttons.AddThemeConstantOverride("separation", 8);
+            buttons.AddChild(CompendiumFilterPatch.MakeActionButton(L.T("community.consent.enable_share"), OnEnableShare, primary: true));
+            buttons.AddChild(CompendiumFilterPatch.MakeActionButton(L.T("community.consent.enable_noshare"), OnEnableNoShare));
+            buttons.AddChild(CompendiumFilterPatch.MakeActionButton(L.T("community.consent.leave_off"), OnLeaveOff));
             vbox.AddChild(buttons);
 
             var dismissHint = new Label
