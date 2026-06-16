@@ -736,13 +736,13 @@ internal static class TooltipHelper
     // table's expand=1 Act column. Dropping the expand stops the empty first column from
     // claiming a quarter of the width. The right value (28) widens this empty cell to push
     // the whole reference block right ~16px from the prior 12. Tune it to nudge horizontally.
-    private const string RefPadLead = "padding=4,0,28,0";
+    private const string RefPadLead = "padding=4,0,26,0";
 
     // Pick(metric) and Win cells: reference-specific padding so the gap BETWEEN the two
-    // values is doubled (was 12+12=24 → now 24+24=48) without touching the shared
-    // data-table column paddings (ColPadInner/ColPadLast).
-    private const string RefPadMetric = "expand=1 padding=12,0,24,0";
-    private const string RefPadWin    = "expand=1 padding=24,0,4,0";
+    // values stays wider than the shared data-table column paddings, without touching them
+    // (ColPadInner/ColPadLast). Gap = metric.right + win.left = 22+22 = 44px.
+    private const string RefPadMetric = "expand=1 padding=12,0,22,0";
+    private const string RefPadWin    = "expand=1 padding=22,0,4,0";
 
     /// <summary>One reference row for the block opened by <see cref="OpenReferenceBlock"/>.</summary>
     internal static string ReferenceRow(string label, string? metric, string? win)
