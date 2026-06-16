@@ -56,7 +56,7 @@ public static class CardHoverShowPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = NoDataText(filter);
+                statsText = NoDataText(filter, CommunityTooltip.CardRow(rawId, upgradeLevel > 0));
             }
             else
             {
@@ -67,7 +67,7 @@ public static class CardHoverShowPatch
                 var pickRateBaseline    = StatsAggregator.GetPickRateBaseline(MainFile.Db, filter);
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
                 var communityRow        = CommunityTooltip.CardRow(rawId, upgradeLevel > 0);
-                statsText = actStats.Count == 0 ? NoDataText(filter) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter, communityRow);
+                statsText = actStats.Count == 0 ? NoDataText(filter, communityRow) : BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout, shopBuyRateBaseline, filter, communityRow);
             }
 
             TooltipHelper.TrySceneTheftOnce();
@@ -315,12 +315,21 @@ public static class CardHoverShowPatch
     /// footer as a populated tooltip), so the user can see what filter is
     /// excluding the data without us repeating that info in the headline.
     /// </summary>
-    internal static string NoDataText(AggregationFilter filter)
+    internal static string NoDataText(AggregationFilter filter, CommunityTooltip.CommunityRef? community = null)
     {
         var characterLabel = GetCharacterLabel(filter);
         var filterCtx = BuildFilterContext(characterLabel, filter);
         var sb = new StringBuilder();
         sb.Append($"[color={TooltipHelper.NeutralShade}]{L.T("tooltip.no_data")}[/color]");
+        // Community (codex) data is independent of the player's own runs, so surface it even
+        // when there's no local data for this item — the case it's most useful (#39). Stands
+        // alone (no local "(baseline)" row, since there are no local cells to compare to).
+        if (community is { } c)
+        {
+            sb.Append(TooltipHelper.OpenReferenceBlock());
+            sb.Append(TooltipHelper.ReferenceRow(c.Label, c.Pick, c.Win));
+            sb.Append(TooltipHelper.CloseReferenceBlock());
+        }
         sb.Append(TooltipHelper.FormatFooter(filterCtx));
         return sb.ToString();
     }
@@ -944,7 +953,7 @@ public static class InspectCardDisplayPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(inspFilter);
+                statsText = CardHoverShowPatch.NoDataText(inspFilter, CommunityTooltip.CardRow(rawId, upgradeLevel > 0));
             }
             else
             {
@@ -956,7 +965,7 @@ public static class InspectCardDisplayPatch
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, inspFilter);
                 var communityRow        = CommunityTooltip.CardRow(rawId, upgradeLevel > 0);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(inspFilter)
+                    ? CardHoverShowPatch.NoDataText(inspFilter, communityRow)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, pickRateBaseline, characterLabel, inspFilter.AscensionMin, inspFilter.AscensionMax, showBuysLayout, shopBuyRateBaseline, inspFilter, communityRow);
             }
 
@@ -1042,7 +1051,7 @@ public static class MerchantCardCreateHoverTipPatch
             string statsText;
             if (lookupId == null)
             {
-                statsText = CardHoverShowPatch.NoDataText(filter);
+                statsText = CardHoverShowPatch.NoDataText(filter, CommunityTooltip.CardRow(rawId, upgradeLevel > 0));
             }
             else
             {
@@ -1053,7 +1062,7 @@ public static class MerchantCardCreateHoverTipPatch
                 var shopBuyRateBaseline = StatsAggregator.GetShopBuyRateBaseline(MainFile.Db, filter);
                 var communityRow        = CommunityTooltip.CardRow(rawId, upgradeLevel > 0);
                 statsText = actStats.Count == 0
-                    ? CardHoverShowPatch.NoDataText(filter)
+                    ? CardHoverShowPatch.NoDataText(filter, communityRow)
                     : CardHoverShowPatch.BuildStatsText(actStats, characterWR, 0, characterLabel, filter.AscensionMin, filter.AscensionMax, showBuysLayout: true, shopBuyRateBaseline, filter, communityRow);
             }
 
