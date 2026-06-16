@@ -734,16 +734,22 @@ internal static class TooltipHelper
 
     // Leading cell for reference rows: a narrow FIXED indent (no expand), unlike the data
     // table's expand=1 Act column. Dropping the expand stops the empty first column from
-    // claiming a quarter of the width, so the whole reference block sits a bit further left
-    // (#37 polish). Tune the right value to nudge the block horizontally.
-    private const string RefPadLead = "padding=4,0,12,0";
+    // claiming a quarter of the width. The right value (28) widens this empty cell to push
+    // the whole reference block right ~16px from the prior 12. Tune it to nudge horizontally.
+    private const string RefPadLead = "padding=4,0,28,0";
+
+    // Pick(metric) and Win cells: reference-specific padding so the gap BETWEEN the two
+    // values is doubled (was 12+12=24 → now 24+24=48) without touching the shared
+    // data-table column paddings (ColPadInner/ColPadLast).
+    private const string RefPadMetric = "expand=1 padding=12,0,24,0";
+    private const string RefPadWin    = "expand=1 padding=24,0,4,0";
 
     /// <summary>One reference row for the block opened by <see cref="OpenReferenceBlock"/>.</summary>
     internal static string ReferenceRow(string label, string? metric, string? win)
         => $"[cell {RefPadLead}][right][/right][/cell]"
          + $"[cell {ColPadInner}][right]{RefSpan(label)}[/right][/cell]"
-         + $"[cell {ColPadInner}][right]{RefSpan(metric)}[/right][/cell]"
-         + $"[cell {ColPadLast}][right]{RefSpan(win)}[/right][/cell]";
+         + $"[cell {RefPadMetric}][right]{RefSpan(metric)}[/right][/cell]"
+         + $"[cell {RefPadWin}][right]{RefSpan(win)}[/right][/cell]";
 
     private static string RefSpan(string? s)
         => string.IsNullOrEmpty(s) ? "" : $"[font_size=16][color={ThemeStyle.FooterGrey}]{s}[/color][/font_size]";
