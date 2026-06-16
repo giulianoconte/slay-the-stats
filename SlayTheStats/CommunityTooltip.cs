@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using SlayTheStats.Community;
 
 namespace SlayTheStats;
@@ -48,10 +47,9 @@ internal static class CommunityTooltip
         return new CommunityRef(CommunityLabel(label), Pick: null, Pct(m.WinRate));
     }
 
-    /// <summary>"(community {cohort})" with a trailing "(as of …)" only when the snapshot
-    /// is stale — the right-aligned label cell of the reference row.</summary>
+    /// <summary>"(codex {cohort})" — the right-aligned label cell of the reference row.</summary>
     private static string CommunityLabel(string cohortLabel)
-        => L.T("tooltip.community.label", ("cohort", cohortLabel)) + AsOfSuffix();
+        => L.T("tooltip.community.label", ("cohort", cohortLabel));
 
     /// <summary>Community encounter figures + descriptor for the bestiary row, or null to
     /// omit. Encounter stats aren't cohort-split in the API (one global set), so the row is
@@ -61,7 +59,7 @@ internal static class CommunityTooltip
         if (!Enabled) return null;
         if (CommunityAdapter.GetEncounterMetric(CommunityStats.Current, encounterId) is not { } m)
             return null;
-        var descriptor = L.T("descriptor.community", ("cohort", L.T("community.cohort.all"))) + AsOfSuffix();
+        var descriptor = L.T("descriptor.community", ("cohort", L.T("community.cohort.all")));
         return (m, descriptor);
     }
 
@@ -72,12 +70,4 @@ internal static class CommunityTooltip
 
     // API rates are already in percent (e.g. 33.5 → "34%").
     private static string Pct(double? v) => v is { } d ? $"{Math.Round(d):F0}%" : "—";
-
-    // Append "(as of <date>)" only when the snapshot is stale (>24h); fresh data stays uncluttered.
-    private static string AsOfSuffix()
-    {
-        var c = CommunityStats.Current;
-        if (c.FetchedUtc is not { } f || !c.IsStale(DateTimeOffset.UtcNow)) return "";
-        return L.T("tooltip.community.asof", ("date", f.ToString("MMM d", CultureInfo.InvariantCulture)));
-    }
 }

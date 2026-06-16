@@ -732,9 +732,15 @@ internal static class TooltipHelper
     internal static string OpenReferenceBlock() => "\n[table=4]";
     internal static string CloseReferenceBlock() => "[/table]";
 
+    // Leading cell for reference rows: a narrow FIXED indent (no expand), unlike the data
+    // table's expand=1 Act column. Dropping the expand stops the empty first column from
+    // claiming a quarter of the width, so the whole reference block sits a bit further left
+    // (#37 polish). Tune the right value to nudge the block horizontally.
+    private const string RefPadLead = "padding=4,0,12,0";
+
     /// <summary>One reference row for the block opened by <see cref="OpenReferenceBlock"/>.</summary>
     internal static string ReferenceRow(string label, string? metric, string? win)
-        => $"[cell {ColPadOuter}][right][/right][/cell]"
+        => $"[cell {RefPadLead}][right][/right][/cell]"
          + $"[cell {ColPadInner}][right]{RefSpan(label)}[/right][/cell]"
          + $"[cell {ColPadInner}][right]{RefSpan(metric)}[/right][/cell]"
          + $"[cell {ColPadLast}][right]{RefSpan(win)}[/right][/cell]";
