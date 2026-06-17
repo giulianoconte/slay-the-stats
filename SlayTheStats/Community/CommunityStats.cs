@@ -139,6 +139,19 @@ public static class CommunityStats
     /// data-source link (settings button, #34). Always the public site, never a dev override.</summary>
     public static void OpenWebsite() => OS.ShellOpen(ProdBaseUrl);
 
+#if DEV_BUILD
+    /// <summary>DEV reset: delete the cache file, drop the in-memory snapshot, and clear the
+    /// once-per-launch guard so a fresh fetch can run again. Part of the "reset Spire Codex
+    /// state" dev button — see <c>SlayTheStatsConfig.CommunityResetState</c>.</summary>
+    internal static void ResetCacheAndState()
+    {
+        try { if (System.IO.File.Exists(CachePath)) System.IO.File.Delete(CachePath); }
+        catch (Exception e) { MainFile.Logger.Warn($"Spire Codex reset: cache delete failed: {e.Message}"); }
+        _current = new CommunityCache();
+        _attemptedThisLaunch = false;
+    }
+#endif
+
     private static async Task RefreshAsync()
     {
         // Single-flight: never two refreshes in flight at once.

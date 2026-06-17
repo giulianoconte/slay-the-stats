@@ -1,3 +1,4 @@
+using System;
 using BaseLib.Config;
 using SlayTheStats.Community;
 
@@ -183,6 +184,33 @@ internal class SlayTheStatsConfig : SimpleModConfig
     [ConfigButton("CommunityAttributionButton")]
     [ConfigVisibleIf(nameof(Community), CommunityMode.ReadOnly, CommunityMode.ReadShare)]
     private static void CommunityOpenWebsite() => CommunityStats.OpenWebsite();
+
+#if DEV_BUILD
+    /// <summary>
+    /// [ConfigButton] DEV-ONLY: reset all Spire Codex state to a fresh-install baseline so
+    /// the onboarding popup and read/write paths can be re-tested without hand-editing the
+    /// config on the host. Sets mode → Off and consent → Unset (re-arms the popup), clears
+    /// the launch counter, and deletes the cached community data + submission ledger.
+    /// Compiled out of release builds entirely — always visible in dev, including when
+    /// Community is Off (that's the state you reset back to). The popup re-arms for the next
+    /// main-menu entry (back out to the menu, or relaunch).
+    /// </summary>
+    [ConfigButton("CommunityResetStateButton")]
+    private static void CommunityResetState()
+    {
+        Community = CommunityMode.Off;
+        CommunityConsentState = ConsentFlow.State.Unset;
+        CommunityConsentDismissedLaunches = 0;
+        try { ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+        catch (Exception e) { MainFile.Logger.Warn($"Spire Codex reset: config save failed: {e.Message}"); }
+
+        CommunityStats.ResetCacheAndState();
+        RunSubmitter.ResetLedgerAndState();
+        CommunityConsentPrompt.ResetForReshow();
+
+        MainFile.Logger.Info("Spire Codex state reset to fresh-install (mode→Off, consent→Unset, cache+ledger cleared). Popup re-arms on next main-menu entry.");
+    }
+#endif
 
     /// <summary>
     /// Persisted state of the Spire Codex onboarding consent flow (#35). Drives whether

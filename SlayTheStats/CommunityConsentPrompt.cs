@@ -118,6 +118,20 @@ internal static partial class CommunityConsentPrompt
         catch (Exception e) { MainFile.Logger.Warn($"Community consent: config save failed: {e.Message}"); }
     }
 
+#if DEV_BUILD
+    /// <summary>DEV reset: close any open popup and re-arm it for this session — clears the
+    /// once-per-launch guard and reseeds the settings-toggle watcher to the (just-reset)
+    /// Community value so the next menu-ready re-shows the popup. Part of the "reset Spire
+    /// Codex state" dev button (<c>SlayTheStatsConfig.CommunityResetState</c>).</summary>
+    internal static void ResetForReshow()
+    {
+        Close();
+        _attemptedThisLaunch = false;
+        _stateAtShow = ConsentFlow.State.Unset;
+        _lastKnownCommunity = SlayTheStatsConfig.Community;
+    }
+#endif
+
     private static void Close()
     {
         if (_layer != null && GodotObject.IsInstanceValid(_layer))

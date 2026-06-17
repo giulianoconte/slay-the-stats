@@ -212,6 +212,18 @@ internal static class RunSubmitter
         }
     }
 
+#if DEV_BUILD
+    /// <summary>DEV reset: delete the submission ledger and clear the once-per-launch guard,
+    /// so the next ReadShare pass re-submits the whole history from scratch. Part of the
+    /// "reset Spire Codex state" dev button (<c>SlayTheStatsConfig.CommunityResetState</c>).</summary>
+    internal static void ResetLedgerAndState()
+    {
+        try { if (File.Exists(LedgerPath)) File.Delete(LedgerPath); }
+        catch (Exception e) { MainFile.Logger.Warn($"Spire Codex reset: ledger delete failed: {e.Message}"); }
+        _attemptedThisLaunch = false;
+    }
+#endif
+
     private static bool IsAbandoned(string json)
     {
         try

@@ -56,6 +56,9 @@
     "SLAYTHESTATS-COMMUNITY_OPEN_WEBSITE.title": "Data source",
     "SLAYTHESTATS-COMMUNITY_ATTRIBUTION_BUTTON.title": "spire-codex.com",
 
+    "SLAYTHESTATS-COMMUNITY_RESET_STATE.title": "Reset Spire Codex state (dev)",
+    "SLAYTHESTATS-COMMUNITY_RESET_STATE_BUTTON.title": "Reset to fresh install",
+
     "community.consent.title":         "Community Stats",
     "community.consent.body":          "SlayTheStats can show how the wider community fares with each card, relic, and encounter — a reference line next to your own stats, pulled from spire-codex.com.\n\nSharing your completed runs helps keep everyone's stats accurate. Either option connects to spire-codex.com; you can change this anytime in Settings.",
     "community.consent.enable_share":   "Enable & share runs",
