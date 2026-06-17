@@ -63,13 +63,16 @@ public partial class MainFile : Node
 
         // When the user turns community stats on in settings, kick a refresh right
         // away — otherwise baselines wouldn't appear until the next launch's menu-ready
-        // pass. MaybeRefresh self-gates on Off / staleness / once-per-launch, so firing
-        // it on every settings change (not just the community dropdown) is harmless.
+        // pass. Likewise kick a submit so flipping to ReadShare mid-session starts
+        // pushing now rather than waiting for the next launch. Both self-gate
+        // (MaybeRefresh on Off/staleness/once-per-launch; MaybeSubmit on !=ReadShare/
+        // once-per-launch), so firing them on every settings change is harmless.
         // An explicit Community toggle also resolves the onboarding consent flow
         // (cancels a pending re-prompt / closes an open popup).
         config.ConfigChanged += (_, _) =>
         {
             Community.CommunityStats.MaybeRefresh();
+            Community.RunSubmitter.MaybeSubmit();
             CommunityConsentPrompt.OnConfigChanged();
         };
 

@@ -96,9 +96,13 @@ internal static partial class CommunityConsentPrompt
         Persist();
         MainFile.Logger.Info($"Community consent: {what} from onboarding popup.");
         // Setting the property in code doesn't raise BaseLib's ConfigChanged, so kick the
-        // first fetch ourselves — otherwise baselines wouldn't appear until next launch.
+        // first fetch (and, for share, the first submit) ourselves — otherwise nothing
+        // would happen until next launch. MaybeSubmit self-gates on !=ReadShare, so it
+        // no-ops for the read-only / off choices.
         if (mode != SlayTheStatsConfig.CommunityMode.Off)
             CommunityStats.MaybeRefresh();
+        if (mode == SlayTheStatsConfig.CommunityMode.ReadShare)
+            RunSubmitter.MaybeSubmit();
         Close();
     }
 
