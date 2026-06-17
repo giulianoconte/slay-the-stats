@@ -334,15 +334,18 @@ public static class MerchantSlotClearHoverTipPatch
 
 /// <summary>
 /// NRelicCollectionEntry is used by the compendium (main-menu relic collection screen).
-/// Only show stats for fully-visible relics; locked/unseen entries show a mystery tooltip
-/// and should not expose identity through stats.
+/// Show stats for seen (Visible) and unlocked-but-unseen (NotSeen) relics — both render
+/// their icon, so surfacing stats (incl. the community row for relics you've never run,
+/// #39) reveals nothing hidden. Skip Locked entries: those are silhouetted with their
+/// identity concealed, so showing their stats would spoil what they are before unlock.
 /// </summary>
 [HarmonyPatch(typeof(NRelicCollectionEntry), "OnFocus")]
 public static class RelicCollectionEntryFocusPatch
 {
     static void Postfix(NRelicCollectionEntry __instance)
     {
-        if (__instance.ModelVisibility != ModelVisibility.Visible) return;
+        if (__instance.ModelVisibility != ModelVisibility.Visible &&
+            __instance.ModelVisibility != ModelVisibility.NotSeen) return;
         RelicHoverHelper.ShowCollection(__instance);
     }
 }
