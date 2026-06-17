@@ -17,15 +17,6 @@ namespace SlayTheStats;
 /// </summary>
 internal static partial class CommunityConsentPrompt
 {
-    /// <summary>
-    /// DEBUG ONLY — when true, the popup re-shows on every main-menu entry, ignoring the
-    /// once-per-launch guard and every suppression rule (resolved state, community already
-    /// on, re-prompt cadence). Double-gated behind <c>!BuildInfo.IsRelease</c> so it can
-    /// never fire on a release build. TODO(#35): set back to false (or delete) before
-    /// shipping — this is a temporary aid for eyeballing the modal.
-    /// </summary>
-    private const bool DebugAlwaysShow = true;
-
     private static bool _attemptedThisLaunch;
     private static CanvasLayer? _layer;
     private static ConsentFlow.State _stateAtShow;
@@ -48,17 +39,6 @@ internal static partial class CommunityConsentPrompt
     /// </summary>
     internal static void MaybeShow()
     {
-        // DEBUG: re-show on every main-menu entry, bypassing all guards. Skips only if a
-        // popup is already up (don't stack duplicates on rapid menu re-entry).
-        if (DebugAlwaysShow && !BuildInfo.IsRelease)
-        {
-            if (_layer != null && GodotObject.IsInstanceValid(_layer)) return;
-            _stateAtShow = SlayTheStatsConfig.CommunityConsentState;
-            MainFile.Logger.Info("Community consent popup shown (DEBUG always-show; suppression bypassed).");
-            BuildPopup();
-            return;
-        }
-
         if (_attemptedThisLaunch) return;
         _attemptedThisLaunch = true;
 
