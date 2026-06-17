@@ -26,6 +26,12 @@ public static class CommunityStats
     private static readonly string[] Cohorts = { "all", "a10" };
     private static readonly string[] EntityTypes = { "cards", "relics", "potions" };
 
+    /// <summary>Encounter community stats (both the fetch here and the bestiary display in
+    /// <see cref="CommunityTooltip.EncounterFigures"/>) are gated OFF until the upstream
+    /// encounter-stats endpoint is reliable — it currently 504s/times out (#40, deferred to
+    /// v1.3). One switch: flip to true to re-enable fetch + display together.</summary>
+    internal const bool EncounterStatsEnabled = false;
+
     private static volatile CommunityCache _current = new();
     /// <summary>The live snapshot. Always non-null; empty until the first successful load/refresh.</summary>
     public static CommunityCache Current => _current;
@@ -184,9 +190,15 @@ public static class CommunityStats
                 }
             }
 
-            var enc = await _client.GetEncounterStatsAsync(cts.Token).ConfigureAwait(false);
-            if (enc.IsOk && enc.Value != null) { built.Encounters = enc.Value; ok++; }
-            else { failures.Add($"encounter-stats: {enc.Error}"); retryAfter = MaxSpan(retryAfter, enc.RetryAfter); }
+            // Encounter-stats fetch gated off while the upstream endpoint is unreliable (#40).
+            // Skipping it (rather than letting it fail) keeps refreshes Complete and the backoff
+            // clean instead of churning on a known-dead unit every round.
+            if (EncounterStatsEnabled)
+            {
+                var enc = await _client.GetEncounterStatsAsync(cts.Token).ConfigureAwait(false);
+                if (enc.IsOk && enc.Value != null) { built.Encounters = enc.Value; ok++; }
+                else { failures.Add($"encounter-stats: {enc.Error}"); retryAfter = MaxSpan(retryAfter, enc.RetryAfter); }
+            }
 
             var ver = await _client.GetVersionsAsync(cts.Token).ConfigureAwait(false);
             if (ver.IsOk && ver.Value != null) { built.Versions = ver.Value.Versions; ok++; }

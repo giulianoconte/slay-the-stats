@@ -59,6 +59,7 @@ internal static class CommunityTooltip
     internal static (CommunityEncounterMetric metric, string descriptor)? EncounterFigures(string encounterId)
     {
         if (!Enabled) return null;
+        if (!CommunityStats.EncounterStatsEnabled) return null; // gated off until the endpoint is reliable (#40)
         if (CommunityAdapter.GetEncounterMetric(CommunityStats.Current, encounterId) is not { } m)
             return null;
         var descriptor = L.T("descriptor.community", ("cohort", L.T("community.cohort.all")));
