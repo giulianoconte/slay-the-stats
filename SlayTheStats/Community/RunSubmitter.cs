@@ -61,6 +61,18 @@ internal static class RunSubmitter
     internal static void MaybeSubmit()
     {
         if (SlayTheStatsConfig.Community != SlayTheStatsConfig.CommunityMode.ReadShare) return;
+
+        // Dev safety: a non-release build must never write to the prod corpus (irreversible —
+        // anonymous runs are undeletable, the _sts stamp ships in the public export). The
+        // write path can only be exercised against a local instance, set via
+        // `deploy --spire-url=` (sts2-docs#136). Release builds always target prod and submit
+        // normally — this guard is the inverse of the release-hard-pin on the read URL.
+        if (!BuildInfo.IsRelease && CommunityStats.BaseUrl == CommunityStats.ProdBaseUrl)
+        {
+            MainFile.Logger.Info("Run submit: dev build pointed at prod — submission skipped (point at a local instance via --spire-url to test the write path).");
+            return;
+        }
+
         if (_attemptedThisLaunch) return;
         _attemptedThisLaunch = true;
 
