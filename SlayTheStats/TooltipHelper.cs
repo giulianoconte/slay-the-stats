@@ -737,6 +737,10 @@ internal static class TooltipHelper
     // claiming a quarter of the width. The right value (28) widens this empty cell to push
     // the whole reference block right ~16px from the prior 12. Tune it to nudge horizontally.
     private const string RefPadLead = "padding=4,0,22,0";
+    // Buys layouts (colorless-card shop + relics, 3rd col = Buys) sit 2px further left than
+    // the pick layout, to line the reference block up with their (differently-sized) data
+    // columns. Pick layout uses RefPadLead.
+    private const string RefPadLeadBuys = "padding=4,0,20,0";
 
     // Pick(metric) and Win cells: reference-specific padding so the gap BETWEEN the two
     // values stays wider than the shared data-table column paddings, without touching them
@@ -744,9 +748,11 @@ internal static class TooltipHelper
     private const string RefPadMetric = "expand=1 padding=12,0,22,0";
     private const string RefPadWin    = "expand=1 padding=22,0,4,0";
 
-    /// <summary>One reference row for the block opened by <see cref="OpenReferenceBlock"/>.</summary>
-    internal static string ReferenceRow(string label, string? metric, string? win)
-        => $"[cell {RefPadLead}][right][/right][/cell]"
+    /// <summary>One reference row for the block opened by <see cref="OpenReferenceBlock"/>.
+    /// <paramref name="buysLayout"/> nudges the block 2px left to align under a Buys-column
+    /// table (colorless cards / relics) rather than a Pick-column one.</summary>
+    internal static string ReferenceRow(string label, string? metric, string? win, bool buysLayout = false)
+        => $"[cell {(buysLayout ? RefPadLeadBuys : RefPadLead)}][right][/right][/cell]"
          + $"[cell {ColPadInner}][right]{RefSpan(label)}[/right][/cell]"
          + $"[cell {RefPadMetric}][right]{RefSpan(metric)}[/right][/cell]"
          + $"[cell {RefPadWin}][right]{RefSpan(win)}[/right][/cell]";

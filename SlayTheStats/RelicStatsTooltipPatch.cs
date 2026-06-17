@@ -272,9 +272,9 @@ internal static class RelicHoverHelper
         var wrStr       = double.IsNaN(wrBaseline)          ? "—" : $"{Math.Round(wrBaseline):F0}%";
         var buysBaseStr = double.IsNaN(shopBuyRateBaseline) ? "—" : $"{Math.Round(shopBuyRateBaseline):F0}%";
         sb.Append(TooltipHelper.OpenReferenceBlock());
-        sb.Append(TooltipHelper.ReferenceRow(L.T("tooltip.baseline.label"), buysBaseStr, wrStr));
+        sb.Append(TooltipHelper.ReferenceRow(L.T("tooltip.baseline.label"), buysBaseStr, wrStr, buysLayout: true));
         if (community is { } c)
-            sb.Append(TooltipHelper.ReferenceRow(c.Label, metric: null, c.Win));
+            sb.Append(TooltipHelper.ReferenceRow(c.Label, metric: null, c.Win, buysLayout: true));
         sb.Append(TooltipHelper.CloseReferenceBlock());
 
         var filterCtx   = filter != null ? CardHoverShowPatch.BuildFilterContext(characterLabel, filter) : "";
