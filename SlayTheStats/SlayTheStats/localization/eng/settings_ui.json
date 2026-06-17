@@ -94,9 +94,9 @@
     "tooltip.baseline.label":      "(baseline)",
     "tooltip.community.pick":      "(community {cohort}) Pick% {pick}    Win% {win}",
     "tooltip.community.win":       "(community {cohort}) Win% {win}",
-    "tooltip.community.label":     "(codex {cohort})",
+    "tooltip.community.label":     "(community)",
     "tooltip.community.asof":      "    (as of {date})",
-    "descriptor.community":        "codex ({cohort})",
+    "descriptor.community":        "community",
     "community.cohort.all":        "all",
     "community.cohort.a10":        "A10",
 

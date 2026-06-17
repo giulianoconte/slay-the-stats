@@ -47,7 +47,9 @@ internal static class CommunityTooltip
         return new CommunityRef(CommunityLabel(label), Pick: null, Pct(m.WinRate));
     }
 
-    /// <summary>"(codex {cohort})" — the right-aligned label cell of the reference row.</summary>
+    /// <summary>"(community)" — the right-aligned label cell of the reference row. The
+    /// cohort still drives which data is shown (see <see cref="Cohort"/>), but is no longer
+    /// surfaced in the label; the arg is kept for the template's optional <c>{cohort}</c>.</summary>
     private static string CommunityLabel(string cohortLabel)
         => L.T("tooltip.community.label", ("cohort", cohortLabel));
 
