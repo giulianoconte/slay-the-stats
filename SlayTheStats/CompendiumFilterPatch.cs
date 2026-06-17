@@ -1755,6 +1755,54 @@ public static partial class CompendiumFilterPatch
             AddSeparator(vbox);
         }
 
+        // ── Community reference cohort (a community *setting*, not a filter) ──
+        // Toggles the baseline reference cohort shown in the card/relic stat tooltips
+        // between Everyone (unticked) and Ascension 10+ (ticked). Unlike the filter rows
+        // above it, this persists immediately and is independent of Clear / Reset / Save
+        // Defaults — it's a setting surfaced here for convenience, not a per-view filter.
+        // Present on all three panes for consistency; inert on the bestiary for now
+        // (encounter community stats aren't cohort-split — #40). The whole section is
+        // hidden while community stats are Off, where the cohort has no visible effect.
+        var communitySection = new VBoxContainer();
+        communitySection.AddThemeConstantOverride("separation", 8);
+        vbox.AddChild(communitySection);
+
+        var communityHeader = new Label();
+        communityHeader.Text = L.T("filter.community.section");
+        communityHeader.AddThemeColorOverride("font_color", Gold);
+        ApplyGameFont(communityHeader, 19);
+        communitySection.AddChild(communityHeader);
+
+        bool cohortA10 = SlayTheStatsConfig.CommunityReferenceCohort == SlayTheStatsConfig.CommunityCohort.A10;
+        var cohortControl = BuildStyledCheckbox(
+            L.T("filter.community.cohort_a10"),
+            cohortA10,
+            ticked =>
+            {
+                SlayTheStatsConfig.CommunityReferenceCohort = ticked
+                    ? SlayTheStatsConfig.CommunityCohort.A10
+                    : SlayTheStatsConfig.CommunityCohort.All;
+                // Persist immediately (it's a setting, not a saved-defaults filter).
+                try { BaseLib.Config.ModConfig.SaveDebounced<SlayTheStatsConfig>(); }
+                catch (System.Exception e) { MainFile.Logger.Warn($"[SlayTheStats] cohort save failed: {e.Message}"); }
+                // Re-render so any live view re-points to the new cohort's reference row.
+                NotifyChanged();
+            });
+        communitySection.AddChild(cohortControl);
+        AddSeparator(communitySection);
+
+        // Sync on pane open: refresh the tick from config and hide the section when off.
+        void SyncCommunitySection()
+        {
+            if (!GodotObject.IsInstanceValid(communitySection)) return;
+            communitySection.Visible = SlayTheStatsConfig.Community != SlayTheStatsConfig.CommunityMode.Off;
+            bool a10 = SlayTheStatsConfig.CommunityReferenceCohort == SlayTheStatsConfig.CommunityCohort.A10;
+            if (cohortControl is NLibraryStatTickbox tb && GodotObject.IsInstanceValid(tb)) tb.IsTicked = a10;
+            else if (cohortControl is CheckBox cb && GodotObject.IsInstanceValid(cb)) cb.SetPressedNoSignal(a10);
+        }
+        SyncCommunitySection();
+        _syncCallbacks.Add(SyncCommunitySection);
+
         // ── Action buttons ──
         var row1 = new HBoxContainer();
         row1.AddThemeConstantOverride("separation", 8);
