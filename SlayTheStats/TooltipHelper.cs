@@ -736,11 +736,11 @@ internal static class TooltipHelper
     // table's expand=1 Act column. Dropping the expand stops the empty first column from
     // claiming a quarter of the width. The right value (28) widens this empty cell to push
     // the whole reference block right ~16px from the prior 12. Tune it to nudge horizontally.
-    private const string RefPadLead = "padding=4,0,22,0";
-    // Buys layouts (colorless-card shop + relics, 3rd col = Buys) sit 2px further left than
-    // the pick layout, to line the reference block up with their (differently-sized) data
+    private const string RefPadLead = "padding=4,0,18,0";
+    // Buys layouts (colorless-card shop + relics, 3rd col = Buys) sit further left than the
+    // pick layout, to line the reference block up with their (differently-sized) data
     // columns. Pick layout uses RefPadLead.
-    private const string RefPadLeadBuys = "padding=4,0,20,0";
+    private const string RefPadLeadBuys = "padding=4,0,13,0";
 
     // Pick(metric) and Win cells: reference-specific padding so the gap BETWEEN the two
     // values stays wider than the shared data-table column paddings, without touching them
