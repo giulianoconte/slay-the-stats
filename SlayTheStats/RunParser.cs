@@ -765,8 +765,9 @@ public static class RunParser
     /// <summary>
     /// Returns (historyDirectoryPath, profileName) tuples for all found history directories.
     /// Profile name is derived from the directory structure (e.g. "profile1", "modded/profile2").
+    /// Internal so the community run-submitter (#36) can enumerate the same .run files.
     /// </summary>
-    private static List<(string path, string profile)> GetHistoryDirectories()
+    internal static List<(string path, string profile)> GetHistoryDirectories()
     {
         var found = new List<(string, string)>();
 

@@ -211,6 +211,10 @@ public static class MainMenuReadyPatch
         // Throttled, off-thread community-stats refresh (no-ops unless due + enabled).
         Community.CommunityStats.MaybeRefresh();
 
+        // Off-thread, best-effort run submission (no-ops unless in ReadShare; once per
+        // launch). Runs after ProcessNewRuns so the just-finished run is on disk (#36).
+        Community.RunSubmitter.MaybeSubmit();
+
         // First-run community consent popup (no-ops unless due; once per launch).
         CommunityConsentPrompt.MaybeShow();
 

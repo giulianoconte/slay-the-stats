@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -48,11 +49,17 @@ public sealed class SpireCodexClient : IDisposable
 
     private readonly HttpClient _http;
 
+    /// <summary>Origin without trailing slash (e.g. "https://spire-codex.com"). Used to
+    /// build the POST /api/runs URL, whose path is exactly <c>/api/runs</c> (no trailing
+    /// slash) — a relative URI against the <c>.../api/runs/</c> BaseAddress can't express that.</summary>
+    private readonly string _origin;
+
     /// <param name="baseUrl">API origin, e.g. "https://spire-codex.com".</param>
     /// <param name="userAgent">Descriptive UA; the site Cloudflare-403s empty/bot agents.</param>
     /// <param name="handler">Transport seam — defaults to a real handler with gzip auto-decompression.</param>
     public SpireCodexClient(string baseUrl, string userAgent, HttpMessageHandler? handler = null)
     {
+        _origin = baseUrl.TrimEnd('/');
         _http = new HttpClient(
             handler ?? new HttpClientHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate },
             disposeHandler: handler == null)
@@ -90,6 +97,65 @@ public sealed class SpireCodexClient : IDisposable
                 break;
         }
         return FetchResult<List<EncounterRow>>.Ok(all);
+    }
+
+    /// <summary>
+    /// POST /api/runs (#36) — submit a raw .run JSON body. Idempotent server-side
+    /// (run_hash UNIQUE over canonical fields), so resubmitting is always safe and
+    /// returns the same hash with <c>duplicate=true</c> — never pre-check. When
+    /// <paramref name="steamId"/> is set, <c>?steam_id=</c> tags the run with its owner
+    /// so it auto-links to the player's profile; the caller gates this on
+    /// <c>PlatformUtil.PrimaryPlatform == Steam</c> (anonymous otherwise). 429/5xx
+    /// surface a <c>Retry-After</c>; 400/403/413 are non-retryable body/site errors.
+    /// </summary>
+    public async Task<FetchResult<SubmitResponse>> SubmitRunAsync(string runJson, ulong? steamId, CancellationToken ct)
+    {
+        try
+        {
+            var url = _origin + "/api/runs" + (steamId is { } id ? $"?steam_id={id}" : "");
+            using var content = new StringContent(runJson, Encoding.UTF8, "application/json");
+            using var resp = await _http.PostAsync(url, content, ct).ConfigureAwait(false);
+
+            int code = (int)resp.StatusCode;
+            if (code == 429 || code >= 500)
+                return FetchResult<SubmitResponse>.Err($"HTTP {code}", ParseRetryAfter(resp));
+            if (!resp.IsSuccessStatusCode)
+                return FetchResult<SubmitResponse>.Err($"HTTP {code}");
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var value = await JsonSerializer.DeserializeAsync<SubmitResponse>(stream, JsonOpts, ct).ConfigureAwait(false);
+            return value == null
+                ? FetchResult<SubmitResponse>.Err("empty/null response body")
+                : FetchResult<SubmitResponse>.Ok(value);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) { return FetchResult<SubmitResponse>.Err("request timed out (15s)"); }
+        catch (Exception e) { return FetchResult<SubmitResponse>.Err(e.Message); }
+    }
+
+    /// <summary>
+    /// GET /api/runs/shared/{run_hash} (#36 round-trip) — does the corpus actually hold
+    /// this run? <c>Ok(true)</c> on HTTP 200 (present), <c>Ok(false)</c> on 404 (absent),
+    /// <c>Err</c> on transport/5xx so the caller can leave the ledger entry unverified and
+    /// retry later. Used to confirm a push landed, not to read the run back.
+    /// </summary>
+    public async Task<FetchResult<bool>> VerifyRunAsync(string runHash, CancellationToken ct)
+    {
+        try
+        {
+            using var resp = await _http
+                .GetAsync($"shared/{Uri.EscapeDataString(runHash)}", HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
+
+            int code = (int)resp.StatusCode;
+            if (code == 404) return FetchResult<bool>.Ok(false);
+            if (code == 429 || code >= 500) return FetchResult<bool>.Err($"HTTP {code}", ParseRetryAfter(resp));
+            if (!resp.IsSuccessStatusCode) return FetchResult<bool>.Err($"HTTP {code}");
+            return FetchResult<bool>.Ok(true);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) { return FetchResult<bool>.Err("request timed out (15s)"); }
+        catch (Exception e) { return FetchResult<bool>.Err(e.Message); }
     }
 
     private async Task<FetchResult<T>> GetJsonAsync<T>(string relativeUrl, CancellationToken ct)

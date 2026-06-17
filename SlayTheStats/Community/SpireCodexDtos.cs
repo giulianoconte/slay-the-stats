@@ -80,3 +80,17 @@ public sealed class VersionsResponse
 {
     [JsonPropertyName("versions")] public List<string> Versions { get; set; } = new();
 }
+
+/// <summary>
+/// Response of POST /api/runs (#36, write path). Idempotent: a fresh insert returns
+/// <c>success=true</c>; resubmitting an already-stored run returns <c>success=true,
+/// duplicate=true</c>. Either way <see cref="RunHash"/> (the canonical sha256[:16] the
+/// server computes) comes back, so the submitter can ledger it and round-trip verify
+/// against GET /api/runs/shared/{run_hash}.
+/// </summary>
+public sealed class SubmitResponse
+{
+    [JsonPropertyName("success")]   public bool Success { get; set; }
+    [JsonPropertyName("duplicate")] public bool Duplicate { get; set; }
+    [JsonPropertyName("run_hash")]  public string? RunHash { get; set; }
+}

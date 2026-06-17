@@ -19,6 +19,8 @@ internal sealed class FakeHandler : HttpMessageHandler
 {
     private readonly Func<string, HttpResponseMessage> _responder;
     public List<string> Requests { get; } = new();
+    public List<HttpMethod> Methods { get; } = new();
+    public List<string?> Bodies { get; } = new();
 
     public FakeHandler(Func<string, HttpResponseMessage> responder) => _responder = responder;
 
@@ -26,6 +28,8 @@ internal sealed class FakeHandler : HttpMessageHandler
     {
         var url = request.RequestUri!.ToString();
         Requests.Add(url);
+        Methods.Add(request.Method);
+        Bodies.Add(request.Content?.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
         return Task.FromResult(_responder(url));
     }
 
@@ -164,6 +168,111 @@ public class SpireCodexClientTests
         var handler = new FakeHandler(_ => FakeHandler.Json(HttpStatusCode.InternalServerError, "boom"));
         var client = Client(handler);
         var r = await client.GetEncounterStatsAsync(CancellationToken.None);
+        Assert.False(r.IsOk);
+    }
+
+    // ───────────────────────── Submit (#36) ─────────────────────────
+
+    [Fact]
+    public async Task SubmitRun_PostsToRunsEndpoint_WithBody_AnonymousByDefault()
+    {
+        var handler = new FakeHandler(_ =>
+            FakeHandler.Json(HttpStatusCode.OK, """{"success":true,"run_id":7,"run_hash":"abc123"}"""));
+        var client = Client(handler);
+
+        var r = await client.SubmitRunAsync("""{"win":true}""", steamId: null, CancellationToken.None);
+
+        Assert.True(r.IsOk);
+        Assert.True(r.Value!.Success);
+        Assert.False(r.Value.Duplicate);
+        Assert.Equal("abc123", r.Value.RunHash);
+        // POST, exact /api/runs path (no trailing slash), no owner tag, raw body forwarded.
+        Assert.Equal(HttpMethod.Post, handler.Methods[0]);
+        Assert.EndsWith("/api/runs", handler.Requests[0]);
+        Assert.DoesNotContain("steam_id", handler.Requests[0]);
+        Assert.Equal("""{"win":true}""", handler.Bodies[0]);
+    }
+
+    [Fact]
+    public async Task SubmitRun_AttachesSteamIdQuery_WhenProvided()
+    {
+        var handler = new FakeHandler(_ =>
+            FakeHandler.Json(HttpStatusCode.OK, """{"success":true,"run_hash":"h"}"""));
+        var client = Client(handler);
+
+        await client.SubmitRunAsync("{}", steamId: 76561197960287930UL, CancellationToken.None);
+
+        Assert.Contains("/api/runs?steam_id=76561197960287930", handler.Requests[0]);
+    }
+
+    [Fact]
+    public async Task SubmitRun_Duplicate_IsOkWithDuplicateFlagAndHash()
+    {
+        var handler = new FakeHandler(_ =>
+            FakeHandler.Json(HttpStatusCode.OK, """{"success":true,"duplicate":true,"run_hash":"dup99"}"""));
+        var client = Client(handler);
+
+        var r = await client.SubmitRunAsync("{}", null, CancellationToken.None);
+
+        Assert.True(r.IsOk);
+        Assert.True(r.Value!.Duplicate);
+        Assert.Equal("dup99", r.Value.RunHash);
+    }
+
+    [Fact]
+    public async Task SubmitRun_429_SurfacesRetryAfter()
+    {
+        var resp = new HttpResponseMessage((HttpStatusCode)429);
+        resp.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(60));
+        var client = Client(new FakeHandler(_ => resp));
+
+        var r = await client.SubmitRunAsync("{}", null, CancellationToken.None);
+
+        Assert.False(r.IsOk);
+        Assert.Equal(TimeSpan.FromSeconds(60), r.RetryAfter);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]      // 400 missing fields
+    [InlineData((HttpStatusCode)413)]            // 413 body too large
+    [InlineData(HttpStatusCode.Forbidden)]       // 403 submissions disabled (beta)
+    public async Task SubmitRun_NonRetryableClientErrors_HaveNoRetryAfter(HttpStatusCode code)
+    {
+        var client = Client(new FakeHandler(_ => FakeHandler.Json(code, "nope")));
+        var r = await client.SubmitRunAsync("{}", null, CancellationToken.None);
+        Assert.False(r.IsOk);
+        Assert.Null(r.RetryAfter);
+    }
+
+    // ───────────────────────── Verify round-trip (#36) ─────────────────────────
+
+    [Fact]
+    public async Task VerifyRun_200_IsPresent_HitsSharedEndpoint()
+    {
+        var handler = new FakeHandler(_ => FakeHandler.Json(HttpStatusCode.OK, "{}"));
+        var client = Client(handler);
+
+        var r = await client.VerifyRunAsync("abc123", CancellationToken.None);
+
+        Assert.True(r.IsOk);
+        Assert.True(r.Value);
+        Assert.Contains("shared/abc123", handler.Requests[0]);
+    }
+
+    [Fact]
+    public async Task VerifyRun_404_IsAbsent_NotAnError()
+    {
+        var client = Client(new FakeHandler(_ => FakeHandler.Json(HttpStatusCode.NotFound, "not found")));
+        var r = await client.VerifyRunAsync("missing", CancellationToken.None);
+        Assert.True(r.IsOk);
+        Assert.False(r.Value);
+    }
+
+    [Fact]
+    public async Task VerifyRun_500_IsError()
+    {
+        var client = Client(new FakeHandler(_ => FakeHandler.Json(HttpStatusCode.InternalServerError, "boom")));
+        var r = await client.VerifyRunAsync("x", CancellationToken.None);
         Assert.False(r.IsOk);
     }
 }

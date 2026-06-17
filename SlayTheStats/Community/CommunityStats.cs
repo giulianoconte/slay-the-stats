@@ -63,7 +63,7 @@ public static class CommunityStats
         }
     }
 
-    private static string UserAgent =>
+    internal static string UserAgent =>
         $"SlayTheStats/{MainFile.ModVersion} (+https://github.com/giulianoconte/slay-the-stats)";
 
     /// <summary>Synchronous cache read into memory (no network). Called from MainFile.Initialize.</summary>
