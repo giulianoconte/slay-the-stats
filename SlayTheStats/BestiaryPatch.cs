@@ -1776,13 +1776,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// is the sum of cellA.right-pad + cellB.left-pad, which the borders make easy
     /// to measure. Gated on <c>!BuildInfo.IsRelease</c> as well as DebugMode so a
     /// release build with DebugMode on (enabled for user bug reports) doesn't
-    /// accidentally paint red cell borders across every stats table.</summary>
+    /// accidentally paint red cell borders across every stats table.
+    /// Compiled out of release binaries entirely via <c>#if DEV_BUILD</c> (#41) —
+    /// the overlay code isn't merely runtime-skipped, it's absent from the shipped
+    /// DLL; the call site stays as a no-op.</summary>
     private static void ApplyDebugTableOverlay(RichTextLabel label)
     {
-        if (BuildInfo.IsRelease || !SlayTheStatsConfig.DebugMode) return;
+#if DEV_BUILD
+        if (!SlayTheStatsConfig.DebugMode) return;
         label.AddThemeColorOverride("table_border",       new Color(1.00f, 0.25f, 0.25f, 0.95f));
         label.AddThemeColorOverride("table_odd_row_bg",   new Color(0.25f, 0.35f, 0.55f, 0.30f));
         label.AddThemeColorOverride("table_even_row_bg",  new Color(0.55f, 0.35f, 0.25f, 0.30f));
+#endif
     }
 
     // ───────────────────────── Column legend popup ─────────────────────────

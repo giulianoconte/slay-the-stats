@@ -96,11 +96,16 @@ internal static class SparklinePoc
     // only: flags when AddImage's display size drifts from the texture's
     // native size (which is what causes Godot to scale + blur/alias the
     // sparkline and what sets the column's min-content width floor).
+#if DEV_BUILD
     private static (int, int, int, int)? _lastLoggedSparklineSize;
+#endif
 
+    // Debug-only size telemetry; compiled out of release binaries (#41). The call
+    // site stays as a no-op so the hot path reads the same in both configs.
     private static void MaybeLogSparklineSize(ImageTexture tex, int displayW, int displayH)
     {
-        if (BuildInfo.IsRelease || !SlayTheStatsConfig.DebugMode) return;
+#if DEV_BUILD
+        if (!SlayTheStatsConfig.DebugMode) return;
         int texW = tex.GetWidth();
         int texH = tex.GetHeight();
         var key = (texW, texH, displayW, displayH);
@@ -108,6 +113,7 @@ internal static class SparklinePoc
         _lastLoggedSparklineSize = key;
         var tag = (texW == displayW && texH == displayH) ? "ok" : "MISMATCH (will scale)";
         MainFile.DebugLog($"Sparkline size: texture={texW}x{texH} display={displayW}x{displayH} [{tag}]");
+#endif
     }
 
     /// <summary>
@@ -360,8 +366,10 @@ internal static class SparklinePoc
             }
         }
 
-        if (!BuildInfo.IsRelease && SlayTheStatsConfig.DebugMode)
+#if DEV_BUILD
+        if (SlayTheStatsConfig.DebugMode)
             DrawDebugBorder(image);
+#endif
 
         return image;
     }
@@ -373,6 +381,7 @@ internal static class SparklinePoc
     // Any gap between them is cell padding + display-size margin. If the
     // cyan line renders non-uniformly thick, Godot is scaling the texture
     // (i.e. AddImage(w,h) doesn't match BuildSparklineImage's Vector2I size).
+#if DEV_BUILD
     private static readonly Color DebugBorderColor = new Color(0.20f, 0.90f, 0.95f, 0.90f);
 
     private static void DrawDebugBorder(Image img)
@@ -390,6 +399,7 @@ internal static class SparklinePoc
             img.SetPixel(w - 1, py, DebugBorderColor);
         }
     }
+#endif
 
 
     /// <summary>Type-7 (linear-interpolated) percentile on a pre-sorted array.</summary>
