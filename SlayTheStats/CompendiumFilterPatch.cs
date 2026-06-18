@@ -722,9 +722,6 @@ public static partial class CompendiumFilterPatch
         if (y + paneHeight > vpSize.Y - screenMargin) y = vpSize.Y - screenMargin - paneHeight;
         if (y < screenMargin) y = screenMargin;
 
-        if (SlayTheStatsConfig.DebugMode)
-            MainFile.DebugLog($"RepositionPaneNextToButton: btnBottom={btnBottom:F0} paneH={paneHeight:F0} vpH={vpSize.Y:F0} y={y:F0}");
-
         pane.GlobalPosition = new Vector2(x, y);
 
         // Place the column-legend tooltip (if any) directly above the pane,
