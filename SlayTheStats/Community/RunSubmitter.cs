@@ -52,12 +52,18 @@ internal static class RunSubmitter
 
     internal static string LedgerPath => System.IO.Path.Combine(OS.GetUserDataDir(), LedgerFileName);
 
-    /// <summary>True when a write to the live prod corpus must be refused: a non-release
-    /// build pointed at prod, unless the dev <c>--spire-prod-write</c> opt-in
-    /// (<see cref="BuildInfo.AllowDevProdWrite"/>) was passed. Release builds always write.</summary>
-    private static bool ProdWriteBlocked() =>
-        !BuildInfo.IsRelease && !BuildInfo.AllowDevProdWrite
-        && CommunityStats.BaseUrl == CommunityStats.ProdBaseUrl;
+    /// <summary>True when a write to the live prod corpus must be refused. The automatic
+    /// per-launch / on-enable pass passes <paramref name="allowDevOptIn"/>=false: it NEVER
+    /// writes to prod from a dev build, so enabling Read+Share can't auto-dump the backlog.
+    /// Only the deliberate one-off button passes true, additionally honoring the
+    /// <c>--spire-prod-write</c> opt-in (<see cref="BuildInfo.AllowDevProdWrite"/>). Release
+    /// builds always write.</summary>
+    private static bool ProdWriteBlocked(bool allowDevOptIn)
+    {
+        if (BuildInfo.IsRelease) return false;
+        if (CommunityStats.BaseUrl != CommunityStats.ProdBaseUrl) return false;
+        return !(allowDevOptIn && BuildInfo.AllowDevProdWrite);
+    }
 
     /// <summary>
     /// Kick a submission pass if warranted. Safe to call repeatedly (invoked on every
@@ -75,9 +81,13 @@ internal static class RunSubmitter
         // sts2-docs#136); a deliberate one-off prod push is opted into with
         // `deploy --spire-prod-write` (#46). Release builds always target prod and submit
         // normally — this guard is the inverse of the release-hard-pin on the read URL.
-        if (ProdWriteBlocked())
+        // The automatic pass never writes to prod from a dev build — even with
+        // --spire-prod-write. That opt-in only empowers the explicit one-off button
+        // (SubmitOneForDev); otherwise enabling Read+Share here would auto-dump the whole
+        // pending backlog to the undeletable public corpus.
+        if (ProdWriteBlocked(allowDevOptIn: false))
         {
-            MainFile.Logger.Info("Run submit: dev build pointed at prod without --spire-prod-write — submission skipped (use --spire-url for a local instance, or --spire-prod-write for the deliberate prod one-off).");
+            MainFile.Logger.Info("Run submit: dev build pointed at prod — automatic submission skipped (use --spire-url for a local instance; the deliberate prod one-off goes through the DEV 'Push one run' button on a --spire-prod-write build).");
             return;
         }
 
@@ -250,7 +260,7 @@ internal static class RunSubmitter
     /// whole local backlog isn't dumped to an undeletable public corpus.</summary>
     internal static void SubmitOneForDev()
     {
-        if (ProdWriteBlocked())
+        if (ProdWriteBlocked(allowDevOptIn: true))
         {
             MainFile.Logger.Warn("Run submit (dev one-off): build points at prod without --spire-prod-write; refusing. Rebuild with `deploy --spire-prod-write` to push to the public corpus.");
             return;
