@@ -58,6 +58,8 @@
 
     "SLAYTHESTATS-COMMUNITY_RESET_STATE.title": "Reset Spire Codex state (dev)",
     "SLAYTHESTATS-COMMUNITY_RESET_STATE_BUTTON.title": "Reset to fresh install",
+    "SLAYTHESTATS-COMMUNITY_PUSH_ONE.title": "Push one run to corpus (dev)",
+    "SLAYTHESTATS-COMMUNITY_PUSH_ONE_BUTTON.title": "Push one run",
 
     "community.consent.title":         "Community Stats",
     "community.consent.body":          "SlayTheStats can show how the wider community fares with each card and relic — a reference line next to your own stats, pulled from spire-codex.com.\n\nSharing your completed runs helps keep everyone's stats accurate. Either option connects to spire-codex.com; you can change this anytime in Settings.",

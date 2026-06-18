@@ -79,6 +79,16 @@
         <SpireCodexBaseUrl Condition="'$(SpireCodexBaseUrl)' == ''">https://spire-codex.com</SpireCodexBaseUrl>
     </PropertyGroup>
 
+    <!-- AllowDevProdWrite: DEV-ONLY escape hatch letting a non-release build POST to the
+         PRODUCTION Spire Codex corpus. The dev-prod write guard (RunSubmitter) normally
+         blocks that; the deploy script's spire-prod-write flag passes
+         /p:AllowDevProdWrite=true to lift it for a deliberate one-off (the #46
+         public-corpus push test). Off by default and forced false on Release in
+         GenerateBuildInfo, so it can never be a shippable default. -->
+    <PropertyGroup>
+        <AllowDevProdWrite Condition="'$(AllowDevProdWrite)' == ''">false</AllowDevProdWrite>
+    </PropertyGroup>
+
     <!-- DEV_BUILD: define on every non-Release configuration so developer-only
          features (the dev-build banner, table wireframe overlay, sparkline
          debug panel, and the BaseLib config toggle that gates them) compile
@@ -217,6 +227,10 @@
             <_BuildUtc>$([System.DateTime]::UtcNow.ToString("o"))</_BuildUtc>
             <_IsRelease>false</_IsRelease>
             <_IsRelease Condition="'$(Configuration)' == 'Release'">true</_IsRelease>
+            <!-- Derived (non-global) copy so the Release override actually takes — a global
+                 /p:AllowDevProdWrite can't be reassigned, but this local property can. -->
+            <_AllowDevProdWrite>$(AllowDevProdWrite)</_AllowDevProdWrite>
+            <_AllowDevProdWrite Condition="'$(Configuration)' == 'Release'">false</_AllowDevProdWrite>
             <_BuildInfoPath>$(IntermediateOutputPath)BuildInfo.g.cs</_BuildInfoPath>
         </PropertyGroup>
         <ItemGroup>
@@ -227,6 +241,7 @@
             <_BuildInfoLine Include="    internal const string BuildTime = %22$(_BuildTime)%22%3B" />
             <_BuildInfoLine Include="    internal const string BuildUtc = %22$(_BuildUtc)%22%3B" />
             <_BuildInfoLine Include="    internal const bool IsRelease = $(_IsRelease)%3B" />
+            <_BuildInfoLine Include="    internal const bool AllowDevProdWrite = $(_AllowDevProdWrite)%3B" />
             <_BuildInfoLine Include="    internal const string SpireCodexBaseUrl = %22$(SpireCodexBaseUrl)%22%3B" />
             <_BuildInfoLine Include="}" />
         </ItemGroup>

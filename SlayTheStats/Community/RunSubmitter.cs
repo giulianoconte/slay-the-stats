@@ -52,6 +52,13 @@ internal static class RunSubmitter
 
     internal static string LedgerPath => System.IO.Path.Combine(OS.GetUserDataDir(), LedgerFileName);
 
+    /// <summary>True when a write to the live prod corpus must be refused: a non-release
+    /// build pointed at prod, unless the dev <c>--spire-prod-write</c> opt-in
+    /// (<see cref="BuildInfo.AllowDevProdWrite"/>) was passed. Release builds always write.</summary>
+    private static bool ProdWriteBlocked() =>
+        !BuildInfo.IsRelease && !BuildInfo.AllowDevProdWrite
+        && CommunityStats.BaseUrl == CommunityStats.ProdBaseUrl;
+
     /// <summary>
     /// Kick a submission pass if warranted. Safe to call repeatedly (invoked on every
     /// menu-ready): no-ops unless this is the first attempt this launch AND the mode is
@@ -64,12 +71,13 @@ internal static class RunSubmitter
 
         // Dev safety: a non-release build must never write to the prod corpus (irreversible —
         // anonymous runs are undeletable, the _sts stamp ships in the public export). The
-        // write path can only be exercised against a local instance, set via
-        // `deploy --spire-url=` (sts2-docs#136). Release builds always target prod and submit
+        // write path is normally exercised against a local instance (`deploy --spire-url=`,
+        // sts2-docs#136); a deliberate one-off prod push is opted into with
+        // `deploy --spire-prod-write` (#46). Release builds always target prod and submit
         // normally — this guard is the inverse of the release-hard-pin on the read URL.
-        if (!BuildInfo.IsRelease && CommunityStats.BaseUrl == CommunityStats.ProdBaseUrl)
+        if (ProdWriteBlocked())
         {
-            MainFile.Logger.Info("Run submit: dev build pointed at prod — submission skipped (point at a local instance via --spire-url to test the write path).");
+            MainFile.Logger.Info("Run submit: dev build pointed at prod without --spire-prod-write — submission skipped (use --spire-url for a local instance, or --spire-prod-write for the deliberate prod one-off).");
             return;
         }
 
@@ -94,7 +102,7 @@ internal static class RunSubmitter
         _ = Task.Run(() => SubmitPendingAsync(steamId, ledgerPath));
     }
 
-    private static async Task SubmitPendingAsync(ulong? steamId, string ledgerPath)
+    private static async Task SubmitPendingAsync(ulong? steamId, string ledgerPath, int maxSubmits = MaxSubmitsPerLaunch)
     {
         // Single-flight: never two passes at once.
         if (!await _lock.WaitAsync(0).ConfigureAwait(false)) return;
@@ -124,15 +132,15 @@ internal static class RunSubmitter
 
             int submitted = 0, duplicates = 0, verified = 0, failed = 0, skipped = 0, consecutiveFailures = 0;
             MainFile.Logger.Info(
-                $"Run submit: {pending.Count} run(s) pending; pushing up to {MaxSubmitsPerLaunch} this launch " +
+                $"Run submit: {pending.Count} run(s) pending; pushing up to {maxSubmits} this launch " +
                 $"(owner tag={(steamId is { } id ? id.ToString() : "anonymous")}, base={CommunityStats.BaseUrl}).");
 
             bool ledgerDirty = false;
             for (int i = 0; i < pending.Count; i++)
             {
-                if (submitted >= MaxSubmitsPerLaunch)
+                if (submitted >= maxSubmits)
                 {
-                    MainFile.Logger.Info($"Run submit: per-launch cap ({MaxSubmitsPerLaunch}) reached; {pending.Count - i} run(s) deferred to next launch.");
+                    MainFile.Logger.Info($"Run submit: cap ({maxSubmits}) reached; {pending.Count - i} run(s) deferred to next launch.");
                     break;
                 }
 
@@ -233,6 +241,35 @@ internal static class RunSubmitter
         try { if (File.Exists(LedgerPath)) File.Delete(LedgerPath); }
         catch (Exception e) { MainFile.Logger.Warn($"Spire Codex reset: ledger delete failed: {e.Message}"); }
         _attemptedThisLaunch = false;
+    }
+
+    /// <summary>DEV one-off: push exactly ONE pending run, ignoring the once-per-launch and
+    /// ReadShare-mode gates but still honoring the prod-write guard (so it reaches prod only
+    /// on a <c>--spire-prod-write</c> build). Backs the "Push one run to corpus (dev)" config
+    /// button — the controlled single-run probe for the #46 public-corpus verification, so the
+    /// whole local backlog isn't dumped to an undeletable public corpus.</summary>
+    internal static void SubmitOneForDev()
+    {
+        if (ProdWriteBlocked())
+        {
+            MainFile.Logger.Warn("Run submit (dev one-off): build points at prod without --spire-prod-write; refusing. Rebuild with `deploy --spire-prod-write` to push to the public corpus.");
+            return;
+        }
+
+        ulong? steamId = null;
+        try
+        {
+            if (PlatformUtil.PrimaryPlatform == PlatformType.Steam)
+                steamId = PlatformUtil.GetLocalPlayerId(PlatformType.Steam);
+        }
+        catch (Exception e)
+        {
+            MainFile.Logger.Warn($"Run submit (dev one-off): Steam id lookup failed ({e.Message}); submitting anonymously.");
+        }
+
+        var ledgerPath = LedgerPath;
+        MainFile.Logger.Info($"Run submit (dev one-off): pushing exactly 1 pending run to {CommunityStats.BaseUrl}.");
+        _ = Task.Run(() => SubmitPendingAsync(steamId, ledgerPath, maxSubmits: 1));
     }
 #endif
 

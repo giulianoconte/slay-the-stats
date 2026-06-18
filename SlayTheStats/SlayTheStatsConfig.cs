@@ -214,6 +214,16 @@ internal class SlayTheStatsConfig : SimpleModConfig
 
         MainFile.Logger.Info("Spire Codex state reset to fresh-install (mode→Off, consent→Unset, cache+ledger cleared). Popup re-arms on next main-menu entry.");
     }
+
+    /// <summary>
+    /// [ConfigButton] DEV-ONLY: push exactly ONE pending run to the configured corpus, on
+    /// demand. The controlled single-run probe for the #46 public-corpus verification —
+    /// reaches prod only on a `deploy --spire-prod-write` build (otherwise refused), so the
+    /// whole local backlog is never dumped to the undeletable public corpus. Honors the same
+    /// owner-tag / round-trip-verify / ledger flow as the normal submit pass.
+    /// </summary>
+    [ConfigButton("CommunityPushOneButton")]
+    private static void CommunityPushOne() => RunSubmitter.SubmitOneForDev();
 #endif
 
     /// <summary>
