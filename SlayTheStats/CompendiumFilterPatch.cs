@@ -709,7 +709,23 @@ public static partial class CompendiumFilterPatch
         var btnRight = button.GlobalPosition.X + button.Size.X;
         var btnBottom = button.GlobalPosition.Y + button.Size.Y;
 
-        pane.GlobalPosition = new Vector2(btnRight + padding, btnBottom - paneHeight);
+        float x = btnRight + padding;
+        float y = btnBottom - paneHeight;
+
+        // Keep the whole pane on-screen. Bottom-aligning to the sidebar button can push
+        // a tall pane (e.g. now that the community section is always shown, not hidden
+        // when off) past the viewport's bottom edge; a short pane off a high button can
+        // clip the top. Clamp the bottom into the viewport first, then guarantee the top
+        // is visible — the top wins if the pane is taller than the viewport.
+        const float screenMargin = 8f;
+        var vpSize = pane.GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920f, 1080f);
+        if (y + paneHeight > vpSize.Y - screenMargin) y = vpSize.Y - screenMargin - paneHeight;
+        if (y < screenMargin) y = screenMargin;
+
+        if (SlayTheStatsConfig.DebugMode)
+            MainFile.DebugLog($"RepositionPaneNextToButton: btnBottom={btnBottom:F0} paneH={paneHeight:F0} vpH={vpSize.Y:F0} y={y:F0}");
+
+        pane.GlobalPosition = new Vector2(x, y);
 
         // Place the column-legend tooltip (if any) directly above the pane,
         // left-aligned. The bestiary re-stacks it above its settings pane in its
