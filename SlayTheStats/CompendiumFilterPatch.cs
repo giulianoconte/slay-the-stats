@@ -1800,7 +1800,15 @@ public static partial class CompendiumFilterPatch
             if (cohortControl is NLibraryStatTickbox tb && GodotObject.IsInstanceValid(tb)) tb.IsTicked = a10;
             else if (cohortControl is CheckBox cb && GodotObject.IsInstanceValid(cb)) cb.SetPressedNoSignal(a10);
         }
-        SyncCommunitySection();
+        // Initial visibility only. Don't run the full sync synchronously here: it sets
+        // IsTicked on the freshly-cloned tickbox, whose NTickbox visuals (_tickedImage /
+        // _notTickedImage) aren't wired until its deferred _Ready fires — touching IsTicked
+        // before that NREs and aborts the whole pane build (so the filter button vanishes).
+        // The initial tick is already applied by BuildStyledCheckbox (initialValue →
+        // CloneTickbox's Ready); the full re-sync runs on pane-open via _syncCallbacks, by
+        // which point Ready has fired.
+        if (GodotObject.IsInstanceValid(communitySection))
+            communitySection.Visible = SlayTheStatsConfig.Community != SlayTheStatsConfig.CommunityMode.Off;
         _syncCallbacks.Add(SyncCommunitySection);
 
         // ── Action buttons ──
