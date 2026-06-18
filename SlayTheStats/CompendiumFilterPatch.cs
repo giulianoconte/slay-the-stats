@@ -1791,24 +1791,37 @@ public static partial class CompendiumFilterPatch
         communitySection.AddChild(cohortControl);
         AddSeparator(communitySection);
 
-        // Sync on pane open: refresh the tick from config and hide the section when off.
+        // Sync on pane open: refresh the tick from config and, when community stats are
+        // off, fade the section and make the cohort control inert with a hover hint that
+        // points at the mod-config switch (the cohort has nothing to apply to until then).
+        // The section always stays visible so the setting is discoverable before enabling.
         void SyncCommunitySection()
         {
             if (!GodotObject.IsInstanceValid(communitySection)) return;
-            communitySection.Visible = SlayTheStatsConfig.Community != SlayTheStatsConfig.CommunityMode.Off;
+            bool communityOff = SlayTheStatsConfig.Community == SlayTheStatsConfig.CommunityMode.Off;
+            communitySection.Modulate = communityOff ? new Color(1f, 1f, 1f, 0.4f) : Colors.White;
+            string offHint = communityOff ? L.T("filter.community.cohort_disabled_hint") : "";
+
             bool a10 = SlayTheStatsConfig.CommunityReferenceCohort == SlayTheStatsConfig.CommunityCohort.A10;
-            if (cohortControl is NLibraryStatTickbox tb && GodotObject.IsInstanceValid(tb)) tb.IsTicked = a10;
-            else if (cohortControl is CheckBox cb && GodotObject.IsInstanceValid(cb)) cb.SetPressedNoSignal(a10);
+            if (cohortControl is NLibraryStatTickbox tb && GodotObject.IsInstanceValid(tb))
+            {
+                tb.IsTicked = a10;
+                tb.SetEnabled(!communityOff); // gates clicks (NClickableControl._isEnabled)
+                tb.TooltipText = offHint;      // native hover tooltip still shows while disabled
+            }
+            else if (cohortControl is CheckBox cb && GodotObject.IsInstanceValid(cb))
+            {
+                cb.SetPressedNoSignal(a10);
+                cb.Disabled = communityOff;
+                cb.TooltipText = offHint;
+            }
         }
-        // Initial visibility only. Don't run the full sync synchronously here: it sets
-        // IsTicked on the freshly-cloned tickbox, whose NTickbox visuals (_tickedImage /
-        // _notTickedImage) aren't wired until its deferred _Ready fires — touching IsTicked
-        // before that NREs and aborts the whole pane build (so the filter button vanishes).
-        // The initial tick is already applied by BuildStyledCheckbox (initialValue →
-        // CloneTickbox's Ready); the full re-sync runs on pane-open via _syncCallbacks, by
-        // which point Ready has fired.
-        if (GodotObject.IsInstanceValid(communitySection))
-            communitySection.Visible = SlayTheStatsConfig.Community != SlayTheStatsConfig.CommunityMode.Off;
+        // Don't run the full sync synchronously here: it sets IsTicked on the freshly-cloned
+        // tickbox, whose NTickbox visuals (_tickedImage / _notTickedImage) aren't wired until
+        // its deferred _Ready fires — touching IsTicked before that NREs and aborts the whole
+        // pane build (so the filter button vanishes). The initial tick is already applied by
+        // BuildStyledCheckbox (initialValue → CloneTickbox's Ready); the full sync runs on
+        // pane-open via _syncCallbacks, by which point Ready has fired and the pane is shown.
         _syncCallbacks.Add(SyncCommunitySection);
 
         // ── Action buttons ──
