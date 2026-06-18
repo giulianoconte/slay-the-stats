@@ -39,10 +39,13 @@ internal static class RunSubmitter
     /// server/network is likely down; retry next launch.</summary>
     private const int MaxConsecutiveFailures = 3;
 
-    /// <summary>The <c>_sts</c> provenance stamp ("slay-the-stats/&lt;version&gt;") is gated
-    /// on an external (peter) OK to land in the public export. Until then we ship
-    /// anonymous-unstamped (#36): flip to true once cleared.</summary>
-    private const bool StampProvenance = false;
+    /// <summary>The <c>_sts</c> provenance stamp ("slay-the-stats/&lt;version&gt;") is injected
+    /// into the OUTBOUND run copy only (never the local .run), to attribute runs as
+    /// slay-the-stats-origin in the public export. It rides in the run JSON body, which the
+    /// server stores in the shareable <c>{run_hash}.json</c> and ships in the export, but does
+    /// NOT affect the dedup hash (fixed-field-based) or the Mongo doc (narrow projection).
+    /// Inertness/roundtrip being verified (#46 follow-up).</summary>
+    private const bool StampProvenance = true;
 
     private const string LedgerFileName = "slay-the-stats-submission-ledger.json";
 
