@@ -140,11 +140,15 @@ internal class SlayTheStatsConfig : SimpleModConfig
     /// spire-codex.com. (The share half of ReadShare wires up in #36; until then
     /// ReadShare reads exactly like ReadOnly and uploads nothing.)
     /// </summary>
+    // Order here drives the mod-config dropdown order (BaseLib renders enum members
+    // top-to-bottom): the promoted "share" option first, plain Off last. Persistence is
+    // by name, the default is pinned explicitly below, and every comparison is equality
+    // (never ordinal), so this order is purely cosmetic.
     public enum CommunityMode
     {
-        Off,
-        ReadOnly,
         ReadShare,
+        ReadOnly,
+        Off,
     }
 
     [ConfigSection("CommunityStats")]
