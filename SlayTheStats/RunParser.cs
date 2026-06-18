@@ -782,6 +782,13 @@ public static class RunParser
                 ? Environment.SpecialFolder.ApplicationData
                 : Environment.SpecialFolder.LocalApplicationData;
             var appData = Environment.GetFolderPath(specialFolder);
+            // macOS: .NET resolves LocalApplicationData to ~/.local/share (XDG),
+            // but the game (Godot) writes user:// to ~/Library/Application Support.
+            // Override so we read where the game actually wrote.
+            if (OperatingSystem.IsMacOS())
+                appData = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    "Library", "Application Support");
             sts2Root = Path.Combine(appData, "SlayTheSpire2", "steam");
         }
 
