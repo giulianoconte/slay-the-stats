@@ -183,9 +183,15 @@ Check the Godot log for `[SlayTheStats]` entries:
 
 ### Translations
 
-The mod is localized into Russian and Simplified Chinese in-game; the locale follows the game's language setting. Native-speaker translation review is pending — if you spot awkward or wrong translations, please leave a comment or ping me on Discord.
+The mod is localized into Russian and Simplified Chinese in-game; the locale follows the game's language setting. Native-speaker translation review is pending — if you spot awkward or wrong translations, please leave a comment.
 
-Want to help translate the mod into another language? DM me on the Slay the Spire Discord — my handle is `.theshoe`.
+Short description in each language:
+
+**English:** Tracks card, relic, and encounter stats across all your runs and shows them in tooltips. Also adds a bestiary page to the compendium, shows optional community stats from Spire Codex (spire-codex.com), and offers a color-blind mode.
+
+**Русский:** Отслеживает статистику карт, реликвий и столкновений по всем вашим забегам и показывает её во всплывающих подсказках. Также добавляет страницу бестиария в компендиум, показывает необязательную статистику сообщества из Spire Codex (spire-codex.com) и предлагает режим для дальтоников.
+
+**简体中文：** 追踪您所有游戏场次中的卡牌、遗物和遭遇统计数据，并以提示框形式显示。同时在图鉴中新增敌怪图鉴页面，并提供来自 Spire Codex（spire-codex.com）的可选社区统计数据和色盲模式。
 
 ---
 

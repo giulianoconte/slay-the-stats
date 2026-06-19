@@ -155,10 +155,11 @@ I was mistaken - you never needed GUMM to run this mod. Here's how to uninstall 
 Translations
 The mod itself is localized into Russian and Simplified Chinese in-game.
 
-Want to help translate the mod into another language? DM me on the Slay the Spire Discord — my handle is .theshoe.
+English: Tracks card, relic, and encounter stats across all your runs and shows them in tooltips. Also adds a bestiary page to the compendium, shows optional community stats from Spire Codex (spire-codex.com), and offers a color-blind mode.
+Spotted a translation error? Please leave a comment — much appreciated!
 
-Русский: Отслеживает статистику карт, реликвий и столкновений по всем вашим забегам и показывает её во всплывающих подсказках. Также добавляет страницу бестиария в компендиум.
-Если вы заметите ошибки перевода — пожалуйста, оставьте комментарий или сообщите на Discord. Буду признателен!
+Русский: Отслеживает статистику карт, реликвий и столкновений по всем вашим забегам и показывает её во всплывающих подсказках. Также добавляет страницу бестиария в компендиум, показывает необязательную статистику сообщества из Spire Codex (spire-codex.com) и предлагает режим для дальтоников.
+Если вы заметите ошибки перевода — пожалуйста, оставьте комментарий. Буду признателен!
 
-简体中文：追踪您所有游戏场次中的卡牌、遗物和遭遇统计数据，并以提示框形式显示。同时在图鉴中添加敌怪图鉴页面。
-如果您发现翻译错误，欢迎在评论区或 Discord 反馈，非常感谢！ 
+简体中文：追踪您所有游戏场次中的卡牌、遗物和遭遇统计数据，并以提示框形式显示。同时在图鉴中新增敌怪图鉴页面，并提供来自 Spire Codex（spire-codex.com）的可选社区统计数据和色盲模式。
+如果您发现翻译错误，欢迎在评论区反馈，非常感谢！
