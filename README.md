@@ -1,6 +1,6 @@
 # SlayTheStats
 
-A Slay the Spire 2 mod that tracks card, relic, and encounter stats across your runs. Card and relic stats show as tooltips on hover; encounter stats show on a new Stats Bestiary compendium page, in a tooltip on combat enemy hovers, and in a comparison tooltip on the post-fight reward screen.
+A Slay the Spire 2 mod that tracks card, relic, and encounter stats across your runs. Card and relic stats show as tooltips on hover; encounter stats show on a new Stats Bestiary compendium page, in a tooltip on combat enemy hovers, and in a comparison tooltip on the post-fight reward screen. It can also optionally show how the wider community fares with each card and relic, pulled from [Spire Codex](https://spire-codex.com).
 
 ---
 
@@ -18,6 +18,14 @@ SlayTheStats reads your full run history retroactively. Stats are updated when y
 - **Buys** — for colorless cards and relics: Shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. `12/30`).
 
 Stats are shown as a tooltip when you hover over cards and relics during a run, in shops, and in the compendium. Stats are broken out by act acquired.
+
+**Community stats** (optional, via [Spire Codex](https://spire-codex.com)):
+
+- Alongside your own numbers, card and relic tooltips can show a **(community)** reference line drawn from the [Spire Codex](https://spire-codex.com) run corpus — community **Pick%** and **Win%** for cards, **Win%** for relics (relics aren't drafted, so they have no pick rate).
+- **Opt-in, off by default.** Enable it on BaseLib's mod configuration page in one of two modes: *Enable without sharing* (pull community baselines only) or *Enable & share runs* (also upload your completed runs to keep everyone's numbers accurate). While off, the mod makes no network calls.
+- **Sharing** ties each uploaded run to your Steam ID; you can review your runs by logging into your Steam account at [spire-codex.com](https://spire-codex.com).
+- **Cohort** — choose which slice of the community the reference line represents: *Everyone* (all recorded runs) or *Ascension 10+* (A10 and above). The cohort is a fixed baseline — it does **not** re-slice to your personal filters (ascension/version/class/profile), so it won't empty out as you narrow them.
+- Community data is cached locally (`slay-the-stats-community-cache.json`) so it still shows when you're offline, and refreshes in the background.
 
 **Encounter stats** (Stats Bestiary + in-combat + post-fight):
 
@@ -55,10 +63,11 @@ To fully remove the mod (or wipe its state for a clean reinstall), delete these 
 1. The `SlayTheStats/` folder inside your STS2 `mods/` directory
 2. `SlayTheStats.cfg` in the `mod_configs/` folder next to your STS2 save data — stores mod settings and filter defaults
 3. `slay-the-stats.json` in your STS2 save data folder — stores the parsed run stats database
+4. *(only if you used community stats)* `slay-the-stats-community-cache.json` and `slay-the-stats-submission-ledger.json` in your STS2 save data folder — cached Spire Codex data and the record of which runs you've already submitted
 
-Paths for items 2–3:
-- **Windows:** `%APPDATA%\Slay the Spire 2\`  (contains `mod_configs\SlayTheStats.cfg` and `slay-the-stats.json`)
-- **Linux:** `~/.local/share/Slay the Spire 2/`  (contains `mod_configs/SlayTheStats.cfg` and `slay-the-stats.json`)
+Paths for items 2–4:
+- **Windows:** `%APPDATA%\Slay the Spire 2\`  (contains `mod_configs\SlayTheStats.cfg`, `slay-the-stats.json`, and the community cache/ledger files)
+- **Linux:** `~/.local/share/Slay the Spire 2/`  (contains `mod_configs/SlayTheStats.cfg`, `slay-the-stats.json`, and the community cache/ledger files)
 
 If you only want to reset stats but keep your settings, delete just `slay-the-stats.json` — it will be rebuilt from your run history on next launch.
 
@@ -91,6 +100,8 @@ Active filters are highlighted in green so it's obvious which controls are diver
 
 Filter changes you make while in a run are temporary — they let you slice the data without committing — and snap back to your saved defaults the next time you boot the game. **Save Defaults** is the only way to persist a change across game boots. You can also open the filter pane standalone from the mod settings menu (via "Open Filters") to edit your defaults without entering the compendium.
 
+Once community stats are enabled (see [Community stats](#what-it-does) above), the pane also shows a **Community stats** section with an **Only show community stats for A10+** checkbox — ticking it switches the community reference line from the *Everyone* cohort to *Ascension 10+*. Unlike the filters above, this is a persisted setting rather than a temporary filter: it takes effect immediately, is unaffected by **Clear Filters** / **Reset** / **Save Defaults**, and doesn't snap back on reboot. It's the same setting as the **Reference Cohort** dropdown in the mod configuration.
+
 ### Understanding the Stats
 
 **Pick%** is sourced only from fight reward screens — the 3-card choice after defeating an enemy. Shop purchases, event cards, ancient (Neow) rewards, and other acquisition sources are not counted. Some relics modify reward screens (e.g. adding an extra card or replacing choices); those modified screens are also excluded since the pool is no longer a standard 3-card offer.
@@ -114,6 +125,9 @@ Mod settings can be configured in-game from BaseLib's mod configuration page:
 - **Disable All Stat Tooltips** — master off switch; turns off every stat tooltip in the game.
 - **Tutorial Seen / Bestiary Tutorial Seen** — toggle off to re-show the corresponding welcome overlay next time you open the compendium or the bestiary.
 - **Encounter Stats (requires restart)** — dropdown with three modes: `BestiaryAndTooltips` (Stats Bestiary button in the compendium + in-combat enemy hover tooltip, default), `Tooltips` (tooltip only, bestiary button hidden), or `Disabled` (both off). Takes effect on next launch.
+- **Community Stats (Spire Codex)** — opt into the community reference line: `Off` (default, no network calls), `Enable without sharing` (pull community baselines only), or `Enable & share runs` (also upload your completed runs). See [Community stats](#what-it-does) above.
+- **Reference Cohort** — which community slice the reference line shows: `Everyone` or `Ascension 10+`. Only shown when community stats are enabled; the same setting as the filter-pane cohort checkbox.
+- **Refresh now** / **spire-codex.com** — buttons shown when community stats are enabled, to force an immediate data refresh or open the Spire Codex site.
 - **Data Directory** — override the SlayTheSpire2 data directory path (the folder containing `steam/`). Leave empty to use the platform default.
 - **Debug Mode** — enable verbose logging for bug reports.
 
@@ -143,6 +157,8 @@ Stats are stored in `slay-the-stats.json`:
 - **Linux:** `~/.local/share/Slay the Spire 2/`
 
 On startup, if the mod version has changed since your last session, all run history is reprocessed to update stats.
+
+If you use community stats, Spire Codex data is cached in the same folder as `slay-the-stats-community-cache.json`, and the record of runs you've submitted lives in `slay-the-stats-submission-ledger.json`.
 
 ### Transferring a Vanilla Profile to a Modded Profile
 
@@ -230,7 +246,8 @@ dotnet test
 | `RelicStatsTooltipPatch.cs` | Harmony patches for relic hover tooltips |
 | `TooltipHelper.cs` | Shared tooltip rendering and color helpers |
 | `Patches.cs` | Harmony patches for run-end hook and character tracking |
-| `SlayTheStatsConfig.cs` | Mod settings (color blind mode, in-run stats toggle, master tooltip kill switch, debug mode, data directory) and persisted filter-pane state (ascension/version/profile/class/group-upgrades + their saved defaults) |
+| `SlayTheStatsConfig.cs` | Mod settings (color blind mode, in-run stats toggle, master tooltip kill switch, debug mode, data directory, community-stats participation mode + reference cohort) and persisted filter-pane state (ascension/version/profile/class/group-upgrades + their saved defaults) |
+| `Community/` | Spire Codex integration — community-stats client, local cache, run submission + ledger, and the first-run consent flow |
 | `StatsLogger.cs` | Debug utility — logs per-act stat tables to the Godot log |
 
 ### How Stats Are Tracked

@@ -6,11 +6,11 @@ My Mods
 - RememberCardSort: https://www.nexusmods.com/slaythespire2/mods/801 - qol
 - MoreTino: https://www.nexusmods.com/slaythespire2/mods/753 - memes
 
-New in v1.0.0
-- Event tracking.
-- Localization - Chinese (Simplified) and Russian language support.
-- Bestiary encounter distribution graph - Shows distribution of damage taken from the encounter.
-- Requires BaseLib v3.1.0
+New in v1.2 - Community card and relic stats
+- See community pick rates for cards and win rates for cards and relics.
+- Community stats data is from Spire Codex (spire-codex.com).
+- You can show community stats for all ascensions or limit to just A10+.
+- Spire Codex / community stats integration is optional.
 
 ______________________________________________________________________
 Features
@@ -24,6 +24,15 @@ Card and relic stats
 - Win% -- how often you win runs that include a given card or relic.
 - Runs -- shown as a fraction of runs the card was in your final deck / runs it appeared on a fight reward screen (e.g. 12/30). For relics, just the number of runs present.
 - Buys -- for colorless cards and relics: shown as a fraction of runs you purchased the item from a shop / runs it appeared in a shop (e.g. 12/30).
+
+Community card and relic stats
+- See community pick rates for cards and win rates for cards and relics.
+- Community stats data is from Spire Codex (spire-codex.com).
+- You can show community stats for all ascensions or limit to just A10+.
+- Spire Codex / community stats integration is optional.
+- You can choose to share your runs with Spire Codex, or just show community stats without sharing your runs.
+- Runs you share will be tied to your Steam ID. You can see your runs by going to spire-codex.com and logging into your steam account.
+- Community stats data is stored locally, so they can be displayed offline as well.
 
 Encounter stats
 Every combat encounter in your run history is parsed and tracked: times fought, damage taken, potions used, etc. Hover over an encounter during a fight to see encounter stats.
