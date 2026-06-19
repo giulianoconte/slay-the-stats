@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Backgrounds;
 using System.Collections.Generic;
 
 namespace SlayTheStats;
@@ -4220,24 +4221,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         "ENCOUNTER.DOORMAKER_BOSS",
     };
 
-    /// <summary>Encounters only the beta NCreature recipe renders correctly; the
-    /// legacy hand-rolled path (used on branches without the bestiary API) binds
-    /// their empty "default" skin and renders nothing useful, so we WIP-placeholder
-    /// them there. When <see cref="BestiaryRecipeAvailable"/> these render fine and
-    /// are NOT suppressed.</summary>
-    private static readonly HashSet<string> LegacyOnlyUnpreviewedEncounterIds = new()
-    {
-        // (empty) SkulkingColony was here, suppressed on the legacy path; we now
-        // let it render — the legacy skin-fallback (TryApplyFallbackSkin /
-        // EnsureNonEmptySkin) gives it bound art, which is better than a WIP card.
-    };
-
     private const string KaiserCrabEncounterId = "ENCOUNTER.KAISER_CRAB_BOSS";
 
     /// <summary>Self-contained scene for the Kaiser Crab body (an
-    /// NKaiserCrabBossBackground Node2D that plays its own idle loops). Only
-    /// present on the branch that has the bestiary; null elsewhere, in which case
-    /// Kaiser Crab stays WIP. Resolved once so a re-hover doesn't re-probe.</summary>
+    /// NKaiserCrabBossBackground Node2D that plays its own idle loops). Resolved
+    /// once so a re-hover doesn't re-probe; null (→ Kaiser Crab stays WIP) only if
+    /// the scene is somehow missing.</summary>
     private static readonly string? KaiserCrabSetupScenePath = ProbeKaiserCrabScene();
 
     private static string? ProbeKaiserCrabScene()
@@ -4257,12 +4246,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
         // Known-unpreviewed encounters — show a "Preview WIP" placeholder
         // instead of letting the render pipeline produce an empty / broken
-        // image. The always-WIP set fails on every branch; the legacy-only set
-        // is suppressed only when the beta recipe isn't available to render it;
-        // Kaiser Crab is WIP only when its body scene isn't bundled (i.e. on a
-        // branch without the bestiary) — otherwise it renders below.
+        // image. Kaiser Crab is WIP only in the unlikely case its body scene
+        // isn't bundled — otherwise it renders below.
         if (UnpreviewedEncounterIds.Contains(encounterId) ||
-            (!BestiaryRecipeAvailable && LegacyOnlyUnpreviewedEncounterIds.Contains(encounterId)) ||
             (encounterId == KaiserCrabEncounterId && KaiserCrabSetupScenePath == null))
         {
             ShowWipPlaceholder();
@@ -4382,13 +4368,9 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // combat screen — so without honoring Bounds.Position we'd place them
         // outside the slot).
         // Per monster we keep the NCreatureVisuals (for measuring/animating) and
-        // the *positionable node* that owns it. On beta that's an NCreature (a
-        // Control built via the game's own bestiary recipe); on main, where that
-        // recipe's types don't exist, it's the bare NCreatureVisuals (a Node2D)
-        // built by the legacy path. We scale/position the owner node, so the
-        // layout math below is identical for both.
+        // the NCreature (a Control) that owns it. We scale/position the owner.
         var visualsList = new List<NCreatureVisuals>();
-        var nodeList = new List<Node>();        // the positionable owner per monster
+        var nodeList = new List<NCreature>();   // the positionable owner per monster
         var boundsRects = new List<Rect2>();    // bounds rect in viewport coords (scaled)
         float totalWidth = 0f;
         float maxHeight = 0f;
@@ -4396,40 +4378,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         // %Bounds extent). If none do, we fall back to the static boss icon.
         int renderableCount = 0;
 
-        // Per-encounter counter of how many instances of each monster id we've
-        // already processed (legacy path uses it to alternate skin variants across
-        // repeated monsters, e.g. 4x PhantasmalGardener tall/short/tall/short).
-        var monsterInstanceIndex = new Dictionary<string, int>();
-
         foreach (var monster in monsters)
         {
             string monsterIdStr = monster.Id.ToString();
-            if (!monsterInstanceIndex.TryGetValue(monsterIdStr, out int instanceIdx)) instanceIdx = 0;
-            monsterInstanceIndex[monsterIdStr] = instanceIdx + 1;
 
-            // Build the visuals. Beta has the full bestiary API (NullCombatState +
-            // NCreature.SetupForBestiary) so we mirror the game's own
-            // NBestiaryLayoutDefault.Setup recipe, which wires the animator/skin in
-            // the right order and fixes the previously-empty SkulkingColony/Aeonglass
-            // renders. Main lacks those types, so we fall back to the hand-rolled
-            // path. The beta-only types live ONLY inside BuildPreviewCreatureBeta,
-            // which is never *called* on main — so the JIT never tries to load them.
-            NCreatureVisuals? visuals;
-            Node ownerNode;
-            if (BestiaryRecipeAvailable)
-            {
-                var nc = BuildPreviewCreatureBeta(monster, viewport);
-                if (nc == null) continue;
-                visuals = nc.Visuals;
-                if (visuals == null) { ((Node)nc).QueueFree(); continue; }
-                ownerNode = nc;
-            }
-            else
-            {
-                visuals = BuildPreviewVisualsLegacy(monster, viewport, monsterIdStr, instanceIdx);
-                if (visuals == null) continue;
-                ownerNode = visuals;
-            }
+            // Build the visuals by mirroring the game's own NBestiaryLayoutDefault.Setup
+            // recipe (a real NCreature + NullCombatState + SetupForBestiary), which
+            // wires the animator/skin in the right order and renders the
+            // SkulkingColony/Aeonglass skeletons correctly.
+            var nc = BuildPreviewCreature(monster, viewport);
+            if (nc == null) continue;
+            NCreatureVisuals visuals = nc.Visuals;
+            NCreature ownerNode = nc;
 
             // Spine monsters animate via the idle loop; non-Spine monsters
             // (Aeonglass renders through a custom non-SpineSprite body) still draw
@@ -4446,7 +4406,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
 
             // Scale the owner node up to match in-combat apparent size. The layout
             // math below uses the scaled bounds so monsters don't overlap.
-            SetNodeScale(ownerNode, new Vector2(MonsterPreviewScale, MonsterPreviewScale));
+            ownerNode.Scale = new Vector2(MonsterPreviewScale, MonsterPreviewScale);
 
             // Measure the sprite's extent in local (origin-relative) coords.
             Rect2 localBounds = MeasureLocalBounds(visuals);
@@ -4529,7 +4489,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             float slotCenterX = cursor + sb.Size.X * 0.5f;
             float posX = slotCenterX - (sb.Position.X + sb.Size.X * 0.5f);
             float posY = feetY       - (sb.Position.Y + sb.Size.Y);
-            SetNodePosition(node, new Vector2(posX, posY));
+            node.Position = new Vector2(posX, posY);
             cursor += sb.Size.X + MonsterPreviewGap;
         }
 
@@ -4554,16 +4514,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     {
         if (_renderArea == null || KaiserCrabSetupScenePath == null) return;
 
-        // The crab body scene's root is NKaiserCrabBossBackground, whose base type
-        // differs by branch (Node2D on the bestiary branch, plain Node on the
-        // other), so we can't cast it to a fixed type. Instantiate it as a Node,
-        // and wrap it in our own Node2D container that we scale/position — the
-        // container is what the layout math drives, the crab just rides inside it.
-        Node? crab = null;
+        // The crab body scene's root is NKaiserCrabBossBackground (a Node2D), which
+        // we scale/position directly — the layout math drives it.
+        NKaiserCrabBossBackground? crab = null;
         try
         {
             var scene = ResourceLoader.Load<PackedScene>(KaiserCrabSetupScenePath);
-            crab = scene?.Instantiate();
+            crab = scene?.Instantiate<NKaiserCrabBossBackground>();
         }
         catch (Exception e)
         {
@@ -4597,23 +4554,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         };
         viewport.AddChild(bgFill);
 
-        // Wrap the crab in a Node2D we control, and scale that. (We can't touch
-        // the crab root's own Position/Scale/Visible: on the non-bestiary branch
-        // it's a plain Node with none of those.) Adding to the tree runs the crab's
-        // _Ready, which starts its idle loops; on the bestiary branch _Ready also
-        // hides itself via SetVisible(false), so re-show it by reflection if that
-        // method exists (no-op on the branch where it doesn't).
+        // Adding to the tree runs the crab's _Ready, which starts its idle loops
+        // and then hides itself via SetVisible(false) — so scale it and re-show it.
         float crabScale = MonsterPreviewScale;
-        var crabHolder = new Node2D { Name = "KaiserCrabHolder" };
-        viewport.AddChild(crabHolder);
-        crabHolder.AddChild(crab);
-        crabHolder.Scale = new Vector2(crabScale, crabScale);
-        try
-        {
-            var setVisible = crab.GetType().GetMethod("SetVisible", new[] { typeof(bool) });
-            setVisible?.Invoke(crab, new object[] { true });
-        }
-        catch { /* branch without SetVisible(bool) — already visible */ }
+        viewport.AddChild(crab);
+        crab.Scale = new Vector2(crabScale, crabScale);
+        crab.Visible = true;
 
         // Measure the crab's spine bounds via its %Visuals child (a SpineSprite),
         // then INFLATE them. The skeleton's GetBounds() under-reports the arm
@@ -4651,7 +4597,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         float feetY = vpH - MonsterPreviewFloorMargin;
         float posX = vpW * 0.5f - (scaledBounds.Position.X + scaledBounds.Size.X * 0.5f);
         float posY = feetY      - (scaledBounds.Position.Y + scaledBounds.Size.Y);
-        crabHolder.Position = new Vector2(posX, posY);
+        crab.Position = new Vector2(posX, posY);
 
         AddToLruCache(encounterId, viewport);
         ActivateViewport(viewport);
@@ -4865,74 +4811,15 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     }
 
     /// <summary>
-    /// True when the running game DLL exposes the beta bestiary API that the
-    /// "build a real NCreature" preview recipe depends on — specifically the
-    /// <c>NullCombatState</c> type and <c>NCreature.SetupForBestiary</c>. These
-    /// landed on the beta branch with the vanilla bestiary; the main branch DLL
-    /// doesn't have them yet. Probed once via reflection so the mod ships a single
-    /// build that runs on both branches: beta uses the recipe (which renders
-    /// SkulkingColony/Aeonglass correctly), main falls back to the legacy
-    /// hand-rolled visuals path. CRITICAL: the beta-only types are referenced ONLY
-    /// inside <see cref="BuildPreviewCreatureBeta"/>, which is never *called* when
-    /// this flag is false.
-    ///
-    /// The mod compiles against the MAIN game DLL, which doesn't *have*
-    /// NullCombatState or NCreature.SetupForBestiary — so they can't be named in
-    /// source at all (it wouldn't compile). We therefore invoke both via
-    /// reflection, with the handles cached here. Everything else the recipe uses
-    /// (ToMutable, Rng.Chaotic, SetUpForCombat, the Creature ctor, CombatSide,
-    /// NCreature.Create) exists on both branches and is called directly.
-    /// </summary>
-    private static readonly bool BestiaryRecipeAvailable;
-    private static readonly Type? _nullCombatStateType;
-    private static readonly System.Reflection.PropertyInfo? _combatStateProp;
-    private static readonly System.Reflection.MethodInfo? _setupForBestiaryMethod;
-
-    // MegaSkeletonDataResource exposes animation lookup differently across game
-    // branches: main has `MegaAnimation? FindAnimation(string)`, beta replaced it
-    // with `bool HasAnimation(string)`. A single deployed DLL must run on both, so
-    // we resolve whichever exists by reflection (see SkeletonHasAnimation).
-    private static readonly System.Reflection.MethodInfo? _hasAnimationMethod;
-    private static readonly System.Reflection.MethodInfo? _findAnimationMethod;
-
-    static NBestiaryStatsSubmenu()
-    {
-        try
-        {
-            _nullCombatStateType = typeof(NCreature).Assembly
-                .GetType("MegaCrit.Sts2.Core.Combat.NullCombatState");
-            _combatStateProp = typeof(Creature).GetProperty("CombatState");
-            _setupForBestiaryMethod = typeof(NCreature).GetMethod(
-                "SetupForBestiary", Type.EmptyTypes);
-            _hasAnimationMethod = typeof(MegaSkeletonDataResource).GetMethod(
-                "HasAnimation", new[] { typeof(string) });
-            _findAnimationMethod = typeof(MegaSkeletonDataResource).GetMethod(
-                "FindAnimation", new[] { typeof(string) });
-            BestiaryRecipeAvailable =
-                _nullCombatStateType != null &&
-                _combatStateProp?.CanWrite == true &&
-                _setupForBestiaryMethod != null;
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] Bestiary recipe probe failed, using legacy preview path: {e.Message}");
-            BestiaryRecipeAvailable = false;
-        }
-    }
-
-    /// <summary>
-    /// Beta path: build the monster exactly the way the game's own bestiary does
+    /// Build the monster exactly the way the game's own bestiary does
     /// (NBestiaryLayoutDefault.Setup) — a real NCreature, added to the viewport
     /// (whose _Ready wires the Spine animator from SpineBody, applies the skin in
     /// the right order, hooks BoundsUpdated→UpdateBounds, and handles phobia /
     /// empty-skin cases the old manual path got wrong) — then SetupForBestiary to
     /// hide the combat-only health bar + intents. Returns the NCreature (a Control
-    /// positioned by the caller), or null on failure. Only called when
-    /// <see cref="BestiaryRecipeAvailable"/>; the two branch-only members
-    /// (NullCombatState, SetupForBestiary) are reached by reflection so this
-    /// compiles against the main DLL that lacks them.
+    /// positioned by the caller), or null on failure.
     /// </summary>
-    private static NCreature? BuildPreviewCreatureBeta(MonsterModel monster, SubViewport viewport)
+    private static NCreature? BuildPreviewCreature(MonsterModel monster, SubViewport viewport)
     {
         NCreature? nc;
         try
@@ -4941,13 +4828,12 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             model.Rng = Rng.Chaotic;
             model.SetUpForCombat();
             var entity = new Creature(model, CombatSide.Enemy, null);
-            // entity.CombatState = new NullCombatState();  — via reflection (main lacks the type)
-            _combatStateProp!.SetValue(entity, Activator.CreateInstance(_nullCombatStateType!));
+            entity.CombatState = new NullCombatState();
             nc = NCreature.Create(entity);
         }
         catch (Exception e)
         {
-            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewCreatureBeta: NCreature.Create failed for {monster.Id}: {e.Message}");
+            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewCreature: NCreature.Create failed for {monster.Id}: {e.Message}");
             return null;
         }
         if (nc == null) return null;   // TestMode (shouldn't happen at runtime)
@@ -4957,99 +4843,13 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
         viewport.AddChild(nc);
         try
         {
-            _setupForBestiaryMethod!.Invoke(nc, null);  // nc.SetupForBestiary()
+            nc.SetupForBestiary();
         }
         catch (Exception e)
         {
-            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewCreatureBeta: SetupForBestiary failed for {monster.Id}: {e.Message}");
+            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewCreature: SetupForBestiary failed for {monster.Id}: {e.Message}");
         }
         return nc;
-    }
-
-    /// <summary>
-    /// Main/legacy path: hand-roll the visuals using only APIs present on both
-    /// branches (CreateVisuals → GenerateAnimator → SetUpSkin, with skin
-    /// fallbacks). This is what the preview used before the beta bestiary API
-    /// existed; it renders most monsters fine but gets a few skin-variant
-    /// skeletons (SkulkingColony) subtly wrong — hence the recipe path on beta.
-    /// Returns the NCreatureVisuals (a Node2D positioned by the caller), or null
-    /// on failure.
-    /// </summary>
-    private static NCreatureVisuals? BuildPreviewVisualsLegacy(
-        MonsterModel monster, SubViewport viewport, string monsterIdStr, int instanceIdx)
-    {
-        NCreatureVisuals visuals;
-        try
-        {
-            visuals = monster.CreateVisuals();
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewVisualsLegacy: CreateVisuals failed for {monster.Id}: {e.Message}");
-            return null;
-        }
-        viewport.AddChild(visuals);
-
-        if (visuals.HasSpineAnimation && visuals.SpineBody != null)
-        {
-            try
-            {
-                monster.GenerateAnimator(visuals.SpineBody);
-            }
-            catch (Exception e)
-            {
-                MainFile.Logger.Warn($"[SlayTheStats] BuildPreviewVisualsLegacy: GenerateAnimator failed for {monster.Id}: {e.Message}");
-            }
-
-            // Skin: try the monster's own SetUpSkin first (the normal path). Many
-            // monsters override SetupSkins and reference base.Creature.SlotName to
-            // pick a per-slot variant (PhantasmalGardener, Vantom, TwoTailedRat,
-            // etc.) — that throws here because we're not in combat and Creature
-            // is null. Fall back to picking the first non-"default" skin so the
-            // skeleton has *some* art bound and isn't invisible.
-            bool skinSet = false;
-            try
-            {
-                visuals.SetUpSkin(monster);
-                skinSet = true;
-            }
-            catch
-            {
-                // Expected for monsters whose SetupSkins override reads
-                // base.Creature.SlotName — fall back to a data-driven skin
-                // pick below.
-            }
-            if (!skinSet)
-            {
-                TryApplyFallbackSkin(visuals, monsterIdStr, instanceIdx);
-            }
-            else
-            {
-                // Even when SetUpSkin succeeds, some skeletons (SkulkingColony,
-                // etc.) end up with their "default" skin bound, which for skin-
-                // variant skeletons is empty and renders nothing. If the bound
-                // bounding rect is suspiciously tiny, try picking a non-default
-                // skin as a safety net.
-                EnsureNonEmptySkin(visuals, monsterIdStr);
-            }
-        }
-        return visuals;
-    }
-
-    /// <summary>Set scale on a preview owner node that may be a Control (beta
-    /// NCreature) or a Node2D (legacy NCreatureVisuals).</summary>
-    private static void SetNodeScale(Node node, Vector2 scale)
-    {
-        if (node is Control c) c.Scale = scale;
-        else if (node is Node2D n) n.Scale = scale;
-    }
-
-    /// <summary>Set position on a preview owner node that may be a Control (beta
-    /// NCreature) or a Node2D (legacy NCreatureVisuals).</summary>
-    private static void SetNodePosition(Node node, Vector2 pos)
-    {
-        if (node is Control c) c.Position = pos;
-        else if (node is Node2D n) n.Position = pos;
     }
 
     /// <summary>True when the visuals have a non-trivial %Bounds extent, i.e. there
@@ -5117,7 +4917,7 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             {
                 var data = visuals.SpineBody?.GetSkeleton()?.GetData();
                 if (data == null) return;
-                if (!SkeletonHasAnimation(data, name)) continue;
+                if (!data.HasAnimation(name)) continue;
                 visuals.SpineAnimation.SetAnimation(name);
                 return;
             }
@@ -5127,128 +4927,6 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
             }
         }
         // No idle animation found — leave the skeleton in its default pose.
-    }
-
-    /// <summary>
-    /// Branch-agnostic "does this skeleton have an animation named <paramref name="name"/>?".
-    /// main exposes <c>MegaAnimation? FindAnimation(string)</c>; beta replaced it with
-    /// <c>bool HasAnimation(string)</c>. We resolve whichever the loaded game provides
-    /// (cached in the static ctor) so one deployed DLL works on both.
-    /// </summary>
-    private static bool SkeletonHasAnimation(MegaSkeletonDataResource data, string name)
-    {
-        if (_hasAnimationMethod != null)
-            return (bool)(_hasAnimationMethod.Invoke(data, new object[] { name }) ?? false);
-        if (_findAnimationMethod != null)
-            return _findAnimationMethod.Invoke(data, new object[] { name }) != null;
-        return false;
-    }
-
-    /// <summary>
-    /// Monster-specific skin patterns for encounters that normally pick a skin
-    /// per combat slot (SetupSkins reads <c>base.Creature.SlotName</c>, which is
-    /// null when we instantiate outside combat). For these monsters we replicate
-    /// the game's per-slot selection using the visual's ordinal index within the
-    /// same encounter. PhantasmalGardener: slots first/third → tall, slots
-    /// second/fourth → short (matches the logic in PhantasmalGardener.SetupSkins).
-    /// Used by the legacy preview path only.
-    /// </summary>
-    private static readonly Dictionary<string, string[]> SlotSkinPatterns = new()
-    {
-        { "MONSTER.PHANTASMAL_GARDENER", new[] { "tall", "short", "tall", "short" } },
-    };
-
-    /// <summary>
-    /// Bind a skin from the skeleton's data to the visuals. Used when a monster's
-    /// own SetupSkins override throws (most commonly because it references
-    /// <c>base.Creature.SlotName</c>, which is null outside combat). If the
-    /// monster has a known per-slot skin pattern (see SlotSkinPatterns), pick the
-    /// skin for the given instance index; otherwise fall back to the first
-    /// non-"default" skin in the skeleton data.
-    /// </summary>
-    private static void TryApplyFallbackSkin(NCreatureVisuals visuals, string idForLog, int instanceIdx)
-    {
-        try
-        {
-            var skeleton = visuals.SpineBody?.GetSkeleton();
-            if (skeleton == null) return;
-
-            // Per-monster pattern first, if one is registered for this id.
-            string? pickedName = null;
-            if (SlotSkinPatterns.TryGetValue(idForLog, out var pattern) && pattern.Length > 0)
-            {
-                var candidate = pattern[instanceIdx % pattern.Length];
-                // Only use it if the skin actually exists on the skeleton.
-                var data = skeleton.GetData();
-                if (data.FindSkin(candidate) != null)
-                    pickedName = candidate;
-            }
-
-            // Generic fallback: first non-"default" skin in the data resource.
-            pickedName ??= PickSkinName(skeleton);
-
-            if (pickedName == null) return;
-            skeleton.SetSkinByName(pickedName);
-            skeleton.SetSlotsToSetupPose();
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] TryApplyFallbackSkin: {idForLog} failed: {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// If the skeleton's current bound skin looks empty (zero-area bounds), attempt
-    /// to switch to a non-"default" skin. Safety net for vanilla monsters whose
-    /// default skin has no art bound (SkulkingColony etc.).
-    /// </summary>
-    private static void EnsureNonEmptySkin(NCreatureVisuals visuals, string idForLog)
-    {
-        try
-        {
-            var skeleton = visuals.SpineBody?.GetSkeleton();
-            if (skeleton == null) return;
-            var bounds = skeleton.GetBounds();
-            if (bounds.Size.X > 4f && bounds.Size.Y > 4f) return; // skin already has content
-            var pickedName = PickSkinName(skeleton);
-            if (pickedName == null) return;
-            skeleton.SetSkinByName(pickedName);
-            skeleton.SetSlotsToSetupPose();
-        }
-        catch (Exception e)
-        {
-            MainFile.Logger.Warn($"[SlayTheStats] EnsureNonEmptySkin: {idForLog} failed: {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Iterate the skeleton's skin list and return the first non-"default" skin
-    /// name. Falls back to the first skin of any name if every skin is named
-    /// "default". Returns null if the data resource has no skins at all.
-    /// </summary>
-    private static string? PickSkinName(MegaSkeleton skeleton)
-    {
-        var data = skeleton.GetData();
-        Godot.Collections.Array<GodotObject> skins;
-        try { skins = data.GetSkins(); }
-        catch { return null; }
-        string? firstAny = null;
-        foreach (var skinObj in skins)
-        {
-            if (skinObj == null) continue;
-            string? name = null;
-            // Spine bindings expose the skin name via get_skin_name; fall back to
-            // get_name if that's not the method on this binding version.
-            try { name = skinObj.Call("get_skin_name").AsString(); } catch { }
-            if (string.IsNullOrEmpty(name))
-            {
-                try { name = skinObj.Call("get_name").AsString(); } catch { }
-            }
-            if (string.IsNullOrEmpty(name)) continue;
-            firstAny ??= name;
-            if (name != "default") return name;
-        }
-        return firstAny;
     }
 
     /// <summary>
