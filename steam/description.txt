@@ -1,8 +1,8 @@
 My Mods
-- SlayTheStats: https://www.nexusmods.com/slaythespire2/mods/349 - stats tracking
-- ExitToDesktop: https://www.nexusmods.com/slaythespire2/mods/553 - qol
-- RememberCardSort: https://www.nexusmods.com/slaythespire2/mods/801 - qol
-- MoreTino: https://www.nexusmods.com/slaythespire2/mods/753 - memes
+- SlayTheStats: https://steamcommunity.com/sharedfiles/filedetails/?id=3748220195 - stats tracking
+- ExitToDesktop: https://steamcommunity.com/sharedfiles/filedetails/?id=3748205321 - qol
+- RememberCardSort: https://steamcommunity.com/sharedfiles/filedetails/?id=3748206153 - qol
+- MoreTino: https://steamcommunity.com/sharedfiles/filedetails/?id=3748206477 - memes
 
 New in v1.2 - Community card and relic stats
 - See community pick rates for cards and win rates for cards and relics.
@@ -88,7 +88,7 @@ ______________________________________________________________________
 Install
 ______________________________________________________________________
 Requirements
-- BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- BaseLib v3.1.0 or later: https://steamcommunity.com/sharedfiles/filedetails/?id=3737335127
 
 
 ______________________________________________________________________
