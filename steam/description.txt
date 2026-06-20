@@ -1,5 +1,3 @@
-Translations: Русский · 中文 — see "Translations" at the bottom of this page.
-
 My Mods
 - SlayTheStats: https://www.nexusmods.com/slaythespire2/mods/349 - stats tracking
 - ExitToDesktop: https://www.nexusmods.com/slaythespire2/mods/553 - qol
@@ -56,7 +54,6 @@ Hover an event option to see how many times you've picked it, your win rate when
 
 Multi-step events (Slippery Bridge, etc.) bucket per terminal option so each branch of the choice tree gets its own stats.
 
-Not all events give complete data on options seen/offered, so some events don't have offered stats for different options. For example, Future of Potions has choices for Common, Uncommon, and Rare potions, however the run history doesn't show which of these were offered at the time, it only shows which one was picked by the player. For events like this you can't show a pick rate because you don't know the amount of times offered (well technically you can by tracking potion acquisition and usage throughout the run but this mod doesn't do that currently).
 
 Visualization
 Color-blind palette available (teal/orange instead of green/red) is available in settings.
@@ -94,27 +91,24 @@ Requirements
 - BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
 
 
-Save data
-Stats are calculated upon opening the game and finishing a run. They are stored in slay-the-stats.json:
-- Windows: %APPDATA%\Slay the Spire 2\
-- Linux: ~/.local/share/Slay the Spire 2/
-
-You can always delete this file without losing data - the run history will be reread on next boot.
-
 ______________________________________________________________________
 Miscellaneous
 ______________________________________________________________________
-Troubleshooting
-Check the Godot log for [SlayTheStats] entries (close the game first):
-- Windows: %APPDATA%\Godot\app_userdata\Slay the Spire 2\logs\godot.log
-- Linux: ~/.local/share/godot/app_userdata/Slay the Spire 2/logs/godot.log
+FAQ
+Q: How do I change stats shown in-run?
+A: Open the SlayTheStats filter pane button on the bottom left in the Card Library, Relic Collection, or Stats Bestiary. Hit "Save Defaults" to apply the filters to in-run stats.
 
-Translations
-The mod itself is localized into Russian and Simplified Chinese in-game.
+Q: Why does a card show more "present" runs than "offered" runs (e.g. 5/1)?
+A: "Present" counts all runs the card ended up in your deck from any source -- including upgrading the base card at a campfire -- while "offered" only counts fight reward screens. Starter cards and relics will always show 0 for "offered" since they never appear on fight reward screens.
 
+Q: Why is my Win% 100% but the stat is grey?
+A: Color intensity reflects both sample size and magnitude of deviation from your baseline. With very few runs, even a perfect rate stays muted -- the color intensifies as evidence builds up.
 
-Русский: Отслеживает статистику карт, реликвий и столкновений по всем вашим забегам и показывает её во всплывающих подсказках. Также добавляет страницу бестиария в компендиум, показывает необязательную статистику сообщества из Spire Codex (spire-codex.com) и предлагает режим для дальтоников.
-Если вы заметите ошибки перевода — пожалуйста, оставьте комментарий. Буду признателен!
+Q: Why don't I see stats for a card I've used?
+A: Open the SlayTheStats filter pane in the compendium and check your filters.
 
-简体中文：追踪您所有游戏场次中的卡牌、遗物和遭遇统计数据，并以提示框形式显示。同时在图鉴中新增敌怪图鉴页面，并提供来自 Spire Codex（spire-codex.com）的可选社区统计数据和色盲模式。
-如果您发现翻译错误，欢迎在评论区反馈，非常感谢！
+Q: I'm seeing "no data" for everything.
+A: The mod cannot find your run history to populate data. In this case you'll need to find where your game save data is (such as run history). Set "DataDirectory" to the "SlayTheSpire2" folder which the data is stored in. For Windows it is %APPDATA%/SlayTheSpire2. Note that you need to put the full path in there. Please file a bug report so I can fix the defaults!
+
+Q: I lost my save data after installing.
+A: It's not lost. By default the game separates modded profiles from normal profiles. If you want to keep your vanilla progress "pure", then create another profile with mods and use an unlock mod to get your progress.
