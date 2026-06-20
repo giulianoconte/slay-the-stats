@@ -1,0 +1,10 @@
+{
+  "title": "Slay the Stats",
+  "description": "Tracks card, relic, and encounter stats across your runs and shows them as tooltips. Also adds a bestiary page to the compendium. Doesn't affect gameplay.",
+  "visibility": "private",
+  "changeNote": "",
+  "tags": [],
+  "dependencies": [3737335127],
+  "minBranch": null,
+  "maxBranch": null
+}
