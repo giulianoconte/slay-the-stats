@@ -1,3 +1,5 @@
+(v1.2 Community Stats update) [Русский · 中文] Track cards, relics, events, and encounters across your runs. Implements an encounter stats compendium page. Integrates with Spire Codex to see community stats.
+
 My Mods
 - SlayTheStats: https://steamcommunity.com/sharedfiles/filedetails/?id=3748220195 - stats tracking
 - ExitToDesktop: https://steamcommunity.com/sharedfiles/filedetails/?id=3748205321 - qol
