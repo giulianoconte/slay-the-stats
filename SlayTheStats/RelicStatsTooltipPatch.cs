@@ -333,6 +333,48 @@ public static class MerchantSlotClearHoverTipPatch
 }
 
 /// <summary>
+/// Safety net: clears our stats panel when a merchant slot leaves the scene tree (shop
+/// closes / player leaves the room) while it was the active hover. The shop's only hide
+/// path is NMerchantSlot.ClearHoverTip, fired from OnUnfocus — but that doesn't run when
+/// the scene tears down out from under a hovered slot (leaving the room, controller/keyboard
+/// nav, etc.), and NMerchantSlot._ExitTree never calls ClearHoverTip itself. Because our
+/// panel is reparented to the SceneTree root (TooltipHelper.ShowPanel), it survives the
+/// transition and bleeds into the next room until another hover overwrites it. This mirrors
+/// the reward/treasure screens' GridCardHolderFreedToPool / CardFreedToPool safety nets,
+/// which the shop otherwise lacks. _ExitTree on the base fires for every subclass
+/// (NMerchantCard/Relic/Potion all chain base._ExitTree()), so patching the base covers all.
+/// Both branches are guarded to the active holder, so the many non-active slots that also
+/// exit on shop close are no-ops.
+/// </summary>
+[HarmonyPatch(typeof(NMerchantSlot), "_ExitTree")]
+public static class MerchantSlotExitTreePatch
+{
+    private static bool _warnedOnce;
+
+    static void Postfix(NMerchantSlot __instance)
+    {
+        try
+        {
+            if (__instance is NMerchantRelic merchantRelic)
+            {
+                RelicHoverHelper.Hide(merchantRelic);
+            }
+            else if (__instance is NMerchantCard
+                     && MerchantCardCreateHoverTipPatch.ActiveMerchantCard == __instance)
+            {
+                MainFile.DebugLog($"MerchantSlotExitTree: clearing stuck shop-card hover (hasActiveHover={TooltipHelper.HasActiveHover})");
+                MerchantCardCreateHoverTipPatch.ActiveMerchantCard = null;
+                CardHoverShowPatch.HideTooltip();
+            }
+        }
+        catch (Exception e)
+        {
+            if (!_warnedOnce) { MainFile.Logger.Warn($"SlayTheStats: MerchantSlotExitTreePatch failed — {e.Message}"); _warnedOnce = true; }
+        }
+    }
+}
+
+/// <summary>
 /// NRelicCollectionEntry is used by the compendium (main-menu relic collection screen).
 /// Show stats for seen (Visible) and unlocked-but-unseen (NotSeen) relics — both render
 /// their icon, so surfacing stats (incl. the community row for relics you've never run,
