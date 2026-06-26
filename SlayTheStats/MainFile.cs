@@ -14,7 +14,7 @@ public partial class MainFile : Node
     /// release). Distinct from <see cref="StatsDb.CurrentModVersion"/>, which is a
     /// schema/migration baseline. Used in the Spire Codex client's User-Agent so peter
     /// can identify the mod's API traffic.</summary>
-    public const string ModVersion = "v1.2.0";
+    public const string ModVersion = "v1.2.1";
 
     public static MegaCrit.Sts2.Core.Logging.Logger Logger { get; } = new(ModId, MegaCrit.Sts2.Core.Logging.LogType.Generic);
 
