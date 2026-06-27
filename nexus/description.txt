@@ -91,11 +91,11 @@ ______________________________________________________________________
 Install
 ______________________________________________________________________
 Requirements
-- BaseLib v3.3.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
+- BaseLib v3.1.0 or later: https://www.nexusmods.com/slaythespire2/mods/103
 - **NOTE**: GUMM is NOT required. If you have previously installed it for this mod, see "Uninstalling GUMM" below.
 
 Installation
-1. Download and extract BaseLib (v3.3.0 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
+1. Download and extract BaseLib (v3.1.0 or later) into your mods folder if you haven't already: https://www.nexusmods.com/slaythespire2/mods/103
 2. Download SlayTheStats-vX.X.X.zip from the Files tab and extract it into your mods folder -- you should end up with a SlayTheStats/ folder inside mods/ containing SlayTheStats.dll, SlayTheStats.json, and SlayTheStats.pck
 
 Save data

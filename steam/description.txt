@@ -90,7 +90,7 @@ ______________________________________________________________________
 Install
 ______________________________________________________________________
 Requirements
-- BaseLib v3.3.0 or later: https://steamcommunity.com/sharedfiles/filedetails/?id=3737335127
+- BaseLib v3.1.0 or later: https://steamcommunity.com/sharedfiles/filedetails/?id=3737335127
 
 
 ______________________________________________________________________
