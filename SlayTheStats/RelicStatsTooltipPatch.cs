@@ -3,6 +3,7 @@ using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Nodes.Events;
+using MegaCrit.Sts2.Core.Nodes.HoverTips;
 using MegaCrit.Sts2.Core.Nodes.Relics;
 using MegaCrit.Sts2.Core.Nodes.Screens.RelicCollection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
@@ -22,6 +23,12 @@ internal static class RelicHoverHelper
     private static object? _activeHolder;
 
     internal static bool IsActiveHover() => _activeHolder != null;
+
+    /// <summary>True when <paramref name="holder"/> is the relic/event holder our
+    /// panel is currently showing for. Lets the NHoverTipSet.Remove teardown net
+    /// (HoverTipSetRemovePatch) skip — without logging — the many unrelated hover
+    /// owners the game removes (enemies, keywords, map points).</summary>
+    internal static bool IsActiveHolder(object? holder) => holder != null && ReferenceEquals(holder, _activeHolder);
 
     internal static Control? ActiveHolderControl => _activeHolder as Control;
 
@@ -370,6 +377,45 @@ public static class MerchantSlotExitTreePatch
         catch (Exception e)
         {
             if (!_warnedOnce) { MainFile.Logger.Warn($"SlayTheStats: MerchantSlotExitTreePatch failed — {e.Message}"); _warnedOnce = true; }
+        }
+    }
+}
+
+/// <summary>
+/// Universal teardown net for every relic/event surface that routes through the
+/// game's NHoverTipSet (relic bar, relic inventory, treasure-room relic, ancient
+/// event option). The game never strands its OWN hover tip because
+/// NHoverTipSet.CreateAndShow connects each owner's TreeExiting → Remove(owner)
+/// (see decomp). Our mod instead hides on OnUnfocus, which — like the shop's
+/// ClearHoverTip — does NOT fire when the holder is torn out of the tree with the
+/// cursor still on it (room transition, controller nav, mid-combat relic-bar
+/// relayout). Result: HasActiveHover stays true and our root-reparented panel is
+/// stranded, following the cursor's native tip set across rooms / over the End
+/// Turn button until the next full hover cycle. Postfixing Remove piggybacks on
+/// the exact signal the game trusts, so our panel tears down in lockstep with the
+/// native tip — covering all four OnFocus/OnUnfocus surfaces in one patch and both
+/// failure modes (mid-combat relayout + transition). Remove fires for every hover
+/// owner (enemies, keywords, map points), so we guard on the active holder to keep
+/// the common case a cheap reference-compare no-op and log only real teardowns.
+/// The shop keeps its own _ExitTree net (MerchantSlotExitTreePatch) — it uses
+/// CreateHoverTip/ClearHoverTip and does not route through NHoverTipSet.
+/// </summary>
+[HarmonyPatch(typeof(NHoverTipSet), "Remove")]
+public static class HoverTipSetRemovePatch
+{
+    private static bool _warnedOnce;
+
+    static void Postfix(Control owner)
+    {
+        try
+        {
+            if (!RelicHoverHelper.IsActiveHolder(owner)) return;
+            MainFile.DebugLog($"HoverTipSetRemove: tearing down stranded relic/event tooltip (owner={owner.GetType().Name})");
+            RelicHoverHelper.Hide(owner);
+        }
+        catch (Exception e)
+        {
+            if (!_warnedOnce) { MainFile.Logger.Warn($"SlayTheStats: HoverTipSetRemovePatch failed — {e.Message}"); _warnedOnce = true; }
         }
     }
 }

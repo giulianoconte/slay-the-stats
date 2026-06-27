@@ -213,6 +213,20 @@ internal static class TooltipHelper
         var panel = new PanelContainer();
         panel.Name    = TooltipNodeName;
         panel.Visible = false;
+        // Click-to-dismiss safety net (mirrors PostFightTooltipPatch): the panel
+        // itself catches mouse buttons (Stop) and force-hides on any press. Under
+        // the happy path the cursor unfocuses the card/relic — hiding the panel —
+        // before it can reach the panel, so this only fires if a tooltip is
+        // somehow stranded under the cursor (e.g. covering the End Turn button).
+        // Children/table/shadow are MouseFilterEnum.Ignore so a click anywhere on
+        // the tooltip falls through to this handler rather than being swallowed by
+        // a child Control with no handler.
+        panel.MouseFilter = Control.MouseFilterEnum.Stop;
+        panel.GuiInput += (InputEvent @event) =>
+        {
+            if (@event is InputEventMouseButton { Pressed: true })
+                ForceHideAll("panel clicked");
+        };
 
         var vbox = new VBoxContainer();
         vbox.Name = "VBoxContainer";
@@ -274,6 +288,9 @@ internal static class TooltipHelper
         table.ScrollActive        = false;
         table.SelectionEnabled    = false;
         table.ShortcutKeysEnabled = false;
+        // Let clicks fall through to the panel's Stop+GuiInput dismiss handler
+        // (and never block input on an interactive element underneath).
+        table.MouseFilter         = Control.MouseFilterEnum.Ignore;
         vbox.AddChild(table);
 
         panel.AddChild(vbox);
@@ -299,6 +316,9 @@ internal static class TooltipHelper
         shadow.Modulate          = new Color(0f, 0f, 0f, 0.25098f);
         shadow.ZIndex            = 99;
         shadow.Visible           = false;
+        // The shadow is a textured rect with no content — a stranded one is an
+        // "info-less tooltip" that would otherwise block clicks. Never intercept.
+        shadow.MouseFilter       = Control.MouseFilterEnum.Ignore;
         _shadow = shadow;
     }
 
@@ -452,6 +472,28 @@ internal static class TooltipHelper
             if (node != null) node.Visible = false;
             if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
         };
+    }
+
+    /// <summary>
+    /// Unconditional teardown of our tooltip: cancels any pending hide timer
+    /// (bumping <see cref="ShowGen"/>), clears all "still hovering" state, and
+    /// hides the panel + shadow immediately. Used by the click-to-dismiss
+    /// handler and the position follower's stranded-tooltip guard — paths where
+    /// we want the panel gone regardless of which surface stranded it. Does NOT
+    /// touch the per-surface active-holder fields (CardHoverShowPatch /
+    /// RelicHoverHelper): with the panel hidden and <see cref="HasActiveHover"/>
+    /// false the follower early-outs, and the next real hover re-seeds them.
+    /// </summary>
+    internal static void ForceHideAll(string reason)
+    {
+        MainFile.DebugLog($"ForceHideAll: {reason} (hadActiveHover={HasActiveHover} inspect={InspectActive})");
+        ShowGen++;
+        HasActiveHover = false;
+        InspectActive  = false;
+        LastShowHolder = null;
+        var p = GetPanelPublic();
+        if (p != null) p.Visible = false;
+        if (_shadow != null && GodotObject.IsInstanceValid(_shadow)) _shadow.Visible = false;
     }
 
     internal static void InvalidateStyles()
@@ -985,6 +1027,29 @@ public partial class SlayTheStatsPositionFollower : Node
         // must continue running to reposition when a native NHoverTipSet appears (e.g. on
         // hovering the upgrade button or any card keyword).
         if (!TooltipHelper.HasActiveHover && !TooltipHelper.InspectActive) return;
+
+        // Stranded-tooltip guard. If we believe a hover is active but every holder
+        // we could be tracking is gone or freed, the paired Hide never fired and
+        // the panel is stranded — without this we'd keep dragging it to follow
+        // whatever native NHoverTipSet currently exists (e.g. over the hand / End
+        // Turn button when the cursor moves there). Force-hide instead. Skipped in
+        // inspect mode, which intentionally keeps the panel alive with no holder.
+        if (TooltipHelper.HasActiveHover && !TooltipHelper.InspectActive)
+        {
+            var cardH     = CardHoverShowPatch.ActiveHolderControl;
+            var relicH    = RelicHoverHelper.ActiveHolderControl;
+            var merchantH = MerchantCardCreateHoverTipPatch.ActiveMerchantCard;
+            bool anyValid =
+                (cardH     != null && GodotObject.IsInstanceValid(cardH))     ||
+                (relicH    != null && GodotObject.IsInstanceValid(relicH))    ||
+                (merchantH != null && GodotObject.IsInstanceValid(merchantH));
+            if (!anyValid)
+            {
+                MainFile.DebugLog($"_Process gen={TooltipHelper.ShowGen}: active hover but no valid holder — force-hiding stranded tooltip");
+                TooltipHelper.ForceHideAll("follower: no valid holder");
+                return;
+            }
+        }
 
         var root          = (Engine.GetMainLoop() as SceneTree)?.Root;
         var tipSet        = TooltipHelper.FindTipSet(root);
