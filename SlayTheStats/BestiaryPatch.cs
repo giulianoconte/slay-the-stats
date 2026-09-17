@@ -17,6 +17,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Nodes.Vfx.Backgrounds;
 using System.Collections.Generic;
+using System.Reflection;
 
 namespace SlayTheStats;
 
@@ -4903,6 +4904,22 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     }
 
     /// <summary>
+    /// <c>SpineAnimationAccess.SetAnimation</c>, resolved reflectively so one DLL
+    /// runs on both game branches. The method changed <em>return type only</em>
+    /// between them — main (Jun 18) returns <c>MegaTrackEntry?</c>, beta (v0.111.0)
+    /// returns <c>void</c>. Return type is part of the CLR signature but not the
+    /// C# call site, so a direct call compiles clean against either branch and
+    /// throws <c>MissingMethodException</c> at JIT time against the other.
+    /// <c>AccessTools.Method</c> matches on name + parameter types and ignores the
+    /// return type, so this binds on both. Same approach as the v1.0.8
+    /// <c>FindAnimation</c> shim. Registered in <c>compat-watch.json</c> — drop it
+    /// and inline the direct call once the branches converge.
+    /// </summary>
+    private static readonly MethodInfo? SetAnimationMethod = AccessTools.Method(
+        typeof(SpineAnimationAccess), "SetAnimation",
+        new[] { typeof(string), typeof(bool), typeof(int) });
+
+    /// <summary>
     /// Start playing an idle animation on the visuals. Tries "idle_loop" first
     /// (the canonical name the game's own NBestiary uses), then a few common
     /// fallbacks. Some monsters use non-standard idle names or only have a
@@ -4910,6 +4927,14 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
     /// </summary>
     private static void TryPlayIdleAnimation(NCreatureVisuals visuals, string idForLog)
     {
+        if (SetAnimationMethod == null)
+        {
+            MainFile.Logger.Warn(
+                "[SlayTheStats] TryPlayIdleAnimation: SpineAnimationAccess.SetAnimation not found; " +
+                "monster previews will render a static pose.");
+            return;
+        }
+
         string[] candidates = { "idle_loop", "idle", "idle_1", "default" };
         foreach (var name in candidates)
         {
@@ -4918,12 +4943,18 @@ public partial class NBestiaryStatsSubmenu : NSubmenu
                 var data = visuals.SpineBody?.GetSkeleton()?.GetData();
                 if (data == null) return;
                 if (!data.HasAnimation(name)) continue;
-                visuals.SpineAnimation.SetAnimation(name);
+                // SpineAnimationAccess is a readonly struct, so the instance boxes
+                // for the reflective call — safe, since SetAnimation only forwards
+                // to the wrapped sprite and mutates no field on the struct itself.
+                SetAnimationMethod.Invoke(visuals.SpineAnimation, new object[] { name, true, 0 });
                 return;
             }
             catch (Exception e)
             {
-                MainFile.Logger.Warn($"[SlayTheStats] TryPlayIdleAnimation: {idForLog} '{name}' failed: {e.Message}");
+                // Invoke wraps anything the target throws in TargetInvocationException,
+                // whose own Message is boilerplate — log the real cause.
+                var cause = (e as TargetInvocationException)?.InnerException ?? e;
+                MainFile.Logger.Warn($"[SlayTheStats] TryPlayIdleAnimation: {idForLog} '{name}' failed: {cause.Message}");
             }
         }
         // No idle animation found — leave the skeleton in its default pose.
