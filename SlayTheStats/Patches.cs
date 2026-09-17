@@ -77,6 +77,66 @@ internal static class LocalCharacterCapture
     }
 }
 
+/// <summary>
+/// <c>StartRunLobby.LocalPlayer</c> and the two fields we read off it, resolved
+/// reflectively so one DLL runs on both game branches. The lobby-player struct was
+/// <em>renamed</em> between them — main (v0.107.1) calls it <c>LobbyPlayer</c>, beta
+/// (v0.111.0) calls it <c>StartRunLobbyPlayer</c> (and added an <c>isModded</c> field).
+/// Neither name exists on the other branch at all.
+///
+/// A direct <c>lobby.LocalPlayer</c> read bakes whichever name the reference assembly
+/// had into this method's locals, and the JIT must resolve that type to lay out the
+/// stack frame — so it throws <c>TypeLoadException</c> <em>before any IL in the method
+/// runs</em>, which no in-method try/catch can catch. It escapes the Harmony wrapper
+/// into <c>NGame.StartNewMultiplayerRun</c> and kills multiplayer embark: black screen
+/// just before Neow. That is what shipped in v1.2.3, the first build referencing beta
+/// (issue #57); Harmony still binds the patch fine at init, so boot and singleplayer
+/// look clean and only MP dies.
+///
+/// Holding every value as <c>object</c> keeps any branch-specific type out of the
+/// signature and the locals, so the same binary binds on both branches — and because
+/// the field names survived the rename unchanged, both get full functionality, not a
+/// degraded fallback. If a future rename does reach the fields, resolution returns
+/// false and the caller falls back to the first player in the run: a joiner's tooltips
+/// may show the host's class, but the run still starts. Same approach as the v1.2.3
+/// <c>SetAnimation</c> and v1.0.8 <c>FindAnimation</c> shims. Registered in
+/// <c>compat-watch.json</c> — drop it and inline the direct read once the branches
+/// converge.
+/// </summary>
+internal static class LobbyLocalPlayerAccess
+{
+    private static readonly PropertyInfo? LocalPlayerProp =
+        AccessTools.Property(typeof(StartRunLobby), "LocalPlayer");
+
+    private static readonly FieldInfo? IdField =
+        LocalPlayerProp == null ? null : AccessTools.Field(LocalPlayerProp.PropertyType, "id");
+
+    private static readonly FieldInfo? CharacterField =
+        LocalPlayerProp == null ? null : AccessTools.Field(LocalPlayerProp.PropertyType, "character");
+
+    /// <summary>
+    /// Read the lobby's local seat. Returns false if the reflective binding failed,
+    /// leaving both outs untouched — the caller should fall back rather than abort.
+    /// Note the game's <c>LocalPlayer</c> is <c>List.Find</c> over a struct list, so a
+    /// no-match yields a zeroed struct (id 0, null character) rather than null; that
+    /// flows through as netId 0 and resolves to the same fallback it always did.
+    /// </summary>
+    internal static bool TryReadLocalPlayer(object? lobby, out ulong? netId, out object? character)
+    {
+        netId = null;
+        character = null;
+        if (lobby == null || LocalPlayerProp == null || IdField == null || CharacterField == null) return false;
+
+        // Boxes the struct once; we only read fields off it, never write back.
+        var localPlayer = LocalPlayerProp.GetValue(lobby);
+        if (localPlayer == null) return false;
+
+        netId = IdField.GetValue(localPlayer) as ulong?;
+        character = CharacterField.GetValue(localPlayer);
+        return true;
+    }
+}
+
 [HarmonyPatch(typeof(NGame), "StartNewMultiplayerRun")]
 public static class StartNewMultiplayerRunPatch
 {
@@ -84,9 +144,16 @@ public static class StartNewMultiplayerRunPatch
     {
         try
         {
-            var localPlayer = lobby?.LocalPlayer;
-            LocalCharacterCapture.PendingCharacterId = CharacterIdHelper.Extract(localPlayer?.character);
-            LocalCharacterCapture.PendingLocalNetId = localPlayer?.id;
+            if (!LobbyLocalPlayerAccess.TryReadLocalPlayer(lobby, out var netId, out var character))
+            {
+                MainFile.Logger.Warn(
+                    "[SlayTheStats] StartNewMultiplayerRun: could not read StartRunLobby.LocalPlayer " +
+                    "(game API changed?); falling back to the first player in the run. The run starts " +
+                    "normally — in multiplayer a joiner's stat tooltips may show the host's class.");
+                return;
+            }
+            LocalCharacterCapture.PendingCharacterId = CharacterIdHelper.Extract(character);
+            LocalCharacterCapture.PendingLocalNetId = netId;
             if (SlayTheStatsConfig.DebugMode) MainFile.Logger.Info($"[SlayTheStats] StartNewMultiplayerRun: captured local character '{LocalCharacterCapture.PendingCharacterId}' netId={LocalCharacterCapture.PendingLocalNetId}");
         }
         catch (Exception e)
