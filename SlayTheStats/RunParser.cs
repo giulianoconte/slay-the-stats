@@ -118,6 +118,11 @@ public static class RunParser
             warn?.Invoke($"Run {runId}: missing game_mode — game format may have changed.");
         gameMode ??= "UNKNOWN";
 
+        // Recency key for encounter-roster sampling (see EncounterMeta). A run with no
+        // start_time sorts oldest, so it can seed an empty roster but never displace a
+        // dated one.
+        var runStartTime = root["start_time"]?.GetValue<long>() ?? 0L;
+
         // Read acts array for biome mapping (e.g. ["ACT.OVERGROWTH", "ACT.HIVE", "ACT.GLORY"])
         var actsNode = root["acts"]?.AsArray();
         var biomeByAct = new List<string>();
@@ -554,8 +559,13 @@ public static class RunParser
                         lastEncounterId = modelId;
                         lastEncounterContextKey = context.ToKey();
 
-                        // Populate EncounterMeta on first occurrence
-                        if (!db.EncounterMeta.ContainsKey(modelId))
+                        // Sample EncounterMeta from the best run that fought this encounter:
+                        // a build that records the spawn set beats one that doesn't, and
+                        // within a tier the most recent run wins. Ties (the same encounter
+                        // twice in one run) keep the later floor. See EncounterMeta.
+                        var candidateRank = (EncounterMeta.IsRosterTrustedBuild(buildVersion) ? 1 : 0, runStartTime);
+                        if (!db.EncounterMeta.TryGetValue(modelId, out var existingMeta)
+                            || candidateRank.CompareTo(existingMeta.SampleRank()) >= 0)
                         {
                             var monsterIds = new List<string>();
                             var monsterIdsNode = room?["monster_ids"]?.AsArray();
@@ -564,10 +574,7 @@ public static class RunParser
                                 foreach (var mid in monsterIdsNode)
                                 {
                                     var mId = mid?.GetValue<string>();
-                                    // Skip player-side pets/companions (e.g. Osty): the save lists
-                                    // every combatant in monster_ids, so a summoned pet would
-                                    // otherwise be recorded as a member of every encounter fought.
-                                    if (mId != null && !EncounterMeta.IsCompanionMonster(mId)) monsterIds.Add(mId);
+                                    if (mId != null) monsterIds.Add(mId);
                                 }
                             }
 
@@ -579,6 +586,8 @@ public static class RunParser
                                 Category = EncounterCategory.Derive(modelId),
                                 Biome = biome,
                                 Act = actIndex + 1,
+                                SampledAt = runStartTime,
+                                SampledBuild = buildVersion,
                             };
                         }
 

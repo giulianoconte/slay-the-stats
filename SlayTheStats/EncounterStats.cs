@@ -109,8 +109,30 @@ public struct PoolMetrics
 
 /// <summary>
 /// Metadata about an encounter type, keyed by encounter ID (not per-context).
-/// Populated on first occurrence during run parsing.
 /// </summary>
+/// <remarks>
+/// The roster is <em>one sampled observation</em> — the monsters present in a single
+/// recorded fight — not the union of every variant. An encounter that can roll
+/// (mA,mB) or (mA,mC) is shown as whichever of those we last saw, because that's a
+/// set the player can actually meet; the union (mA,mB,mC) is a lineup that never
+/// occurs.
+///
+/// The sample is the <b>most recent</b> one, by the observing run's
+/// <c>start_time</c> (<see cref="SampledAt"/>) — not the first seen. Rosters go stale:
+/// the game changes an encounter's composition between versions, so a sample from an
+/// old build can describe a fight that no longer exists. Most-recent-wins lets newer
+/// runs overwrite that.
+///
+/// It is also what keeps player-side pets (Osty, Byrdpip, Pael's Legion) out of
+/// rosters, without the mod ever having to know what a pet is. The save's per-room
+/// <c>monster_ids</c> normally records the fight's <em>spawn</em> set, which excludes
+/// pets and mid-fight summons alike; only builds around v0.107 wrote the cumulative
+/// combatant list instead. So the fix is to distrust that data window
+/// (<see cref="IsRosterTrustedBuild"/>) rather than to identify pets — which also
+/// catches the same corruption's non-pet face, where a summon like the Fabricator's
+/// Zapbot is recorded as an encounter member. No pet allowlist could have caught that
+/// one, nor could any have covered mod-added pets.
+/// </remarks>
 public class EncounterMeta
 {
     [JsonPropertyName("monster_ids")] public List<string> MonsterIds { get; set; } = new();
@@ -119,21 +141,69 @@ public class EncounterMeta
     [JsonPropertyName("act")]         public int Act                 { get; set; }
 
     /// <summary>
-    /// Monster ids that are player-side companions/pets, not enemies belonging to
-    /// an encounter. The run history's per-room <c>monster_ids</c> is a flat list of
-    /// every combatant, with no side/team/pet field, so a summoned pet (e.g. the
-    /// Necrobinder's Osty) shows up in <em>every</em> encounter the player fought.
-    /// The vanilla bestiary excludes these structurally — they appear in no
-    /// EncounterModel's AllPossibleMonsters — but since we derive rosters from run
-    /// data we have to filter them out explicitly. Keyed case-insensitively; extend
-    /// if future characters gain persistent pets.
+    /// <c>start_time</c> of the run this roster was sampled from — the recency half of
+    /// the comparison key. Runs are parsed in filesystem order and incrementally across
+    /// sessions, so arrival order says nothing about recency; this does. Absent (0) on
+    /// entries written before the field existed, which lets any dated observation
+    /// replace them.
     /// </summary>
-    public static readonly HashSet<string> CompanionMonsterIds = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "MONSTER.OSTY",
-    };
+    [JsonPropertyName("sampled_at")]    public long SampledAt        { get; set; }
 
-    public static bool IsCompanionMonster(string id) => CompanionMonsterIds.Contains(id);
+    /// <summary>
+    /// <c>build_id</c> of that run, so <see cref="IsRosterTrustedBuild"/> can be
+    /// re-evaluated later without re-reading the save.
+    /// </summary>
+    [JsonPropertyName("sampled_build")] public string SampledBuild   { get; set; } = "";
+
+    /// <summary>
+    /// Ranks a candidate sample: trusted builds beat untrusted ones, and within a tier
+    /// the more recent run wins. Comparing this tuple is the whole sampling policy.
+    /// </summary>
+    public (int trust, long at) SampleRank() => (IsRosterTrustedBuild(SampledBuild) ? 1 : 0, SampledAt);
+
+    /// <summary>
+    /// Whether a game build recorded <c>monster_ids</c> the way we need it: the fight's
+    /// <em>spawn</em> set. Builds in a window around v0.107 wrote the cumulative
+    /// combatant list instead, which pulls in both player-side pets and mid-fight
+    /// summons — so a roster sampled there lists monsters that were never part of the
+    /// encounter. We prefer any sample from outside that window, however old.
+    /// </summary>
+    /// <remarks>
+    /// Measured against 466 local runs, counting only runs that could produce a pet:
+    /// v0.98.0–v0.105.0 leaked in 0 of ~1025 combat rooms, v0.106.1/v0.107.0/v0.107.1
+    /// leaked in 22/22, 53/73 and 26/26, and v0.111.0 leaked in 0 of 18. So the window
+    /// is confirmed open by v0.106.1, confirmed closed by v0.111.0.
+    ///
+    /// The bound below is deliberately wider than what was observed, covering v0.106.0
+    /// and v0.108–v0.110 — builds absent from that history, so untested either way.
+    /// Being too wide only means preferring an older sample that is known-good over a
+    /// newer one that might not be; being too narrow means showing phantom enemies.
+    /// It cost nothing on the measured corpus: all 88 encounters still had a trusted
+    /// sample, so nothing fell back.
+    ///
+    /// This is transitional by construction. Every encounter refought on a current
+    /// build resamples into the trusted tier, after which the window never applies
+    /// again. An unparseable or missing build is treated as trusted — it's far more
+    /// likely to be a future build than one of these five.
+    /// </remarks>
+    public static bool IsRosterTrustedBuild(string? buildId)
+    {
+        var v = ParseBuild(buildId);
+        if (v == null) return true;
+        var (major, minor, _) = v.Value;
+        return !(major == 0 && minor >= 106 && minor <= 110);
+    }
+
+    /// <summary>Parses a <c>build_id</c> like "v0.107.1" into (0, 107, 1).</summary>
+    private static (int, int, int)? ParseBuild(string? buildId)
+    {
+        if (string.IsNullOrWhiteSpace(buildId)) return null;
+        var parts = buildId.TrimStart('v', 'V').Split('.');
+        if (parts.Length < 2) return null;
+        if (!int.TryParse(parts[0], out var major) || !int.TryParse(parts[1], out var minor)) return null;
+        int patch = parts.Length > 2 && int.TryParse(parts[2], out var p) ? p : 0;
+        return (major, minor, patch);
+    }
 }
 
 public static class EncounterCategory

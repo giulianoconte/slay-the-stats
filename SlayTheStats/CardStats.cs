@@ -166,7 +166,7 @@ public class StatsDb
     /// loaded db's schema version doesn't match, Load() returns a fresh db
     /// and all runs are re-processed.
     /// </summary>
-    public const int CurrentSchemaVersion = 9; // bumped from 8: run-id model — CardStat.RunFlags + RunIndex; removed CardsGroupOverlap (#6)
+    public const int CurrentSchemaVersion = 10; // bumped from 9: EncounterMeta.SampledAt — rosters resample most-recent-wins (#55)
 
     [JsonPropertyName("mod_version")] public string ModVersion { get; set; } = CurrentModVersion;
     /// <summary>
@@ -245,12 +245,7 @@ public class StatsDb
                 // that data stored under older classifications (e.g. OVERGROWTH_CRAWLERS as
                 // "unknown") picks up new overrides without requiring a full reparse.
                 foreach (var (encId, meta) in db.EncounterMeta)
-                {
                     meta.Category = EncounterCategory.Derive(encId);
-                    // Retroactively strip player-side pets/companions (e.g. Osty) from rosters
-                    // stored before they were filtered, so old data is cleaned without a reparse.
-                    meta.MonsterIds?.RemoveAll(global::SlayTheStats.EncounterMeta.IsCompanionMonster);
-                }
 
                 return db;
             }

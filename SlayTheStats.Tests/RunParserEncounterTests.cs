@@ -304,11 +304,12 @@ public class RunParserEncounterTests : IDisposable
     }
 
     [Fact]
-    public void EncounterMeta_NotOverwrittenOnSecondRun()
+    public void EncounterMeta_ResampledFromNewerRun_StatsStillAccumulate()
     {
         var db = new StatsDb();
-        // First run: encounter with 2 rats
+        // Older run.
         var path1 = TempRun(BuildWithEncounters(
+            startTime: 1000,
             actsArray: ["ACT.OVERGROWTH", "ACT.HIVE", "ACT.GLORY"],
             encounterActs:
             [[
@@ -317,8 +318,9 @@ public class RunParserEncounterTests : IDisposable
             ]]));
         RunParser.ProcessRun(path1, "run1", "default", db);
 
-        // Second run: same encounter (meta already cached)
+        // Newer run, same encounter in a different biome.
         var path2 = TempRun(BuildWithEncounters(
+            startTime: 2000,
             actsArray: ["ACT.UNDERDOCKS", "ACT.HIVE", "ACT.GLORY"],
             encounterActs:
             [[
@@ -327,9 +329,9 @@ public class RunParserEncounterTests : IDisposable
             ]]));
         RunParser.ProcessRun(path2, "run2", "default", db);
 
-        // Meta should reflect first occurrence
-        Assert.Equal("ACT.OVERGROWTH", db.EncounterMeta["ENCOUNTER.RATS_WEAK"].Biome);
-        // But stats should be accumulated
+        // Meta is a sample, and the sample tracks the most recent run (was: first seen).
+        Assert.Equal("ACT.UNDERDOCKS", db.EncounterMeta["ENCOUNTER.RATS_WEAK"].Biome);
+        // Stats are cumulative, and unaffected by resampling.
         Assert.Equal(2, db.Encounters["ENCOUNTER.RATS_WEAK"][Ctx1].Fought);
     }
 }

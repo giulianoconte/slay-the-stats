@@ -154,7 +154,8 @@ public static class RunFixture
         string gameMode = "UNKNOWN",
         string killedByEncounter = "NONE.NONE",
         List<string>? actsArray = null,
-        List<List<EncounterFloor>>? encounterActs = null)
+        List<List<EncounterFloor>>? encounterActs = null,
+        long startTime = 0)
     {
         actsArray ??= ["ACT.OVERGROWTH", "ACT.HIVE", "ACT.GLORY"];
         encounterActs ??= [];
@@ -187,13 +188,14 @@ public static class RunFixture
         var actsArrayJson = string.Join(",", actsArray.Select(a => $@"""{a}"""));
         var buildIdField = buildVersion != "UNKNOWN" ? $@"""build_id"": ""{buildVersion}"", " : "";
         var gameModeField = gameMode != "UNKNOWN" ? $@"""game_mode"": ""{gameMode}"", " : "";
+        var startTimeField = startTime != 0 ? $@"""start_time"": {startTime}, " : "";
 
         return $$"""
         {
             "was_abandoned": {{abandoned.ToString().ToLower()}},
             "win": {{won.ToString().ToLower()}},
             "ascension": {{ascension}},
-            {{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}" }],
+            {{startTimeField}}{{buildIdField}}{{gameModeField}}"players": [{ "character": "{{character}}" }],
             "killed_by_encounter": "{{killedByEncounter}}",
             "acts": [{{actsArrayJson}}],
             "map_point_history": [{{string.Join(",", actsJsonParts)}}]
